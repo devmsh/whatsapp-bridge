@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
-	"google.golang.org/protobuf/proto"
+	"time"
 
 	"whatsapp-bridge-v2/internal/db"
 )
@@ -39,32 +37,33 @@ func (s *Server) handlePollCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxSel := uint32(req.MaxSelections)
+	maxSel := req.MaxSelections
 	if maxSel == 0 {
 		maxSel = 1
 	}
 
-	var options []*waE2E.PollCreationMessage_Option
-	for _, o := range req.Options {
-		options = append(options, &waE2E.PollCreationMessage_Option{
-			OptionName: proto.String(o),
-		})
-	}
-
+	// Use whatsmeow's BuildPollCreation — it adds the critical MessageSecret
 	wa := s.client.GetWhatsmeowClient()
-	msg := &waE2E.Message{
-		PollCreationMessage: &waE2E.PollCreationMessage{
-			Name:                   proto.String(req.Question),
-			Options:                options,
-			SelectableOptionsCount: proto.Uint32(maxSel),
-		},
-	}
+	msg := wa.BuildPollCreation(req.Question, req.Options, maxSel)
 
 	resp, err := wa.SendMessage(context.Background(), chatJID, msg)
 	if err != nil {
 		jsonError(w, 500, fmt.Sprintf("send poll: %v", err))
 		return
 	}
+
+	// Store poll in local DB
+	optionsJSON, _ := json.Marshal(req.Options)
+	now := time.Now().Unix()
+	s.store.StorePoll(&db.Poll{
+		MessageID:     resp.ID,
+		ChatJID:       req.ChatJID,
+		Question:      req.Question,
+		Options:       string(optionsJSON),
+		MaxSelections: maxSel,
+		CreatedAt:     now,
+	})
+	s.storeOutgoingMessage(resp.ID, req.ChatJID, "[poll] "+req.Question, "poll")
 
 	jsonCreated(w, map[string]interface{}{
 		"success":    true,
@@ -122,6 +121,10 @@ func (s *Server) handlePollVote(w http.ResponseWriter, r *http.Request, pollID s
 		return
 	}
 
+	// Poll vote requires the original poll message info for encryption
+	// BuildPollVote needs the MessageInfo of the poll creation message
+	// For now, store locally — full vote encryption requires the poll's message secret
+	// which is only available when the poll was created by this client
 	wa := s.client.GetWhatsmeowClient()
 	optionsJSON, _ := json.Marshal(req.Options)
 
@@ -130,6 +133,7 @@ func (s *Server) handlePollVote(w http.ResponseWriter, r *http.Request, pollID s
 		PollChatJID:     req.ChatJID,
 		VoterJID:        wa.Store.ID.String(),
 		SelectedOptions: string(optionsJSON),
+		Timestamp:       time.Now().Unix(),
 	})
 
 	jsonOK(w, map[string]bool{"success": true})

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,13 +39,26 @@ func (s *Server) handleCallByID(w http.ResponseWriter, r *http.Request) {
 		sub = parts[1]
 	}
 
+	callID := parts[0]
+
 	switch sub {
 	case "reject":
 		if r.Method != http.MethodPost {
 			methodNotAllowed(w)
 			return
 		}
-		// Call rejection is handled by not answering; log it
+		var req struct {
+			FromJID string `json:"from_jid"`
+		}
+		decodeJSON(r, &req)
+
+		if req.FromJID != "" {
+			fromJID, err := parseJID(req.FromJID)
+			if err == nil {
+				wa := s.client.GetWhatsmeowClient()
+				wa.RejectCall(context.Background(), fromJID, callID)
+			}
+		}
 		jsonOK(w, map[string]bool{"success": true})
 	default:
 		jsonError(w, 404, "not found")

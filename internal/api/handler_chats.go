@@ -132,13 +132,26 @@ func (s *Server) handleChatDisappearing(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	chat, err := s.store.GetChat(jid)
+	chatJID, err := types.ParseJID(jid)
 	if err != nil {
-		jsonError(w, 404, "chat not found")
+		jsonError(w, 400, "invalid jid")
 		return
 	}
-	chat.DisappearingTimer = req.Timer
-	s.store.StoreChat(chat)
+
+	// Set disappearing timer on WhatsApp
+	wa := s.client.GetWhatsmeowClient()
+	dur := time.Duration(req.Timer) * time.Second
+	if err := wa.SetDisappearingTimer(context.Background(), chatJID, dur, time.Now()); err != nil {
+		jsonError(w, 500, "failed to set timer: "+err.Error())
+		return
+	}
+
+	// Update local DB
+	chat, _ := s.store.GetChat(jid)
+	if chat != nil {
+		chat.DisappearingTimer = req.Timer
+		s.store.StoreChat(chat)
+	}
 
 	jsonOK(w, map[string]bool{"success": true})
 }

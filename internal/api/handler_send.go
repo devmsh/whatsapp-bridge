@@ -9,13 +9,28 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
-	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
 	"whatsapp-bridge-v2/internal/db"
 )
+
+// storeOutgoingMessage saves a sent message to the local DB and updates chat activity.
+func (s *Server) storeOutgoingMessage(msgID, chatJID, content, msgType string) {
+	wa := s.client.GetWhatsmeowClient()
+	now := time.Now().Unix()
+	s.store.StoreMessage(&db.Message{
+		ID:          msgID,
+		ChatJID:     chatJID,
+		Sender:      wa.Store.ID.User,
+		Content:     content,
+		Timestamp:   now,
+		IsFromMe:    true,
+		MessageType: msgType,
+	})
+	s.store.UpdateChatLastMessage(chatJID, "", now)
+}
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -64,17 +79,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chatJID := recipientJID.String()
-	now := time.Now().Unix()
-	s.store.StoreMessage(&db.Message{
-		ID:       resp.ID,
-		ChatJID:  chatJID,
-		Sender:   wa.Store.ID.User,
-		Content:  req.Message,
-		Timestamp: now,
-		IsFromMe: true,
-	})
-	s.store.UpdateChatLastMessage(chatJID, "", now)
+	msgType := "text"
+	if req.MediaPath != "" {
+		msgType = "media"
+	}
+	s.storeOutgoingMessage(resp.ID, recipientJID.String(), req.Message, msgType)
 
 	jsonOK(w, map[string]interface{}{
 		"success":    true,
@@ -107,7 +116,7 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 	// Look up the original message to include in the quote
 	origMsg, _ := s.store.GetMessage(req.MessageID, req.ChatJID)
 	var quotedMsg *waE2E.Message
-	participant := req.ChatJID // default: the chat itself (for 1:1)
+	participant := req.ChatJID
 	if origMsg != nil {
 		quotedMsg = &waE2E.Message{
 			Conversation: proto.String(origMsg.Content),
@@ -138,6 +147,8 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.storeOutgoingMessage(resp.ID, req.ChatJID, req.Message, "text")
+
 	jsonOK(w, map[string]interface{}{
 		"success":    true,
 		"message_id": resp.ID,
@@ -165,25 +176,36 @@ func (s *Server) handleReact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Determine who sent the original message for BuildReaction
 	wa := s.client.GetWhatsmeowClient()
-	msg := &waE2E.Message{
-		ReactionMessage: &waE2E.ReactionMessage{
-			Key: &waCommon.MessageKey{
-				RemoteJID: proto.String(req.ChatJID),
-				ID:        proto.String(req.MessageID),
-				FromMe:    proto.Bool(false),
-			},
-			Text: proto.String(req.Emoji),
-		},
+	senderJID := wa.Store.ID.ToNonAD() // default: from me
+	origMsg, _ := s.store.GetMessage(req.MessageID, req.ChatJID)
+	if origMsg != nil && !origMsg.IsFromMe && origMsg.Sender != "" {
+		parsed, perr := types.ParseJID(origMsg.Sender + "@s.whatsapp.net")
+		if perr == nil {
+			senderJID = parsed
+		}
 	}
 
-	resp, err := wa.SendMessage(context.Background(), chatJID, msg)
+	msg := wa.BuildReaction(chatJID, senderJID, types.MessageID(req.MessageID), req.Emoji)
+
+	_, err = wa.SendMessage(context.Background(), chatJID, msg)
 	if err != nil {
 		jsonError(w, 500, fmt.Sprintf("react failed: %v", err))
 		return
 	}
 
-	jsonOK(w, map[string]interface{}{"success": true, "message_id": resp.ID})
+	// Store reaction locally
+	s.store.StoreReaction(&db.Reaction{
+		MessageID:  req.MessageID,
+		ChatJID:    req.ChatJID,
+		Sender:     wa.Store.ID.User,
+		SenderName: "",
+		Emoji:      req.Emoji,
+		Timestamp:  time.Now().Unix(),
+	})
+
+	jsonOK(w, map[string]interface{}{"success": true})
 }
 
 func (s *Server) handleMention(w http.ResponseWriter, r *http.Request) {
@@ -224,6 +246,8 @@ func (s *Server) handleMention(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.storeOutgoingMessage(resp.ID, req.ChatJID, req.Message, "text")
+
 	jsonOK(w, map[string]interface{}{"success": true, "message_id": resp.ID})
 }
 
@@ -259,7 +283,7 @@ func (s *Server) handleForward(w http.ResponseWriter, r *http.Request) {
 		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 			Text: proto.String(original.Content),
 			ContextInfo: &waE2E.ContextInfo{
-				IsForwarded:    proto.Bool(true),
+				IsForwarded:     proto.Bool(true),
 				ForwardingScore: proto.Uint32(1),
 			},
 		},
@@ -270,6 +294,8 @@ func (s *Server) handleForward(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 500, fmt.Sprintf("forward failed: %v", err))
 		return
 	}
+
+	s.storeOutgoingMessage(resp.ID, req.ToChat, original.Content, "text")
 
 	jsonOK(w, map[string]interface{}{"success": true, "message_id": resp.ID})
 }
