@@ -1,16 +1,86 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
+	"io"
 	"net/http"
 	"strings"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 
+	_ "golang.org/x/image/webp"
+
 	"whatsapp-bridge-v2/internal/db"
 )
+
+// handleGroupsDiscover returns all groups with activity stats, marking tracked vs untracked.
+// POST /api/v2/groups/discover — body: {"tracked_jids":["jid1","jid2"]}
+// GET /api/v2/groups/discover — returns all groups (none marked as tracked)
+// Optional query: ?filter=new (only untracked), ?filter=active (has messages), ?filter=dead (no messages)
+func (s *Server) handleGroupsDiscover(w http.ResponseWriter, r *http.Request) {
+	trackedMap := make(map[string]bool)
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			TrackedJIDs []string `json:"tracked_jids"`
+		}
+		if err := decodeJSON(r, &req); err == nil {
+			for _, jid := range req.TrackedJIDs {
+				trackedMap[jid] = true
+			}
+		}
+	}
+
+	results, err := s.store.GetGroupsDiscovery(trackedMap)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	if results == nil {
+		results = []db.GroupDiscovery{}
+	}
+
+	// Apply filter
+	filter := r.URL.Query().Get("filter")
+	if filter != "" {
+		var filtered []db.GroupDiscovery
+		for _, g := range results {
+			switch filter {
+			case "new":
+				if !g.Tracked {
+					filtered = append(filtered, g)
+				}
+			case "active":
+				if g.MessageCount > 0 {
+					filtered = append(filtered, g)
+				}
+			case "dead":
+				if g.MessageCount == 0 {
+					filtered = append(filtered, g)
+				}
+			case "community":
+				if g.IsParent {
+					filtered = append(filtered, g)
+				}
+			default:
+				filtered = append(filtered, g)
+			}
+		}
+		results = filtered
+		if results == nil {
+			results = []db.GroupDiscovery{}
+		}
+	}
+
+	jsonOK(w, results)
+}
 
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -207,6 +277,54 @@ func (s *Server) handleGroupDescription(w http.ResponseWriter, r *http.Request, 
 	jsonOK(w, map[string]bool{"success": true})
 }
 
+// convertToJPEG takes any image format (PNG, WebP, GIF, JPEG) and returns
+// a 640x640 JPEG suitable for WhatsApp profile/group photos.
+func convertToJPEG(data []byte) ([]byte, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode image: %w", err)
+	}
+
+	// Resize to 640x640 (WhatsApp standard)
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+
+	// Crop to square first (center crop)
+	var cropImg image.Image = img
+	if w != h {
+		size := w
+		if h < w {
+			size = h
+		}
+		x0 := (w - size) / 2
+		y0 := (h - size) / 2
+		type subImager interface {
+			SubImage(r image.Rectangle) image.Image
+		}
+		if si, ok := img.(subImager); ok {
+			cropImg = si.SubImage(image.Rect(x0, y0, x0+size, y0+size))
+		}
+	}
+
+	// Resize to 640x640 using nearest-neighbor
+	cropBounds := cropImg.Bounds()
+	target := 640
+	thumb := image.NewRGBA(image.Rect(0, 0, target, target))
+	for y := 0; y < target; y++ {
+		for x := 0; x < target; x++ {
+			srcX := cropBounds.Min.X + x*cropBounds.Dx()/target
+			srcY := cropBounds.Min.Y + y*cropBounds.Dy()/target
+			thumb.Set(x, y, cropImg.At(srcX, srcY))
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, fmt.Errorf("encode jpeg: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 func (s *Server) handleGroupPhoto(w http.ResponseWriter, r *http.Request, jid string) {
 	if r.Method != http.MethodPut {
 		methodNotAllowed(w)
@@ -219,14 +337,17 @@ func (s *Server) handleGroupPhoto(w http.ResponseWriter, r *http.Request, jid st
 	}
 	defer file.Close()
 
-	var data []byte
-	buf := make([]byte, 1024*1024)
-	for {
-		n, err := file.Read(buf)
-		data = append(data, buf[:n]...)
-		if err != nil {
-			break
-		}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		jsonError(w, 400, "failed to read photo")
+		return
+	}
+
+	// Auto-convert any image format to 640x640 JPEG
+	jpegData, err := convertToJPEG(data)
+	if err != nil {
+		jsonError(w, 400, fmt.Sprintf("invalid image: %v", err))
+		return
 	}
 
 	parsedJID, err := types.ParseJID(jid)
@@ -236,7 +357,7 @@ func (s *Server) handleGroupPhoto(w http.ResponseWriter, r *http.Request, jid st
 	}
 
 	wa := s.client.GetWhatsmeowClient()
-	_, err = wa.SetGroupPhoto(context.Background(), parsedJID, data)
+	_, err = wa.SetGroupPhoto(context.Background(), parsedJID, jpegData)
 	if err != nil {
 		jsonError(w, 500, fmt.Sprintf("set photo: %v", err))
 		return

@@ -58,6 +58,7 @@ func (s *Server) registerRoutes() {
 
 	// Groups
 	s.mux.HandleFunc("/api/v2/groups", s.handleGroups)
+	s.mux.HandleFunc("/api/v2/groups/discover", s.handleGroupsDiscover)
 	s.mux.HandleFunc("/api/v2/groups/join", s.handleGroupJoin)
 	s.mux.HandleFunc("/api/v2/groups/", s.handleGroupByJID)
 

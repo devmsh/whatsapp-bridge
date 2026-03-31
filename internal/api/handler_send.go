@@ -147,10 +147,11 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ChatJID   string `json:"chat_jid"`
-		MessageID string `json:"message_id"`
-		Message   string `json:"message"`
-		MediaPath string `json:"media_path,omitempty"`
+		ChatJID       string   `json:"chat_jid"`
+		MessageID     string   `json:"message_id"`
+		Message       string   `json:"message"`
+		MediaPath     string   `json:"media_path,omitempty"`
+		MentionedJIDs []string `json:"mentioned_jids,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")
@@ -195,6 +196,7 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		StanzaID:      proto.String(req.MessageID),
 		Participant:   proto.String(participant),
 		QuotedMessage: quotedMsg,
+		MentionedJID:  req.MentionedJIDs,
 	}
 
 	wa := s.client.GetWhatsmeowClient()

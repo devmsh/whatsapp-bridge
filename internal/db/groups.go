@@ -126,6 +126,53 @@ func (s *Store) GetGroups() ([]Group, error) {
 	return groups, rows.Err()
 }
 
+// GroupDiscovery holds a group with activity stats for new group detection.
+type GroupDiscovery struct {
+	Group
+	MessageCount   int    `json:"message_count"`
+	LastMessageAt  int64  `json:"last_message_at,omitempty"`
+	ParticipantNum int    `json:"participant_num"`
+	Tracked        bool   `json:"tracked"`
+}
+
+// GetGroupsDiscovery returns all groups with activity stats, marking which are tracked.
+func (s *Store) GetGroupsDiscovery(trackedJIDs map[string]bool) ([]GroupDiscovery, error) {
+	rows, err := s.DB.Query(`
+		SELECT g.jid, COALESCE(g.name,''), g.owner_jid, g.group_created, g.is_announce, g.is_parent, g.suspended,
+			COALESCE(msg.cnt, 0) as message_count,
+			COALESCE(msg.last_ts, 0) as last_message_at,
+			COALESCE(gp.pcnt, 0) as participant_num
+		FROM groups g
+		LEFT JOIN (
+			SELECT chat_jid, COUNT(*) as cnt, MAX(timestamp) as last_ts
+			FROM messages WHERE chat_jid LIKE '%@g.us'
+			GROUP BY chat_jid
+		) msg ON g.jid = msg.chat_jid
+		LEFT JOIN (
+			SELECT group_jid, COUNT(*) as pcnt
+			FROM group_participants
+			GROUP BY group_jid
+		) gp ON g.jid = gp.group_jid
+		ORDER BY g.group_created DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []GroupDiscovery
+	for rows.Next() {
+		var d GroupDiscovery
+		if err := rows.Scan(&d.JID, &d.Name, &d.OwnerJID, &d.GroupCreated,
+			&d.IsAnnounce, &d.IsParent, &d.Suspended,
+			&d.MessageCount, &d.LastMessageAt, &d.ParticipantNum); err != nil {
+			continue
+		}
+		d.Tracked = trackedJIDs[d.JID]
+		results = append(results, d)
+	}
+	return results, rows.Err()
+}
+
 // StoreGroupParticipant upserts a group participant.
 func (s *Store) StoreGroupParticipant(p *GroupParticipant) error {
 	if p.UpdatedAt == 0 {

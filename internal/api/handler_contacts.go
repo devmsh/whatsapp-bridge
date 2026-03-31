@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
+	waSyncAction "go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 
 	"whatsapp-bridge-v2/internal/db"
 )
@@ -84,6 +87,8 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleContactBusiness(w, r, jid)
 	case "avatar":
 		s.handleContactAvatar(w, r, jid)
+	case "name":
+		s.handleContactName(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
@@ -144,4 +149,62 @@ func (s *Server) handleContactAvatar(w http.ResponseWriter, r *http.Request, jid
 		return
 	}
 	jsonOK(w, pic)
+}
+
+func (s *Server) handleContactName(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		FullName  string `json:"full_name"`
+		FirstName string `json:"first_name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, 400, "invalid JSON")
+		return
+	}
+	if req.FullName == "" {
+		jsonError(w, 400, "full_name required")
+		return
+	}
+
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+
+	// Sync contact name via WhatsApp App State
+	wa := s.client.GetWhatsmeowClient()
+	patch := appstate.PatchInfo{
+		Type: appstate.WAPatchCriticalUnblockLow,
+		Mutations: []appstate.MutationInfo{{
+			Index:   []string{appstate.IndexContact, parsedJID.ToNonAD().String()},
+			Version: 2,
+			Value: &waSyncAction.SyncActionValue{
+				ContactAction: &waSyncAction.ContactAction{
+					FullName:  proto.String(req.FullName),
+					FirstName: proto.String(req.FirstName),
+				},
+			},
+		}},
+	}
+
+	err = wa.SendAppState(context.Background(), patch)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("set contact name: %v", err))
+		return
+	}
+
+	// Update local store
+	wa.Store.Contacts.PutContactName(context.Background(), parsedJID, req.FullName, req.FirstName)
+
+	// Update our DB
+	s.store.StoreContact(&db.Contact{
+		JID:  jid,
+		Name: req.FullName,
+	})
+
+	jsonOK(w, map[string]bool{"success": true})
 }
