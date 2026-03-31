@@ -1,3 +1,4 @@
 store/
 whatsapp-bridge-v2
 vendor/
+.DS_Store

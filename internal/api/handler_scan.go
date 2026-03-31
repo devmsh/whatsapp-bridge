@@ -43,6 +43,12 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Determine own JID for self-message detection
+	selfJID := ""
+	if s.client != nil && s.client.WA != nil && s.client.WA.Store.ID != nil {
+		selfJID = s.client.WA.Store.ID.User + "@s.whatsapp.net"
+	}
+
 	// Build query with enriched joins
 	query := `
 		SELECT
@@ -51,7 +57,7 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 			COALESCE(c.name, m.chat_jid) as chat_name,
 			CASE
 				WHEN m.chat_jid LIKE '%@g.us' THEN 'group'
-				WHEN m.chat_jid = '966535435254@s.whatsapp.net' THEN 'self'
+				WHEN ? != '' AND m.chat_jid = ? THEN 'self'
 				WHEN m.chat_jid LIKE '%@s.whatsapp.net' THEN 'individual'
 				WHEN m.chat_jid LIKE '%@lid' THEN 'individual'
 				WHEN m.chat_jid LIKE '%@newsletter' THEN 'newsletter'
@@ -78,7 +84,7 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 		)
 		WHERE m.timestamp > ?`
 
-	args := []interface{}{since}
+	args := []interface{}{selfJID, selfJID, since}
 
 	if chatFilter != "" {
 		query += " AND m.chat_jid = ?"
