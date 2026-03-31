@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"go.mau.fi/whatsmeow/types"
+
 	"whatsapp-bridge-v2/internal/db"
 )
 
@@ -121,13 +123,47 @@ func (s *Server) handlePollVote(w http.ResponseWriter, r *http.Request, pollID s
 		return
 	}
 
-	// Poll vote requires the original poll message info for encryption
-	// BuildPollVote needs the MessageInfo of the poll creation message
-	// For now, store locally — full vote encryption requires the poll's message secret
-	// which is only available when the poll was created by this client
-	wa := s.client.GetWhatsmeowClient()
-	optionsJSON, _ := json.Marshal(req.Options)
+	if req.ChatJID == "" || len(req.Options) == 0 {
+		jsonError(w, 400, "chat_jid and options required")
+		return
+	}
 
+	chatJID, err := parseJID(req.ChatJID)
+	if err != nil {
+		jsonError(w, 400, "invalid chat_jid")
+		return
+	}
+
+	wa := s.client.GetWhatsmeowClient()
+
+	// Reconstruct MessageInfo — use phone-based JIDs (whatsmeow's SQL has LID↔PN fallback)
+	ownID := wa.Store.ID.ToNonAD()
+
+	pollInfo := &types.MessageInfo{
+		MessageSource: types.MessageSource{
+			Chat:     chatJID,
+			Sender:   ownID,
+			IsFromMe: true,
+			IsGroup:  chatJID.Server == "g.us",
+		},
+		ID: types.MessageID(pollID),
+	}
+
+	msg, err := wa.BuildPollVote(context.Background(), pollInfo, req.Options)
+	if err != nil {
+		fmt.Printf("[poll-vote] BuildPollVote error: %v\n", err)
+		jsonError(w, 500, fmt.Sprintf("build poll vote failed: %v", err))
+		return
+	}
+
+	resp, err := wa.SendMessage(context.Background(), chatJID, msg)
+	fmt.Printf("[poll-vote] SendMessage result: id=%s err=%v\n", resp.ID, err)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("send poll vote failed: %v", err))
+		return
+	}
+
+	optionsJSON, _ := json.Marshal(req.Options)
 	s.store.StorePollVote(&db.PollVote{
 		PollMessageID:   pollID,
 		PollChatJID:     req.ChatJID,

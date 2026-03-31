@@ -1,8 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"net/http"
 	"os"
 	"strings"
@@ -13,8 +18,50 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 
+	_ "golang.org/x/image/webp"
+
 	"whatsapp-bridge-v2/internal/db"
 )
+
+// getImageDimensions decodes image data to get width and height.
+func getImageDimensions(data []byte) (int, int, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0, err
+	}
+	return cfg.Width, cfg.Height, nil
+}
+
+// makeJpegThumbnail creates a small JPEG thumbnail from image data.
+func makeJpegThumbnail(data []byte) []byte {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+	// Resize to max 72px on longest side
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	maxDim := 72
+	if w > h {
+		h = h * maxDim / w
+		w = maxDim
+	} else {
+		w = w * maxDim / h
+		h = maxDim
+	}
+	// Create thumbnail using simple nearest-neighbor
+	thumb := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			srcX := x * bounds.Dx() / w
+			srcY := y * bounds.Dy() / h
+			thumb.Set(x, y, img.At(bounds.Min.X+srcX, bounds.Min.Y+srcY))
+		}
+	}
+	var buf bytes.Buffer
+	jpeg.Encode(&buf, thumb, &jpeg.Options{Quality: 50})
+	return buf.Bytes()
+}
 
 // storeOutgoingMessage saves a sent message to the local DB and updates chat activity.
 func (s *Server) storeOutgoingMessage(msgID, chatJID, content, msgType string) {
@@ -41,6 +88,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		JID       string `json:"jid"`
 		Message   string `json:"message"`
 		MediaPath string `json:"media_path,omitempty"`
+		Sticker   bool   `json:"sticker,omitempty"` // true = send .webp as sticker; default = image
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")
@@ -65,7 +113,8 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	msg := &waE2E.Message{}
 
 	if req.MediaPath != "" {
-		if err := buildMediaMessage(wa, msg, req.MediaPath, req.Message); err != nil {
+		// forceImage=true by default; sticker only when explicitly requested
+		if err := buildMediaMessageEx(wa, msg, req.MediaPath, req.Message, !req.Sticker); err != nil {
 			jsonError(w, 500, err.Error())
 			return
 		}
@@ -101,6 +150,7 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		ChatJID   string `json:"chat_jid"`
 		MessageID string `json:"message_id"`
 		Message   string `json:"message"`
+		MediaPath string `json:"media_path,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")
@@ -118,27 +168,66 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 	var quotedMsg *waE2E.Message
 	participant := req.ChatJID
 	if origMsg != nil {
-		quotedMsg = &waE2E.Message{
-			Conversation: proto.String(origMsg.Content),
-		}
-		if origMsg.Sender != "" {
-			participant = origMsg.Sender + "@s.whatsapp.net"
+		// Build the correct quoted message type based on original message type
+		if origMsg.MediaType == "image" || origMsg.MessageType == "media" && strings.Contains(origMsg.Content, "[image:") {
+			quotedMsg = &waE2E.Message{
+				ImageMessage: &waE2E.ImageMessage{
+					Caption: proto.String(origMsg.MediaCaption),
+				},
+			}
+		} else {
+			quotedMsg = &waE2E.Message{
+				Conversation: proto.String(origMsg.Content),
+			}
 		}
 		if origMsg.IsFromMe {
 			participant = s.client.GetWhatsmeowClient().Store.ID.ToNonAD().String()
+		} else if origMsg.Sender != "" {
+			if strings.Contains(origMsg.Sender, "@") {
+				participant = origMsg.Sender
+			} else {
+				participant = origMsg.Sender + "@s.whatsapp.net"
+			}
 		}
 	}
 
+	contextInfo := &waE2E.ContextInfo{
+		StanzaID:      proto.String(req.MessageID),
+		Participant:   proto.String(participant),
+		QuotedMessage: quotedMsg,
+	}
+
 	wa := s.client.GetWhatsmeowClient()
-	msg := &waE2E.Message{
-		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
-			Text: proto.String(req.Message),
-			ContextInfo: &waE2E.ContextInfo{
-				StanzaID:      proto.String(req.MessageID),
-				Participant:   proto.String(participant),
-				QuotedMessage: quotedMsg,
+	var msg *waE2E.Message
+
+	if req.MediaPath != "" {
+		// Media reply — build media message with ContextInfo attached
+		// Force webp as image (not sticker) for replies
+		msg = &waE2E.Message{}
+		if err := buildMediaMessageEx(wa, msg, req.MediaPath, req.Message, true); err != nil {
+			jsonError(w, 500, err.Error())
+			return
+		}
+		// Attach ContextInfo to whichever media type was built
+		if msg.ImageMessage != nil {
+			msg.ImageMessage.ContextInfo = contextInfo
+		} else if msg.VideoMessage != nil {
+			msg.VideoMessage.ContextInfo = contextInfo
+		} else if msg.AudioMessage != nil {
+			msg.AudioMessage.ContextInfo = contextInfo
+		} else if msg.DocumentMessage != nil {
+			msg.DocumentMessage.ContextInfo = contextInfo
+		} else if msg.StickerMessage != nil {
+			msg.StickerMessage.ContextInfo = contextInfo
+		}
+	} else {
+		// Text reply
+		msg = &waE2E.Message{
+			ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+				Text:        proto.String(req.Message),
+				ContextInfo: contextInfo,
 			},
-		},
+		}
 	}
 
 	resp, err := wa.SendMessage(context.Background(), chatJID, msg)
@@ -147,7 +236,11 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.storeOutgoingMessage(resp.ID, req.ChatJID, req.Message, "text")
+	msgType := "text"
+	if req.MediaPath != "" {
+		msgType = "media"
+	}
+	s.storeOutgoingMessage(resp.ID, req.ChatJID, req.Message, msgType)
 
 	jsonOK(w, map[string]interface{}{
 		"success":    true,
@@ -308,12 +401,17 @@ func parseJID(jid string) (types.JID, error) {
 }
 
 func buildMediaMessage(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, caption string) error {
+	return buildMediaMessageEx(wa, msg, mediaPath, caption, false)
+}
+
+func buildMediaMessageEx(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, caption string, forceImage bool) error {
 	data, err := os.ReadFile(mediaPath)
 	if err != nil {
 		return fmt.Errorf("read media file: %w", err)
 	}
 
 	ext := strings.ToLower(mediaPath[strings.LastIndex(mediaPath, ".")+1:])
+	isSticker := ext == "webp" && !forceImage
 	var mediaType whatsmeow.MediaType
 	var mimeType string
 
@@ -352,6 +450,30 @@ func buildMediaMessage(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, capt
 		return fmt.Errorf("upload media: %w", err)
 	}
 
+	if isSticker {
+		msg.StickerMessage = &waE2E.StickerMessage{
+			Mimetype:      proto.String(mimeType),
+			URL:           &resp.URL,
+			DirectPath:    &resp.DirectPath,
+			MediaKey:      resp.MediaKey,
+			FileEncSHA256: resp.FileEncSHA256,
+			FileSHA256:    resp.FileSHA256,
+			FileLength:    &resp.FileLength,
+			PngThumbnail:  data, // use the webp data as thumbnail
+		}
+		return nil
+	}
+
+	// Detect image dimensions + generate thumbnail for proper WhatsApp layout
+	var imgWidth, imgHeight uint32
+	var jpegThumb []byte
+	if mediaType == whatsmeow.MediaImage {
+		if w, h, err := getImageDimensions(data); err == nil {
+			imgWidth, imgHeight = uint32(w), uint32(h)
+		}
+		jpegThumb = makeJpegThumbnail(data)
+	}
+
 	switch mediaType {
 	case whatsmeow.MediaImage:
 		msg.ImageMessage = &waE2E.ImageMessage{
@@ -363,6 +485,9 @@ func buildMediaMessage(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, capt
 			FileEncSHA256: resp.FileEncSHA256,
 			FileSHA256:    resp.FileSHA256,
 			FileLength:    &resp.FileLength,
+			Width:         &imgWidth,
+			Height:        &imgHeight,
+			JPEGThumbnail: jpegThumb,
 		}
 	case whatsmeow.MediaVideo:
 		msg.VideoMessage = &waE2E.VideoMessage{

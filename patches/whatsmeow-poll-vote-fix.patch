@@ -1,0 +1,18 @@
+# Fix for whatsmeow issue #1076 / PR #1107
+# EncryptPollVote uses getOwnID() (Phone JID) but SendMessage uses LID identity
+# This causes silent decryption failure on poll votes
+#
+# Apply: cd vendor/go.mau.fi/whatsmeow && patch -p1 < ../../../patches/whatsmeow-poll-vote-fix.patch
+# Or: sed -i '' 's/cli.getOwnID(), pollInfo/cli.getOwnLID(), pollInfo/' vendor/go.mau.fi/whatsmeow/msgsecret.go
+
+--- a/msgsecret.go
++++ b/msgsecret.go
+@@ -328,7 +328,7 @@
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to marshal poll vote protobuf: %w", err)
+ 	}
+-	ciphertext, iv, err := cli.encryptMsgSecret(ctx, cli.getOwnID(), pollInfo.Chat, pollInfo.Sender, pollInfo.ID, EncSecretPollVote, plaintext)
++	ciphertext, iv, err := cli.encryptMsgSecret(ctx, cli.getOwnLID(), pollInfo.Chat, pollInfo.Sender, pollInfo.ID, EncSecretPollVote, plaintext)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to encrypt poll vote: %w", err)
+ 	}
