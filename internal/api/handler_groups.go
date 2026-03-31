@@ -1,0 +1,420 @@
+package api
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
+
+	"whatsapp-bridge-v2/internal/db"
+)
+
+func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		groups, err := s.store.GetGroups()
+		if err != nil {
+			jsonError(w, 500, err.Error())
+			return
+		}
+		if groups == nil {
+			groups = []db.Group{}
+		}
+		jsonOK(w, groups)
+	case http.MethodPost:
+		s.handleGroupCreate(w, r)
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name         string   `json:"name"`
+		Participants []string `json:"participants"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, 400, "invalid JSON")
+		return
+	}
+	if req.Name == "" {
+		jsonError(w, 400, "name required")
+		return
+	}
+
+	wa := s.client.GetWhatsmeowClient()
+	var jids []types.JID
+	for _, p := range req.Participants {
+		j, err := parseJID(p)
+		if err == nil {
+			jids = append(jids, j)
+		}
+	}
+
+	info, err := wa.CreateGroup(context.Background(), whatsmeow.ReqCreateGroup{
+		Name:         req.Name,
+		Participants: jids,
+	})
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("create group: %v", err))
+		return
+	}
+
+	jsonCreated(w, map[string]string{"jid": info.JID.String(), "name": info.Name})
+}
+
+func (s *Server) handleGroupJoin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, 400, "invalid JSON")
+		return
+	}
+
+	wa := s.client.GetWhatsmeowClient()
+	jid, err := wa.JoinGroupWithLink(context.Background(), req.Code)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("join group: %v", err))
+		return
+	}
+	jsonOK(w, map[string]string{"jid": jid.String()})
+}
+
+func (s *Server) handleGroupByJID(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/v2/groups/")
+	if path == "join" {
+		s.handleGroupJoin(w, r)
+		return
+	}
+
+	parts := strings.SplitN(path, "/", 2)
+	jid := parts[0]
+	sub := ""
+	if len(parts) > 1 {
+		sub = parts[1]
+	}
+
+	switch sub {
+	case "":
+		s.handleGroupGet(w, r, jid)
+	case "name":
+		s.handleGroupName(w, r, jid)
+	case "description":
+		s.handleGroupDescription(w, r, jid)
+	case "photo":
+		s.handleGroupPhoto(w, r, jid)
+	case "settings":
+		s.handleGroupSettings(w, r, jid)
+	case "participants":
+		s.handleGroupParticipants(w, r, jid)
+	case "invite-link":
+		s.handleGroupInviteLink(w, r, jid)
+	case "sub-groups":
+		s.handleGroupSubGroups(w, r, jid)
+	case "requests":
+		s.handleGroupRequests(w, r, jid)
+	default:
+		jsonError(w, 404, "not found")
+	}
+}
+
+func (s *Server) handleGroupGet(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method == http.MethodDelete {
+		parsedJID, err := types.ParseJID(jid)
+		if err != nil {
+			jsonError(w, 400, "invalid JID")
+			return
+		}
+		wa := s.client.GetWhatsmeowClient()
+		err = wa.LeaveGroup(context.Background(), parsedJID)
+		if err != nil {
+			jsonError(w, 500, fmt.Sprintf("leave group: %v", err))
+			return
+		}
+		jsonOK(w, map[string]bool{"success": true})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	group, err := s.store.GetGroup(jid)
+	if err != nil {
+		jsonError(w, 404, "group not found")
+		return
+	}
+	parts, _ := s.store.GetGroupParticipants(jid)
+	type GroupWithParticipants struct {
+		*db.Group
+		Participants []db.GroupParticipant `json:"participants"`
+	}
+	if parts == nil {
+		parts = []db.GroupParticipant{}
+	}
+	jsonOK(w, GroupWithParticipants{Group: group, Participants: parts})
+}
+
+func (s *Server) handleGroupName(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct{ Name string `json:"name"` }
+	decodeJSON(r, &req)
+
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+	wa := s.client.GetWhatsmeowClient()
+	err = wa.SetGroupName(context.Background(), parsedJID, req.Name)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("set name: %v", err))
+		return
+	}
+	jsonOK(w, map[string]bool{"success": true})
+}
+
+func (s *Server) handleGroupDescription(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct{ Description string `json:"description"` }
+	decodeJSON(r, &req)
+
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+	wa := s.client.GetWhatsmeowClient()
+	err = wa.SetGroupTopic(context.Background(), parsedJID, "", "", req.Description)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("set description: %v", err))
+		return
+	}
+	jsonOK(w, map[string]bool{"success": true})
+}
+
+func (s *Server) handleGroupPhoto(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	file, _, err := r.FormFile("photo")
+	if err != nil {
+		jsonError(w, 400, "photo file required")
+		return
+	}
+	defer file.Close()
+
+	var data []byte
+	buf := make([]byte, 1024*1024)
+	for {
+		n, err := file.Read(buf)
+		data = append(data, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+
+	wa := s.client.GetWhatsmeowClient()
+	_, err = wa.SetGroupPhoto(context.Background(), parsedJID, data)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("set photo: %v", err))
+		return
+	}
+	jsonOK(w, map[string]bool{"success": true})
+}
+
+func (s *Server) handleGroupSettings(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodPut {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		Locked   *bool `json:"locked,omitempty"`
+		Announce *bool `json:"announce,omitempty"`
+	}
+	decodeJSON(r, &req)
+
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+
+	wa := s.client.GetWhatsmeowClient()
+	if req.Locked != nil {
+		wa.SetGroupLocked(context.Background(), parsedJID, *req.Locked)
+	}
+	if req.Announce != nil {
+		wa.SetGroupAnnounce(context.Background(), parsedJID, *req.Announce)
+	}
+
+	jsonOK(w, map[string]bool{"success": true})
+}
+
+func (s *Server) handleGroupParticipants(w http.ResponseWriter, r *http.Request, jid string) {
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		parts, err := s.store.GetGroupParticipants(jid)
+		if err != nil {
+			jsonError(w, 500, err.Error())
+			return
+		}
+		if parts == nil {
+			parts = []db.GroupParticipant{}
+		}
+		jsonOK(w, parts)
+	case http.MethodPost:
+		var req struct {
+			JIDs   []string `json:"jids"`
+			Action string   `json:"action"`
+		}
+		decodeJSON(r, &req)
+
+		var memberJIDs []types.JID
+		for _, j := range req.JIDs {
+			pj, err := parseJID(j)
+			if err == nil {
+				memberJIDs = append(memberJIDs, pj)
+			}
+		}
+
+		wa := s.client.GetWhatsmeowClient()
+		var action whatsmeow.ParticipantChange
+		switch req.Action {
+		case "add":
+			action = "add"
+		case "remove":
+			action = "remove"
+		case "promote":
+			action = "promote"
+		case "demote":
+			action = "demote"
+		default:
+			jsonError(w, 400, "action must be add/remove/promote/demote")
+			return
+		}
+
+		_, opErr := wa.UpdateGroupParticipants(context.Background(), parsedJID, memberJIDs, action)
+		if opErr != nil {
+			jsonError(w, 500, opErr.Error())
+			return
+		}
+		jsonOK(w, map[string]bool{"success": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *Server) handleGroupInviteLink(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+
+	wa := s.client.GetWhatsmeowClient()
+	reset := r.URL.Query().Get("reset") == "true"
+	link, err := wa.GetGroupInviteLink(context.Background(), parsedJID, reset)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("get invite link: %v", err))
+		return
+	}
+	jsonOK(w, map[string]string{"link": link})
+}
+
+func (s *Server) handleGroupSubGroups(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+	wa := s.client.GetWhatsmeowClient()
+	subs, err := wa.GetSubGroups(context.Background(), parsedJID)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("get sub-groups: %v", err))
+		return
+	}
+	jsonOK(w, subs)
+}
+
+func (s *Server) handleGroupRequests(w http.ResponseWriter, r *http.Request, jid string) {
+	parsedJID, err := types.ParseJID(jid)
+	if err != nil {
+		jsonError(w, 400, "invalid JID")
+		return
+	}
+	wa := s.client.GetWhatsmeowClient()
+
+	switch r.Method {
+	case http.MethodGet:
+		requests, err := wa.GetGroupRequestParticipants(context.Background(), parsedJID)
+		if err != nil {
+			jsonError(w, 500, fmt.Sprintf("get requests: %v", err))
+			return
+		}
+		jsonOK(w, requests)
+	case http.MethodPost:
+		var req struct {
+			JIDs   []string `json:"jids"`
+			Action string   `json:"action"`
+		}
+		decodeJSON(r, &req)
+
+		var memberJIDs []types.JID
+		for _, j := range req.JIDs {
+			pj, err := parseJID(j)
+			if err == nil {
+				memberJIDs = append(memberJIDs, pj)
+			}
+		}
+
+		var action whatsmeow.ParticipantChange = "approve"
+		if req.Action == "reject" {
+			action = "reject"
+		}
+
+		_, err := wa.UpdateGroupParticipants(context.Background(), parsedJID, memberJIDs, action)
+		if err != nil {
+			jsonError(w, 500, err.Error())
+			return
+		}
+		jsonOK(w, map[string]bool{"success": true})
+	default:
+		methodNotAllowed(w)
+	}
+}
