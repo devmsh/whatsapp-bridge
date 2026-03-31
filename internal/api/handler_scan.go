@@ -28,6 +28,13 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chatFilter := r.URL.Query().Get("chat")
+	excludeParam := r.URL.Query().Get("exclude")
+	var excludeJIDs []string
+	if excludeParam != "" {
+		for _, jid := range strings.Split(excludeParam, ",") {
+			excludeJIDs = append(excludeJIDs, strings.TrimSpace(jid))
+		}
+	}
 	limitStr := r.URL.Query().Get("limit")
 	limit := 5000
 	if limitStr != "" {
@@ -76,6 +83,11 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 	if chatFilter != "" {
 		query += " AND m.chat_jid = ?"
 		args = append(args, chatFilter)
+	}
+
+	for _, ej := range excludeJIDs {
+		query += " AND m.chat_jid != ?"
+		args = append(args, ej)
 	}
 
 	query += " ORDER BY m.timestamp ASC LIMIT ?"
@@ -140,12 +152,19 @@ func (s *Server) handleScanGroups(w http.ResponseWriter, r *http.Request) {
 		since, _ = strconv.ParseInt(sinceStr, 10, 64)
 	}
 
-	// Also accept tracked_jids to mark tracked vs untracked
+	// Accept tracked JIDs and exclude JIDs
 	trackedParam := r.URL.Query().Get("tracked")
 	trackedMap := make(map[string]bool)
 	if trackedParam != "" {
 		for _, jid := range strings.Split(trackedParam, ",") {
 			trackedMap[strings.TrimSpace(jid)] = true
+		}
+	}
+	excludeParam := r.URL.Query().Get("exclude")
+	var excludeJIDs []string
+	if excludeParam != "" {
+		for _, jid := range strings.Split(excludeParam, ",") {
+			excludeJIDs = append(excludeJIDs, strings.TrimSpace(jid))
 		}
 	}
 
@@ -174,10 +193,16 @@ func (s *Server) handleScanGroups(w http.ResponseWriter, r *http.Request) {
 			FROM group_participants
 			GROUP BY group_jid
 		) gp ON g.jid = gp.group_jid
-		WHERE g.group_created > ?
-		ORDER BY g.group_created DESC`
+		WHERE g.group_created > ?`
 
-	rows, err := s.store.DB.Query(query, since)
+	args := []interface{}{since}
+	for _, ej := range excludeJIDs {
+		query += " AND g.jid != ?"
+		args = append(args, ej)
+	}
+	query += " ORDER BY g.group_created DESC"
+
+	rows, err := s.store.DB.Query(query, args...)
 	if err != nil {
 		jsonError(w, 500, err.Error())
 		return
