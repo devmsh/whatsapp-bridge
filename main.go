@@ -46,7 +46,7 @@ func main() {
 	wa.StartPeriodicSync(client, 6*time.Hour)
 
 	// Start API server (blocks in goroutine)
-	server := api.NewServer(store, client, cfg.MediaDir, cfg.Port)
+	server := api.NewServer(store, client, cfg.MediaDir, cfg.Port, cfg)
 	go func() {
 		if err := server.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "API server error: %v\n", err)

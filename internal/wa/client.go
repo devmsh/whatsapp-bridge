@@ -10,6 +10,7 @@ import (
 	"github.com/mdp/qrterminal"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
 	"whatsapp-bridge-v2/internal/db"
@@ -92,6 +93,34 @@ func (c *Client) IsConnected() bool {
 // GetWhatsmeowClient returns the underlying whatsmeow client.
 func (c *Client) GetWhatsmeowClient() *whatsmeow.Client {
 	return c.WA
+}
+
+// ResolveLIDForJID takes a phone JID (e.g. "972592604155@s.whatsapp.net") and returns
+// the corresponding LID JID if one exists, or empty string if not found.
+// This is used by the API layer to merge LID-stored messages with phone-stored messages.
+func (c *Client) ResolveLIDForJID(phoneJID string) string {
+	jid, err := types.ParseJID(phoneJID)
+	if err != nil || jid.Server != types.DefaultUserServer {
+		return ""
+	}
+	lid, err := c.WA.Store.LIDs.GetLIDForPN(context.Background(), jid)
+	if err != nil || lid.IsEmpty() {
+		return ""
+	}
+	return lid.String()
+}
+
+// ResolvePhoneForLID takes a LID JID and returns the phone JID, or empty string.
+func (c *Client) ResolvePhoneForLID(lidJID string) string {
+	jid, err := types.ParseJID(lidJID)
+	if err != nil || jid.Server != "lid" {
+		return ""
+	}
+	pn, err := c.WA.Store.LIDs.GetPNForLID(context.Background(), jid)
+	if err != nil || pn.IsEmpty() {
+		return ""
+	}
+	return pn.String()
 }
 
 // Uptime returns how long the client has been running.

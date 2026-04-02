@@ -49,12 +49,22 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 		selfJID = s.client.WA.Store.ID.User + "@s.whatsapp.net"
 	}
 
-	// Build query with enriched joins
+	// Build query with enriched joins.
+	// peer_ct resolves DM chat_jid to a contact (works for both @lid and @s.whatsapp.net).
+	// ct resolves the message sender to a contact.
 	query := `
 		SELECT
 			m.timestamp,
 			m.chat_jid,
-			COALESCE(c.name, m.chat_jid) as chat_name,
+			CASE
+				WHEN m.chat_jid LIKE '%@g.us' THEN COALESCE(c.name, m.chat_jid)
+				ELSE COALESCE(
+					NULLIF(peer_ct.name, ''),
+					NULLIF(peer_ct.push_name, ''),
+					NULLIF(c.name, ''),
+					m.chat_jid
+				)
+			END as chat_name,
 			CASE
 				WHEN m.chat_jid LIKE '%@g.us' THEN 'group'
 				WHEN ? != '' AND m.chat_jid = ? THEN 'self'
@@ -74,9 +84,17 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 			CASE WHEN m.media_type != '' AND m.media_type IS NOT NULL THEN 1 ELSE 0 END as has_media,
 			COALESCE(m.media_type, '') as media_type,
 			COALESCE(m.mentions, '') as mentions,
-			m.id as message_id
+			m.id as message_id,
+			COALESCE(peer_ct.phone, REPLACE(REPLACE(m.chat_jid, '@s.whatsapp.net', ''), '@lid', ''), '') as chat_phone
 		FROM messages m
 		LEFT JOIN chats c ON m.chat_jid = c.jid
+		LEFT JOIN contacts peer_ct ON peer_ct.jid = (
+			SELECT jid FROM contacts
+			WHERE jid = m.chat_jid
+				OR phone || '@s.whatsapp.net' = m.chat_jid
+				OR lid || '@lid' = m.chat_jid
+			LIMIT 1
+		)
 		LEFT JOIN contacts ct ON ct.jid = (
 			SELECT jid FROM contacts
 			WHERE jid = m.sender OR phone || '@s.whatsapp.net' = m.sender OR lid || '@lid' = m.sender
@@ -110,7 +128,7 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "inline")
 
 	// Header
-	fmt.Fprintln(w, "timestamp,chat_jid,chat_name,chat_type,sender_phone,sender_name,is_from_me,message_type,content,is_forwarded,forward_score,has_reply,has_media,media_type,mentions,message_id")
+	fmt.Fprintln(w, "timestamp,chat_jid,chat_name,chat_type,sender_phone,sender_name,is_from_me,message_type,content,is_forwarded,forward_score,has_reply,has_media,media_type,mentions,message_id,chat_phone")
 
 	for rows.Next() {
 		var ts int64
@@ -118,12 +136,12 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 		var isFromMe int
 		var msgType, content string
 		var isForwarded, forwardScore, hasReply, hasMedia int
-		var mediaType, mentions, messageID string
+		var mediaType, mentions, messageID, chatPhone string
 
 		if err := rows.Scan(&ts, &chatJID, &chatName, &chatType,
 			&senderPhone, &senderName, &isFromMe,
 			&msgType, &content, &isForwarded, &forwardScore,
-			&hasReply, &hasMedia, &mediaType, &mentions, &messageID); err != nil {
+			&hasReply, &hasMedia, &mediaType, &mentions, &messageID, &chatPhone); err != nil {
 			continue
 		}
 
@@ -136,11 +154,11 @@ func (s *Server) handleScanMessages(w http.ResponseWriter, r *http.Request) {
 		senderName = csvEscape(senderName)
 		mentions = csvEscape(mentions)
 
-		fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%d,%s,%s,%d,%d,%d,%d,%s,%s,%s\n",
+		fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%d,%s,%s,%d,%d,%d,%d,%s,%s,%s,%s\n",
 			tsStr, chatJID, chatName, chatType,
 			senderPhone, senderName, isFromMe,
 			msgType, content, isForwarded, forwardScore,
-			hasReply, hasMedia, mediaType, mentions, messageID)
+			hasReply, hasMedia, mediaType, mentions, messageID, chatPhone)
 	}
 }
 

@@ -8,8 +8,11 @@ import (
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
+	"math"
 	"net/http"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +25,81 @@ import (
 
 	"whatsapp-bridge-v2/internal/db"
 )
+
+// getAudioDuration returns the duration in seconds using ffprobe.
+// Returns 0 if ffprobe is unavailable or fails.
+func getAudioDuration(path string) uint32 {
+	out, err := exec.Command("ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		return 0
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+	if err != nil {
+		return 0
+	}
+	return uint32(math.Ceil(f))
+}
+
+// convertToOpus converts any audio file to OGG Opus format (required for WA voice note transcription).
+// Returns the path to the converted file, or the original path if conversion fails/unnecessary.
+func convertToOpus(srcPath string) (string, bool) {
+	ext := strings.ToLower(srcPath[strings.LastIndex(srcPath, ".")+1:])
+	if ext == "ogg" {
+		return srcPath, false // already OGG, no temp file created
+	}
+	dst := srcPath[:strings.LastIndex(srcPath, ".")] + ".ogg"
+	err := exec.Command("ffmpeg", "-y", "-i", srcPath, "-c:a", "libopus", "-b:a", "48k", "-vn", dst).Run()
+	if err != nil {
+		return srcPath, false // fallback to original
+	}
+	return dst, true
+}
+
+// generateWaveform produces a 64-byte waveform from audio using ffmpeg.
+// Each byte is an amplitude sample (0-100) that WhatsApp uses for the visual waveform.
+func generateWaveform(path string) []byte {
+	// Extract raw PCM samples, compute RMS per chunk
+	out, err := exec.Command("ffmpeg", "-i", path, "-ac", "1", "-ar", "8000", "-f", "s16le", "-").Output()
+	if err != nil || len(out) < 128 {
+		return nil
+	}
+	// 16-bit signed LE samples
+	numSamples := len(out) / 2
+	chunkSize := numSamples / 64
+	if chunkSize < 1 {
+		chunkSize = 1
+	}
+	waveform := make([]byte, 64)
+	var maxRMS float64
+	rmsValues := make([]float64, 64)
+	for i := 0; i < 64; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > numSamples {
+			end = numSamples
+		}
+		var sumSq float64
+		for j := start; j < end; j++ {
+			idx := j * 2
+			if idx+1 >= len(out) {
+				break
+			}
+			sample := int16(out[idx]) | int16(out[idx+1])<<8
+			sumSq += float64(sample) * float64(sample)
+		}
+		rms := math.Sqrt(sumSq / float64(end-start))
+		rmsValues[i] = rms
+		if rms > maxRMS {
+			maxRMS = rms
+		}
+	}
+	if maxRMS > 0 {
+		for i := 0; i < 64; i++ {
+			waveform[i] = byte(rmsValues[i] / maxRMS * 100)
+		}
+	}
+	return waveform
+}
 
 // getImageDimensions decodes image data to get width and height.
 func getImageDimensions(data []byte) (int, int, error) {
@@ -89,6 +167,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		Message   string `json:"message"`
 		MediaPath string `json:"media_path,omitempty"`
 		Sticker   bool   `json:"sticker,omitempty"` // true = send .webp as sticker; default = image
+		PTT       bool   `json:"ptt,omitempty"`     // true = send audio as voice note (push-to-talk)
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")
@@ -114,7 +193,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 
 	if req.MediaPath != "" {
 		// forceImage=true by default; sticker only when explicitly requested
-		if err := buildMediaMessageEx(wa, msg, req.MediaPath, req.Message, !req.Sticker); err != nil {
+		if err := buildMediaMessageEx(wa, msg, req.MediaPath, req.Message, !req.Sticker, req.PTT); err != nil {
 			jsonError(w, 500, err.Error())
 			return
 		}
@@ -206,7 +285,7 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request) {
 		// Media reply — build media message with ContextInfo attached
 		// Force webp as image (not sticker) for replies
 		msg = &waE2E.Message{}
-		if err := buildMediaMessageEx(wa, msg, req.MediaPath, req.Message, true); err != nil {
+		if err := buildMediaMessageEx(wa, msg, req.MediaPath, req.Message, true, false); err != nil {
 			jsonError(w, 500, err.Error())
 			return
 		}
@@ -403,10 +482,10 @@ func parseJID(jid string) (types.JID, error) {
 }
 
 func buildMediaMessage(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, caption string) error {
-	return buildMediaMessageEx(wa, msg, mediaPath, caption, false)
+	return buildMediaMessageEx(wa, msg, mediaPath, caption, false, false)
 }
 
-func buildMediaMessageEx(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, caption string, forceImage bool) error {
+func buildMediaMessageEx(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, caption string, forceImage bool, ptt bool) error {
 	data, err := os.ReadFile(mediaPath)
 	if err != nil {
 		return fmt.Errorf("read media file: %w", err)
@@ -439,6 +518,12 @@ func buildMediaMessageEx(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, ca
 	case "ogg":
 		mediaType = whatsmeow.MediaAudio
 		mimeType = "audio/ogg; codecs=opus"
+	case "mp3":
+		mediaType = whatsmeow.MediaAudio
+		mimeType = "audio/mpeg"
+	case "m4a", "aac":
+		mediaType = whatsmeow.MediaAudio
+		mimeType = "audio/mp4"
 	case "pdf":
 		mediaType = whatsmeow.MediaDocument
 		mimeType = "application/pdf"
@@ -503,16 +588,47 @@ func buildMediaMessageEx(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, ca
 			FileLength:    &resp.FileLength,
 		}
 	case whatsmeow.MediaAudio:
-		msg.AudioMessage = &waE2E.AudioMessage{
-			Mimetype:      proto.String(mimeType),
+		audioPath := mediaPath
+		audioMime := mimeType
+		audioData := data
+
+		// For voice notes (PTT): convert to Opus and generate waveform
+		if ptt {
+			if converted, isTemp := convertToOpus(mediaPath); converted != mediaPath {
+				audioPath = converted
+				audioMime = "audio/ogg; codecs=opus"
+				if convData, err := os.ReadFile(audioPath); err == nil {
+					audioData = convData
+				}
+				if isTemp {
+					defer os.Remove(audioPath)
+				}
+				// Re-upload the converted file
+				resp, err = wa.Upload(context.Background(), audioData, whatsmeow.MediaAudio)
+				if err != nil {
+					return fmt.Errorf("upload converted audio: %w", err)
+				}
+			}
+		}
+
+		dur := getAudioDuration(audioPath)
+		audioMsg := &waE2E.AudioMessage{
+			Mimetype:      proto.String(audioMime),
 			URL:           &resp.URL,
 			DirectPath:    &resp.DirectPath,
 			MediaKey:      resp.MediaKey,
 			FileEncSHA256: resp.FileEncSHA256,
 			FileSHA256:    resp.FileSHA256,
 			FileLength:    &resp.FileLength,
-			PTT:           proto.Bool(true),
+			Seconds:       &dur,
+			PTT:           proto.Bool(ptt),
 		}
+		if ptt {
+			if wf := generateWaveform(audioPath); wf != nil {
+				audioMsg.Waveform = wf
+			}
+		}
+		msg.AudioMessage = audioMsg
 	case whatsmeow.MediaDocument:
 		fileName := mediaPath[strings.LastIndex(mediaPath, "/")+1:]
 		msg.DocumentMessage = &waE2E.DocumentMessage{
@@ -530,4 +646,13 @@ func buildMediaMessageEx(wa *whatsmeow.Client, msg *waE2E.Message, mediaPath, ca
 	}
 
 	return nil
+}
+
+// buildAudioMessage uploads an audio file and returns a ready-to-send voice note message.
+func buildAudioMessage(wa *whatsmeow.Client, audioPath string, ptt bool) *waE2E.Message {
+	msg := &waE2E.Message{}
+	if err := buildMediaMessageEx(wa, msg, audioPath, "", true, ptt); err != nil {
+		return nil
+	}
+	return msg
 }

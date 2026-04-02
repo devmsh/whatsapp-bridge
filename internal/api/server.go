@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"whatsapp-bridge-v2/internal/config"
 	"whatsapp-bridge-v2/internal/db"
 	"whatsapp-bridge-v2/internal/wa"
 )
@@ -15,16 +16,18 @@ type Server struct {
 	mediaDir string
 	port     int
 	mux      *http.ServeMux
+	cfg      *config.Config
 }
 
 // NewServer creates a new API server.
-func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int) *Server {
+func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cfg *config.Config) *Server {
 	s := &Server{
 		store:    store,
 		client:   client,
 		mediaDir: mediaDir,
 		port:     port,
 		mux:      http.NewServeMux(),
+		cfg:      cfg,
 	}
 	s.registerRoutes()
 	return s
@@ -38,6 +41,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/send", s.handleSend)
 	s.mux.HandleFunc("/api/v2/reply", s.handleReply)
 	s.mux.HandleFunc("/api/v2/react", s.handleReact)
+	s.mux.HandleFunc("/api/v2/tts-send", s.handleTTSSend)
 	s.mux.HandleFunc("/api/v2/mention", s.handleMention)
 	s.mux.HandleFunc("/api/v2/forward", s.handleForward)
 
@@ -98,6 +102,7 @@ func (s *Server) registerRoutes() {
 	// Sync
 	s.mux.HandleFunc("/api/v2/sync/contacts", s.handleSyncContacts)
 	s.mux.HandleFunc("/api/v2/sync/history", s.handleSyncHistory)
+	s.mux.HandleFunc("/api/v2/sync/migrate-lid", s.handleSyncMigrateLID)
 	s.mux.HandleFunc("/api/v2/sync/state/", s.handleSyncState)
 }
 

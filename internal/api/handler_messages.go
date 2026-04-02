@@ -37,7 +37,17 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	msgs, err := s.store.GetMessages(chatJID, since, limit)
+	// Resolve LID↔phone mapping so we merge messages from both JIDs.
+	// WhatsApp's LID migration means the same DM conversation may be split
+	// across a phone JID and a LID JID.
+	chatJIDs := []string{chatJID}
+	if lid := s.client.ResolveLIDForJID(chatJID); lid != "" {
+		chatJIDs = append(chatJIDs, lid)
+	} else if pn := s.client.ResolvePhoneForLID(chatJID); pn != "" {
+		chatJIDs = append(chatJIDs, pn)
+	}
+
+	msgs, err := s.store.GetMessagesMerged(chatJIDs, since, limit)
 	if err != nil {
 		jsonError(w, 500, err.Error())
 		return

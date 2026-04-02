@@ -1,4 +1,6 @@
 store/
 whatsapp-bridge-v2
+whatsapp-bridge
 vendor/
 .DS_Store
+.env

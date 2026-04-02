@@ -1,6 +1,10 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+)
 
 // Message maps to the messages table.
 type Message struct {
@@ -73,7 +77,8 @@ func (s *Store) StoreMessage(m *Message) error {
 	return err
 }
 
-// GetMessages returns messages for a chat, ordered by timestamp descending.
+// GetMessages returns messages for a chat, ordered by timestamp descending (latest first),
+// then reversed to ascending order for the caller.
 func (s *Store) GetMessages(chatJID string, since int64, limit int) ([]Message, error) {
 	query := `SELECT id, chat_jid, sender, sender_name, push_name, content, timestamp,
 		is_from_me, is_group, message_type, device_id,
@@ -84,13 +89,67 @@ func (s *Store) GetMessages(chatJID string, since int64, limit int) ([]Message, 
 		reply_to_id, reply_to_sender, reply_to_content, mentions,
 		latitude, longitude, location_name, location_address,
 		vcard_name, vcard_data, poll_id, sticker_pack, broadcast_list_jid
-		FROM messages WHERE chat_jid = ? AND timestamp > ? ORDER BY timestamp ASC LIMIT ?`
+		FROM messages WHERE chat_jid = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT ?`
 	rows, err := s.DB.Query(query, chatJID, since, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMessages(rows)
+	msgs, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Reverse to return in ascending (chronological) order
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
+// GetMessagesMerged returns messages for a chat, merging results from multiple
+// chat JIDs (e.g. phone JID + LID) into a single timeline. This handles
+// WhatsApp's LID migration where the same conversation may be split across JIDs.
+func (s *Store) GetMessagesMerged(chatJIDs []string, since int64, limit int) ([]Message, error) {
+	if len(chatJIDs) == 0 {
+		return nil, nil
+	}
+	if len(chatJIDs) == 1 {
+		return s.GetMessages(chatJIDs[0], since, limit)
+	}
+	placeholders := make([]string, len(chatJIDs))
+	args := make([]interface{}, 0, len(chatJIDs)+2)
+	for i, jid := range chatJIDs {
+		placeholders[i] = "?"
+		args = append(args, jid)
+	}
+	args = append(args, since, limit)
+
+	query := fmt.Sprintf(`SELECT id, chat_jid, sender, sender_name, push_name, content, timestamp,
+		is_from_me, is_group, message_type, device_id,
+		is_ephemeral, is_view_once, is_forwarded, forward_score,
+		is_edit, edit_timestamp, original_id,
+		is_deleted, deleted_at, deleted_by,
+		media_type, media_path, media_mime, media_size, media_caption, media_filename, thumbnail_path,
+		reply_to_id, reply_to_sender, reply_to_content, mentions,
+		latitude, longitude, location_name, location_address,
+		vcard_name, vcard_data, poll_id, sticker_pack, broadcast_list_jid
+		FROM messages WHERE chat_jid IN (%s) AND timestamp > ? ORDER BY timestamp DESC LIMIT ?`,
+		strings.Join(placeholders, ","))
+
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	msgs, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Reverse to return in ascending (chronological) order
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
 }
 
 // GetMessage returns a single message by ID and chat JID.

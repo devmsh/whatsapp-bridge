@@ -42,6 +42,22 @@ func (s *Server) handleSyncHistory(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"status": "sync complete"})
 }
 
+func (s *Server) handleSyncMigrateLID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	count, err := wa.MigrateLIDMessages(s.client)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("migration failed: %v", err))
+		return
+	}
+	jsonOK(w, map[string]interface{}{
+		"status":   "ok",
+		"migrated": count,
+	})
+}
+
 func (s *Server) handleSyncState(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/api/v2/sync/state/")
 	if key == "" {

@@ -1,11 +1,13 @@
 package wa
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
 	"whatsapp-bridge-v2/internal/db"
@@ -21,6 +23,16 @@ func handleMessage(c *Client, evt *events.Message) {
 	chatJID := info.Chat.String()
 	senderJID := info.Sender.String()
 	ts := info.Timestamp.Unix()
+
+	// Resolve LID → phone JID so DM messages are stored under the phone number.
+	// WhatsApp's LID migration means incoming DMs may arrive with LID-based JIDs
+	// instead of phone-based JIDs, splitting conversations.
+	if info.Chat.Server == types.DefaultUserServer || info.Chat.Server == "lid" {
+		chatJID = resolveLIDToPhone(c, info.Chat, chatJID)
+	}
+	if info.Sender.Server == types.DefaultUserServer || info.Sender.Server == "lid" {
+		senderJID = resolveLIDToPhone(c, info.Sender, senderJID)
+	}
 
 	// Handle protocol messages: edits, revokes, ephemeral settings
 	if proto := msg.GetProtocolMessage(); proto != nil {
@@ -348,6 +360,25 @@ func handleProtocol(c *Client, chatJID, senderJID string, ts int64, msgID string
 			Timestamp: ts,
 		})
 	}
+}
+
+// resolveLIDToPhone converts a LID-based JID to a phone-based JID using whatsmeow's
+// LID map. Returns the original string if not a LID or if no mapping is found.
+func resolveLIDToPhone(c *Client, jid types.JID, fallback string) string {
+	if jid.Server != "lid" {
+		return fallback
+	}
+	// Strip device suffix for lookup (e.g. "53901906723060:10@lid" → "53901906723060@lid")
+	lookupJID := jid
+	lookupJID.Device = 0
+	lookupJID.RawAgent = 0
+
+	pn, err := c.WA.Store.LIDs.GetPNForLID(context.Background(), lookupJID)
+	if err != nil || pn.IsEmpty() {
+		c.Log.Debugf("No PN mapping for LID %s: %v", jid.String(), err)
+		return fallback
+	}
+	return pn.String()
 }
 
 func handleReaction(c *Client, chatJID, senderJID, pushName string, ts int64, reaction *waE2E.ReactionMessage) {
