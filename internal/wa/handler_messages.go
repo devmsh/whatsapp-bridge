@@ -106,6 +106,9 @@ func handleMessage(c *Client, evt *events.Message) {
 		return
 	}
 
+	// Broadcast to SSE listeners
+	c.Broadcaster.Publish(rec)
+
 	// Update chat
 	chatName := ""
 	if info.IsGroup {

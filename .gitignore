@@ -1,6 +1,13 @@
 store/
-whatsapp-bridge-v2
-whatsapp-bridge
+/whatsapp-bridge-v2
+/whatsapp-bridge
+/wa-watch
 vendor/
 .DS_Store
 .env
+
+# Personal transcripts / scratch
+3A5FC99E43BDF9C89972.*
+*.srt
+*.vtt
+*.tsv

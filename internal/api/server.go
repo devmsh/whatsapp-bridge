@@ -99,6 +99,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/scan/messages", s.handleScanMessages)
 	s.mux.HandleFunc("/api/v2/scan/groups", s.handleScanGroups)
 
+	// Stream (SSE real-time message push)
+	s.mux.HandleFunc("/api/v2/stream", s.handleStream)
+
 	// Sync
 	s.mux.HandleFunc("/api/v2/sync/contacts", s.handleSyncContacts)
 	s.mux.HandleFunc("/api/v2/sync/history", s.handleSyncHistory)

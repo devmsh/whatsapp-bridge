@@ -68,6 +68,44 @@ func toolTTSSend() mcp.Tool {
 	)
 }
 
+func toolMention() mcp.Tool {
+	return mcp.NewTool("wa_mention",
+		mcp.WithDescription("Send a WhatsApp message that mentions specific people. Automatically resolves phone numbers to JIDs/LIDs from the contacts database. Use this instead of wa_send whenever you need to @mention someone in a group."),
+		mcp.WithString("jid", mcp.Required(), mcp.Description("Chat JID to send to (e.g. group JID)")),
+		mcp.WithString("message", mcp.Required(), mcp.Description("Message text, include @phone_number for each mention (e.g. '@96171626971 check this out')")),
+		mcp.WithString("mentioned_phones", mcp.Required(), mcp.Description("Comma-separated phone numbers to mention (e.g. '96171626971,966535435254'). The tool resolves JIDs/LIDs automatically.")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint:    mcp.ToBoolPtr(false),
+			DestructiveHint: mcp.ToBoolPtr(false),
+		}),
+	)
+}
+
+func toolDelete() mcp.Tool {
+	return mcp.NewTool("wa_delete",
+		mcp.WithDescription("Delete (revoke) a WhatsApp message for everyone. Requires the bridge daemon to be running."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description("Chat JID where the message is")),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("ID of the message to delete")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint:    mcp.ToBoolPtr(false),
+			DestructiveHint: mcp.ToBoolPtr(true),
+		}),
+	)
+}
+
+func toolEdit() mcp.Tool {
+	return mcp.NewTool("wa_edit",
+		mcp.WithDescription("Edit a sent WhatsApp message. Requires the bridge daemon to be running."),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description("Chat JID where the message is")),
+		mcp.WithString("message_id", mcp.Required(), mcp.Description("ID of the message to edit")),
+		mcp.WithString("new_text", mcp.Required(), mcp.Description("New text content to replace the message with")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint:    mcp.ToBoolPtr(false),
+			DestructiveHint: mcp.ToBoolPtr(false),
+		}),
+	)
+}
+
 func toolMarkRead() mcp.Tool {
 	return mcp.NewTool("wa_mark_read",
 		mcp.WithDescription("Mark WhatsApp messages as read. Requires the bridge daemon to be running."),
@@ -175,6 +213,64 @@ func (s *Server) handleReact(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		"chat_jid":   chatJID,
 		"message_id": messageID,
 		"emoji":      emoji,
+	})
+}
+
+func (s *Server) handleMention(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	jid, _ := args["jid"].(string)
+	message, _ := args["message"].(string)
+	phonesStr, _ := args["mentioned_phones"].(string)
+	if jid == "" || message == "" || phonesStr == "" {
+		return mcp.NewToolResultError("jid, message, and mentioned_phones are required"), nil
+	}
+
+	phones := splitAndTrim(phonesStr)
+	mentionedJIDs := make([]string, 0, len(phones))
+	for _, phone := range phones {
+		// Try LID first, fall back to s.whatsapp.net JID
+		var lid string
+		err := s.db.QueryRowContext(ctx,
+			`SELECT lid FROM contacts WHERE jid = ? OR jid LIKE ? LIMIT 1`,
+			phone+"@s.whatsapp.net", phone+"%@s.whatsapp.net",
+		).Scan(&lid)
+		if err == nil && lid != "" {
+			mentionedJIDs = append(mentionedJIDs, lid+"@lid")
+		} else {
+			mentionedJIDs = append(mentionedJIDs, phone+"@s.whatsapp.net")
+		}
+	}
+
+	return s.postAPIAny("/mention", map[string]interface{}{
+		"chat_jid":       jid,
+		"message":        message,
+		"mentioned_jids": mentionedJIDs,
+	})
+}
+
+func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	chatJID, _ := args["chat_jid"].(string)
+	messageID, _ := args["message_id"].(string)
+	if chatJID == "" || messageID == "" {
+		return mcp.NewToolResultError("chat_jid and message_id are required"), nil
+	}
+	return s.postAPIAny(fmt.Sprintf("/messages/%s/revoke", messageID), map[string]string{
+		"chat_jid": chatJID,
+	})
+}
+
+func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	chatJID, _ := args["chat_jid"].(string)
+	messageID, _ := args["message_id"].(string)
+	newText, _ := args["new_text"].(string)
+	if chatJID == "" || messageID == "" || newText == "" {
+		return mcp.NewToolResultError("chat_jid, message_id, and new_text are required"), nil
+	}
+	return s.postAPIAny(fmt.Sprintf("/messages/%s/edit", messageID), map[string]string{
+		"chat_jid": chatJID,
+		"new_text": newText,
 	})
 }
 

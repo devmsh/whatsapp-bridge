@@ -18,12 +18,13 @@ import (
 
 // Client wraps whatsmeow.Client with our database store.
 type Client struct {
-	WA        *whatsmeow.Client
-	Store     *db.Store
-	MediaDir  string
-	Log       waLog.Logger
-	startTime time.Time
-	mu        sync.RWMutex
+	WA          *whatsmeow.Client
+	Store       *db.Store
+	MediaDir    string
+	Log         waLog.Logger
+	Broadcaster *Broadcaster
+	startTime   time.Time
+	mu          sync.RWMutex
 }
 
 // NewClient creates a new WhatsApp client backed by the given DB paths.
@@ -46,10 +47,11 @@ func NewClient(waDBPath string, store *db.Store, mediaDir string, logLevel strin
 	waClient := whatsmeow.NewClient(device, logger)
 
 	return &Client{
-		WA:       waClient,
-		Store:    store,
-		MediaDir: mediaDir,
-		Log:      logger,
+		WA:          waClient,
+		Store:       store,
+		MediaDir:    mediaDir,
+		Log:         logger,
+		Broadcaster: NewBroadcaster(),
 	}, nil
 }
 

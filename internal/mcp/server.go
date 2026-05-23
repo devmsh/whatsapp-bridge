@@ -66,6 +66,9 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 	srv.AddTool(toolSend(), s.handleSend)
 	srv.AddTool(toolReply(), s.handleReply)
 	srv.AddTool(toolReact(), s.handleReact)
+	srv.AddTool(toolMention(), s.handleMention)
+	srv.AddTool(toolDelete(), s.handleDelete)
+	srv.AddTool(toolEdit(), s.handleEdit)
 	srv.AddTool(toolMarkRead(), s.handleMarkRead)
 	srv.AddTool(toolTTSSend(), s.handleTTSSend)
 }
