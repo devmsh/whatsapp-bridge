@@ -85,6 +85,10 @@ func RegisterHandlers(c *Client) {
 			handleArchive(c, evt)
 		case *events.MarkChatAsRead:
 			handleMarkChatAsRead(c, evt)
+		case *events.DeleteForMe:
+			handleDeleteForMe(c, evt)
+		case *events.DeleteChat:
+			handleDeleteChat(c, evt)
 		case *events.AppStateSyncComplete:
 			handleAppStateSyncComplete(c, evt)
 

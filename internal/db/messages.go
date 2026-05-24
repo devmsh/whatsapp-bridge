@@ -220,6 +220,22 @@ func (s *Store) MarkDeleted(id, chatJID, deletedBy string, deletedAt int64) erro
 	return err
 }
 
+// MarkChatMessagesDeleted bulk-marks every non-deleted message in a chat as
+// deleted. Used when the user clears a chat from another device (DeleteChat
+// app-state event). Returns the count of rows affected.
+func (s *Store) MarkChatMessagesDeleted(chatJID, deletedBy string, deletedAt int64) (int64, error) {
+	res, err := s.DB.Exec(
+		`UPDATE messages SET is_deleted = 1, deleted_at = ?, deleted_by = ?
+		 WHERE chat_jid = ? AND is_deleted = 0`,
+		deletedAt, deletedBy, chatJID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // MarkEdited stores an edit of a message.
 func (s *Store) MarkEdited(id, chatJID, newContent string, editTS int64) error {
 	_, err := s.DB.Exec(
