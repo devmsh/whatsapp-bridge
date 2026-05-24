@@ -62,6 +62,16 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 	srv.AddTool(toolGroupInfo(), s.handleGroupInfo)
 	srv.AddTool(toolScan(), s.handleScan)
 
+	// Task tools (read DB + write via REST API)
+	srv.AddTool(toolCreateTask(), s.handleCreateTask)
+	srv.AddTool(toolLinkTaskMessage(), s.handleLinkTaskMessage)
+	srv.AddTool(toolListTasks(), s.handleListTasks)
+
+	// Circle + profile tools (read DB) for circle-level extraction
+	srv.AddTool(toolCircleInfo(), s.handleCircleInfo)
+	srv.AddTool(toolListCircles(), s.handleListCircles)
+	srv.AddTool(toolGetProfile(), s.handleGetProfile)
+
 	// Write tools (via REST API)
 	srv.AddTool(toolSend(), s.handleSend)
 	srv.AddTool(toolReply(), s.handleReply)

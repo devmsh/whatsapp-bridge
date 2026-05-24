@@ -1,0 +1,10 @@
+{
+  "name": "wa-task-extractor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Claude Agent SDK sidecar that extracts tasks from WhatsApp content via the bridge MCP server. Runs on a Claude subscription (no API key).",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest"
+  }
+}

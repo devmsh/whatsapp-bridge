@@ -16,6 +16,8 @@ import { initial, jidUser, previewText } from './format'
 import { CIRCLE_COLORS, pickColor } from './colors'
 import { CircleSettings } from './CircleSettings'
 import { TagChips, TagEditor } from './Tags'
+import { ProfileCard } from './ProfileCard'
+import { ExtractionsModal } from './Extractions'
 
 // Kind is the add-members picker mode; "all" searches groups + contacts together.
 type Kind = 'all' | MemberType
@@ -34,6 +36,7 @@ export function CircleView({
   onTagsChanged,
   onOpenChat,
   onOpenCircle,
+  onOpenTasks,
   onChanged,
   onDeleted,
 }: {
@@ -47,6 +50,7 @@ export function CircleView({
   onTagsChanged: () => void
   onOpenChat: (jid: string) => void
   onOpenCircle: (id: number) => void
+  onOpenTasks: (id: number) => void
   onChanged: () => void
   onDeleted: () => void
 }) {
@@ -65,6 +69,8 @@ export function CircleView({
   const [subBusy, setSubBusy] = useState(false)
   const [contactsEnriched, setContactsEnriched] = useState<CircleContact[]>([])
   const [expand, setExpand] = useState({ circles: false, groups: false, contacts: false })
+  const [extracting, setExtracting] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
 
   function reload() {
     return Promise.all([
@@ -253,6 +259,40 @@ export function CircleView({
           + Add
         </button>
         <button
+          onClick={async () => {
+            if (extracting) return
+            setExtracting(true)
+            try {
+              const r = await api.extractCircleTasks(circleId, circle.name)
+              onOpenTasks(circleId)
+              alert(`Extracted ${r.created} task(s) across the circle.\n\n${r.summary || ''}`)
+            } catch (e) {
+              alert('Circle extraction failed: ' + (e as Error).message)
+            } finally {
+              setExtracting(false)
+            }
+          }}
+          disabled={extracting}
+          className="shrink-0 rounded-lg bg-emerald-500/15 px-2 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-60"
+          title="Extract tasks across all chats in this circle (AI)"
+        >
+          {extracting ? 'Extracting…' : '✨ Extract'}
+        </button>
+        <button
+          onClick={() => setShowHistory(true)}
+          className="shrink-0 rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+          title="Past circle extraction runs and what the agent did"
+        >
+          🕘
+        </button>
+        <button
+          onClick={() => onOpenTasks(circleId)}
+          className="shrink-0 rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+          title="Tasks in this circle"
+        >
+          ✓ Tasks
+        </button>
+        <button
           onClick={() => setShowSettings(true)}
           className="shrink-0 rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
           title="Circle settings"
@@ -267,6 +307,8 @@ export function CircleView({
           🗑
         </button>
       </header>
+
+      <ProfileCard type="circle" ref_={String(circleId)} defaultOpen />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {visibleSugg.length === 0 && suggContext && (
@@ -533,6 +575,13 @@ export function CircleView({
             await reload()
             onChanged()
           }}
+        />
+      )}
+      {showHistory && (
+        <ExtractionsModal
+          title={'Circle: ' + circle.name}
+          fetchRuns={() => api.listCircleExtractions(circleId)}
+          onClose={() => setShowHistory(false)}
         />
       )}
     </div>

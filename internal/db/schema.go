@@ -261,4 +261,67 @@ CREATE TABLE IF NOT EXISTS contact_tags (
     FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_contact_tags_jid ON contact_tags(contact_jid);
+
+-- Tasks: work items built on top of WhatsApp content. A task can span multiple
+-- chats/groups (origin in one, completion in another) via task_messages.
+CREATE TABLE IF NOT EXISTS tasks (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    title             TEXT    NOT NULL,
+    description       TEXT    NOT NULL DEFAULT '',
+    status            TEXT    NOT NULL DEFAULT 'open',   -- open | in_progress | done | cancelled
+    priority          TEXT    NOT NULL DEFAULT 'normal', -- low | normal | high
+    assignee_jid      TEXT    NOT NULL DEFAULT '',
+    creator_jid       TEXT    NOT NULL DEFAULT '',
+    due_at            INTEGER NOT NULL DEFAULT 0,
+    completed_at      INTEGER NOT NULL DEFAULT 0,
+    origin_chat_jid   TEXT    NOT NULL DEFAULT '',
+    origin_message_id TEXT    NOT NULL DEFAULT '',
+    created_at        INTEGER NOT NULL DEFAULT 0,
+    updated_at        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_jid);
+
+-- task_messages links a task to messages across any chats (cross-chat tasks).
+CREATE TABLE IF NOT EXISTS task_messages (
+    task_id    INTEGER NOT NULL,
+    chat_jid   TEXT    NOT NULL,
+    message_id TEXT    NOT NULL DEFAULT '',
+    role       TEXT    NOT NULL DEFAULT 'related', -- origin | completion | comment | attachment | related
+    added_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (task_id, chat_jid, message_id, role),
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_task_messages_task ON task_messages(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_messages_chat ON task_messages(chat_jid);
+CREATE INDEX IF NOT EXISTS idx_task_messages_msg ON task_messages(message_id, chat_jid);
+
+-- task_circles pins a task to circles.
+CREATE TABLE IF NOT EXISTS task_circles (
+    task_id   INTEGER NOT NULL,
+    circle_id INTEGER NOT NULL,
+    added_at  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (task_id, circle_id),
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (circle_id) REFERENCES circles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_task_circles_circle ON task_circles(circle_id);
+
+-- entity_profiles: an AI-written (and user-editable) "purpose" description for
+-- each circle, group, and contact/DM. Used as context for task extraction.
+-- Refreshed on a 7-working-day cadence; a manual edit pins source='manual'.
+CREATE TABLE IF NOT EXISTS entity_profiles (
+    entity_type        TEXT    NOT NULL,            -- 'circle' | 'group' | 'contact'
+    entity_ref         TEXT    NOT NULL,            -- JID for group/contact; circle id for circle
+    description        TEXT    NOT NULL DEFAULT '',
+    source             TEXT    NOT NULL DEFAULT 'auto', -- 'auto' | 'manual'
+    msg_count_at_gen   INTEGER NOT NULL DEFAULT 0,   -- message count when last generated (staleness by activity)
+    status             TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'ok' | 'empty' | 'error'
+    error              TEXT    NOT NULL DEFAULT '',
+    generated_at       INTEGER NOT NULL DEFAULT 0,
+    updated_at         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (entity_type, entity_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_generated ON entity_profiles(generated_at);
+CREATE INDEX IF NOT EXISTS idx_profiles_status ON entity_profiles(status);
 `

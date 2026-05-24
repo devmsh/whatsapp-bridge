@@ -1,5 +1,6 @@
 import type { Message } from '../api'
 import { clockTime, humanSize, mediaURL, senderTitle } from './format'
+import { MessageTaskButton } from './MessageTaskButton'
 
 // MessageBubble renders one message: alignment, sender (in groups), reply
 // preview, media, text, reactions, and edited/deleted/forwarded markers.
@@ -7,10 +8,14 @@ export function MessageBubble({
   msg,
   group,
   nameMap,
+  onOpenTask,
+  onTasksChanged,
 }: {
   msg: Message
   group: boolean
   nameMap: Map<string, string>
+  onOpenTask?: (id: number) => void
+  onTasksChanged?: () => void
 }) {
   const mine = msg.is_from_me
   const sender = group && !mine ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap) : ''
@@ -19,7 +24,7 @@ export function MessageBubble({
     <div className={'flex ' + (mine ? 'justify-end' : 'justify-start')}>
       <div
         className={
-          'max-w-[78%] rounded-2xl px-3 py-2 text-sm ' +
+          'group max-w-[78%] rounded-2xl px-3 py-2 text-sm ' +
           (mine ? 'bg-emerald-700/40' : 'bg-neutral-800')
         }
       >
@@ -59,6 +64,15 @@ export function MessageBubble({
         )}
 
         <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-neutral-400">
+          {onOpenTask && (
+            <MessageTaskButton
+              chatJID={msg.chat_jid}
+              messageID={msg.id}
+              defaultTitle={msg.content || msg.media_caption || ''}
+              onOpenTask={onOpenTask}
+              onChanged={onTasksChanged || (() => {})}
+            />
+          )}
           {msg.is_edit && <span className="italic">edited</span>}
           <span>{clockTime(msg.timestamp)}</span>
         </div>

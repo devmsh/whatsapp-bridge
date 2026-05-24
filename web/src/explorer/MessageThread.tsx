@@ -4,6 +4,8 @@ import { chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser } from '.
 import { MessageBubble } from './MessageBubble'
 import { ChatCircles } from './ChatCircles'
 import { TagChips, TagEditor } from './Tags'
+import { ExtractionsModal } from './Extractions'
+import { ProfileCard } from './ProfileCard'
 
 const PAGE = 100
 
@@ -19,6 +21,9 @@ export function MessageThread({
   contactTags,
   onCirclesChanged,
   onTagsChanged,
+  onOpenTask,
+  onTasksChanged,
+  onOpenChatTasks,
   onSent,
 }: {
   jid: string
@@ -30,12 +35,17 @@ export function MessageThread({
   contactTags: Record<string, Tag[]>
   onCirclesChanged: () => void
   onTagsChanged: () => void
+  onOpenTask: (id: number) => void
+  onTasksChanged: () => void
+  onOpenChatTasks: (jid: string) => void
   onSent?: (m: Message) => void
 }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [limit, setLimit] = useState(PAGE)
   const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -136,8 +146,49 @@ export function MessageThread({
             onChanged={onTagsChanged}
           />
         )}
+        {group && (
+          <button
+            onClick={async () => {
+              if (extracting) return
+              setExtracting(true)
+              try {
+                const r = await api.extractTasks(jid, title)
+                onTasksChanged()
+                onOpenChatTasks(jid)
+                alert(`Extracted ${r.created} task(s).\n\n${r.summary || ''}`)
+              } catch (e) {
+                alert('Extraction failed: ' + (e as Error).message)
+              } finally {
+                setExtracting(false)
+              }
+            }}
+            disabled={extracting}
+            className="shrink-0 rounded-lg bg-emerald-500/15 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 disabled:opacity-60"
+            title="Extract tasks from this group with AI"
+          >
+            {extracting ? 'Extracting…' : '✨ Extract tasks'}
+          </button>
+        )}
+        {group && (
+          <button
+            onClick={() => setShowHistory(true)}
+            className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800"
+            title="See past extraction runs and what the agent did"
+          >
+            🕘 History
+          </button>
+        )}
+        <button
+          onClick={() => onOpenChatTasks(jid)}
+          className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800"
+          title="Tasks in this chat"
+        >
+          ✓ Tasks
+        </button>
         <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
       </header>
+
+      {(group || isContact) && <ProfileCard type={group ? 'group' : 'contact'} ref_={jid} />}
 
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {loading && messages.length === 0 ? (
@@ -156,12 +207,26 @@ export function MessageThread({
                 </button>
               </div>
             )}
-            <Timeline messages={messages} group={group} nameMap={nameMap} />
+            <Timeline
+              messages={messages}
+              group={group}
+              nameMap={nameMap}
+              onOpenTask={onOpenTask}
+              onTasksChanged={onTasksChanged}
+            />
           </>
         )}
       </div>
 
       {canSend && <Composer jid={jid} group={group} onSent={handleSent} />}
+
+      {showHistory && (
+        <ExtractionsModal
+          title={title}
+          fetchRuns={() => api.listExtractions(jid)}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
     </div>
   )
 }
@@ -259,10 +324,14 @@ function Timeline({
   messages,
   group,
   nameMap,
+  onOpenTask,
+  onTasksChanged,
 }: {
   messages: Message[]
   group: boolean
   nameMap: Map<string, string>
+  onOpenTask: (id: number) => void
+  onTasksChanged: () => void
 }) {
   let lastDay = ''
   return (
@@ -280,7 +349,13 @@ function Timeline({
                 </span>
               </div>
             )}
-            <MessageBubble msg={m} group={group} nameMap={nameMap} />
+            <MessageBubble
+              msg={m}
+              group={group}
+              nameMap={nameMap}
+              onOpenTask={onOpenTask}
+              onTasksChanged={onTasksChanged}
+            />
           </div>
         )
       })}

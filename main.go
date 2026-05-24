@@ -84,6 +84,9 @@ func main() {
 	// Start periodic sync (every 6 hours)
 	wa.StartPeriodicSync(client, 6*time.Hour)
 
+	// Start background entity profiling (purpose descriptions + 7-working-day refresh)
+	server.StartProfiler()
+
 	fmt.Printf("Bridge running. Open the GUI at http://localhost:%d/\n", cfg.Port)
 
 	// Wait for shutdown signal

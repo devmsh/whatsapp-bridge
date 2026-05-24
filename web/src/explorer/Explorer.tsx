@@ -16,10 +16,13 @@ import { ContactsPanel } from './ContactsPanel'
 import { CirclesPanel } from './CirclesPanel'
 import { CircleView } from './CircleView'
 import { RecommendationsView } from './RecommendationsView'
+import { TasksPanel } from './TasksPanel'
+import { TaskView } from './TaskView'
 import { MessageThread } from './MessageThread'
 import { MediaSettings } from '../Settings'
+import { ProfilingStatusModal } from './ProfilingStatus'
 
-type Tab = 'chats' | 'contacts' | 'circles'
+type Tab = 'chats' | 'contacts' | 'circles' | 'tasks'
 
 // Explorer is the main app after onboarding: a chat list / contacts sidebar and
 // a message thread, with live updates over SSE.
@@ -35,8 +38,13 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [selectedCircle, setSelectedCircle] = useState<number | null>(null)
   const [recoOpen, setRecoOpen] = useState(false)
+  const [selectedTask, setSelectedTask] = useState<number | null>(null)
+  const [taskChatFilter, setTaskChatFilter] = useState<string | null>(null)
+  const [taskCircleFilter, setTaskCircleFilter] = useState<number | null>(null)
+  const [taskVersion, setTaskVersion] = useState(0)
   const [liveMsg, setLiveMsg] = useState<Message | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showProfiling, setShowProfiling] = useState(false)
 
   const selectedRef = useRef<string | null>(null)
   selectedRef.current = selected
@@ -99,10 +107,47 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     }
   }, [])
 
+  const bumpTasks = useCallback(() => setTaskVersion((v) => v + 1), [])
+
   const openChat = useCallback((jid: string) => {
     setRecoOpen(false)
+    setSelectedTask(null)
     setSelected(jid)
     setChats((prev) => prev.map((c) => (c.jid === jid ? { ...c, unread_count: 0 } : c)))
+  }, [])
+
+  const openTask = useCallback((id: number) => {
+    setRecoOpen(false)
+    setSelected(null)
+    setSelectedCircle(null)
+    setSelectedTask(id)
+    setTab('tasks')
+  }, [])
+
+  const openChatTasks = useCallback((jid: string) => {
+    setRecoOpen(false)
+    setSelected(null)
+    setSelectedCircle(null)
+    setSelectedTask(null)
+    setTaskCircleFilter(null)
+    setTaskChatFilter(jid)
+    setTab('tasks')
+  }, [])
+
+  const openCircleTasks = useCallback((id: number) => {
+    setRecoOpen(false)
+    setSelected(null)
+    setSelectedCircle(null)
+    setSelectedTask(null)
+    setTaskChatFilter(null)
+    setTaskCircleFilter(id)
+    setTab('tasks')
+  }, [])
+
+  const clearTaskFilter = useCallback(() => {
+    setTaskChatFilter(null)
+    setTaskCircleFilter(null)
+    setSelectedTask(null)
   }, [])
 
   const openContactDM = useCallback(
@@ -118,18 +163,21 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const openCircle = useCallback((id: number) => {
     setRecoOpen(false)
     setSelected(null)
+    setSelectedTask(null)
     setSelectedCircle(id)
   }, [])
 
   const openReco = useCallback(() => {
     setSelected(null)
     setSelectedCircle(null)
+    setSelectedTask(null)
     setRecoOpen(true)
   }, [])
 
   return (
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
+      {showProfiling && <ProfilingStatusModal onClose={() => setShowProfiling(false)} />}
 
       <aside className="flex w-80 shrink-0 flex-col border-r border-neutral-800">
         <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
@@ -145,6 +193,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <IconButton title="Profiles & AI context" onClick={() => setShowProfiling(true)}>
+              🧠
+            </IconButton>
             <IconButton title="Media settings" onClick={() => setShowSettings(true)}>
               ⚙
             </IconButton>
@@ -163,6 +214,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           </TabButton>
           <TabButton active={tab === 'circles'} onClick={() => setTab('circles')}>
             Circles
+          </TabButton>
+          <TabButton active={tab === 'tasks'} onClick={() => setTab('tasks')}>
+            Tasks
           </TabButton>
         </div>
 
@@ -193,6 +247,20 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             }}
           />
         )}
+        {tab === 'tasks' && (
+          <TasksPanel
+            chats={chats}
+            nameMap={nameMap}
+            chatFilter={taskChatFilter}
+            circleFilter={taskCircleFilter}
+            circleName={circles.find((c) => c.id === taskCircleFilter)?.name || ''}
+            selected={selectedTask}
+            version={taskVersion}
+            onOpen={openTask}
+            onCreated={bumpTasks}
+            onClearFilter={clearTaskFilter}
+          />
+        )}
       </aside>
 
       <main className="min-w-0 flex-1">
@@ -209,7 +277,21 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             contactTags={contactTags}
             onCirclesChanged={reloadCircles}
             onTagsChanged={reloadTags}
+            onOpenTask={openTask}
+            onTasksChanged={bumpTasks}
+            onOpenChatTasks={openChatTasks}
             onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
+          />
+        ) : selectedTask != null ? (
+          <TaskView
+            taskId={selectedTask}
+            contacts={contacts}
+            circles={circles}
+            nameMap={nameMap}
+            version={taskVersion}
+            onOpenChat={openChat}
+            onChanged={bumpTasks}
+            onDeleted={() => setSelectedTask(null)}
           />
         ) : selectedCircle != null ? (
           <CircleView
@@ -223,6 +305,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onTagsChanged={reloadTags}
             onOpenChat={openChat}
             onOpenCircle={openCircle}
+            onOpenTasks={openCircleTasks}
             onChanged={reloadCircles}
             onDeleted={() => setSelectedCircle(null)}
           />

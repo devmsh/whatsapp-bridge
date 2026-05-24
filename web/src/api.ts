@@ -178,6 +178,99 @@ export interface Tag {
   created_at: number
 }
 
+export type TaskStatus = 'open' | 'in_progress' | 'done' | 'cancelled'
+
+export interface Task {
+  id: number
+  title: string
+  description: string
+  status: TaskStatus
+  priority: string
+  assignee_jid: string
+  creator_jid: string
+  due_at: number
+  completed_at: number
+  origin_chat_jid: string
+  origin_message_id: string
+  created_at: number
+  updated_at: number
+  message_count: number
+  circle_ids?: number[]
+}
+
+export interface TaskMessageLink {
+  task_id: number
+  chat_jid: string
+  message_id: string
+  role: string
+  added_at: number
+  sender?: string
+  sender_name?: string
+  push_name?: string
+  content?: string
+  timestamp?: number
+  is_from_me?: boolean
+  is_group?: boolean
+  media_type?: string
+  media_path?: string
+}
+
+export interface TaskDetail {
+  task: Task
+  messages: TaskMessageLink[]
+}
+
+// One past extraction run, read from the Agent SDK session store (no DB).
+export interface ExtractionRun {
+  session_id: string
+  title: string
+  first_prompt: string
+  last_modified: number
+  created_at: number
+}
+
+// One step in a run's transcript: agent reasoning, a tool call, or its result.
+export interface ExtractionStep {
+  type: 'assistant_text' | 'text' | 'tool_use' | 'tool_result'
+  text?: string
+  name?: string
+  input?: unknown
+  is_error?: boolean
+  content?: string
+}
+
+export type ProfileEntityType = 'circle' | 'group' | 'contact'
+
+// An AI-written (and user-editable) purpose description for an entity.
+export interface EntityProfile {
+  entity_type: ProfileEntityType
+  entity_ref: string
+  description: string
+  source: 'auto' | 'manual'
+  msg_count_at_gen: number
+  status: 'pending' | 'ok' | 'empty' | 'error'
+  error?: string
+  generated_at: number
+  updated_at: number
+}
+
+export interface ProfileStats {
+  total: number
+  ok: number
+  empty: number
+  error: number
+  pending: number
+  manual: number
+  stale: number
+  queue_size: number
+}
+
+export interface ProfilesStatus {
+  stats: ProfileStats
+  active: string
+  enabled: boolean
+}
+
 export interface CircleContact {
   jid: string
   group_count: number
@@ -346,6 +439,89 @@ export const api = {
     postBody<Tag[]>(`/api/v2/contacts/${encodeURIComponent(jid)}/tags`, body),
   unassignTag: (jid: string, tagId: number) =>
     del(`/api/v2/contacts/${encodeURIComponent(jid)}/tags`, { tag_id: tagId }),
+
+  // --- tasks ---
+  tasks: async (params: { status?: string; chat?: string; circle?: number } = {}): Promise<Task[]> => {
+    const q = new URLSearchParams()
+    if (params.status) q.set('status', params.status)
+    if (params.chat) q.set('chat', params.chat)
+    if (params.circle) q.set('circle', String(params.circle))
+    const res = await fetch('/api/v2/tasks' + (q.toString() ? `?${q}` : ''))
+    return res.json()
+  },
+  createTask: (body: {
+    title: string
+    assignee_jid?: string
+    due_at?: number
+    origin_chat_jid?: string
+    origin_message_id?: string
+    circle_id?: number
+  }) => postBody<Task>('/api/v2/tasks', body),
+  getTask: async (id: number): Promise<TaskDetail> => {
+    const res = await fetch(`/api/v2/tasks/${id}`)
+    return res.json()
+  },
+  updateTask: (
+    id: number,
+    body: Partial<{
+      title: string
+      description: string
+      status: TaskStatus
+      priority: string
+      assignee_jid: string
+      due_at: number
+    }>,
+  ) => putJSON<Task>(`/api/v2/tasks/${id}`, body),
+  deleteTask: (id: number) => del(`/api/v2/tasks/${id}`),
+  linkTaskMessage: (id: number, body: { chat_jid: string; message_id: string; role: string }) =>
+    postBody<{ success: boolean }>(`/api/v2/tasks/${id}/messages`, body),
+  unlinkTaskMessage: (id: number, body: { chat_jid: string; message_id: string; role: string }) =>
+    del(`/api/v2/tasks/${id}/messages`, body),
+  addTaskCircle: (id: number, circleId: number) =>
+    postBody<{ success: boolean }>(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
+  extractTasks: (chatJid: string, groupName?: string) =>
+    postBody<{ ok: boolean; created: number; summary: string; session_id: string }>(
+      '/api/v2/tasks/extract',
+      { chat_jid: chatJid, group_name: groupName },
+    ),
+  listExtractions: async (chatJid: string): Promise<ExtractionRun[]> => {
+    const res = await fetch('/api/v2/extractions?chat=' + encodeURIComponent(chatJid))
+    const data = await res.json()
+    return data.runs || []
+  },
+  listCircleExtractions: async (circleId: number): Promise<ExtractionRun[]> => {
+    const res = await fetch('/api/v2/extractions?circle=' + circleId)
+    const data = await res.json()
+    return data.runs || []
+  },
+  extractCircleTasks: (circleId: number, name?: string) =>
+    postBody<{ ok: boolean; created: number; summary: string; session_id: string }>(
+      `/api/v2/circles/${circleId}/extract`,
+      { name },
+    ),
+  extractionTranscript: async (sessionId: string): Promise<ExtractionStep[]> => {
+    const res = await fetch('/api/v2/extractions/transcript?session=' + encodeURIComponent(sessionId))
+    const data = await res.json()
+    return data.steps || []
+  },
+
+  // Entity profiles (purpose descriptions).
+  getProfile: async (type: ProfileEntityType, ref: string): Promise<EntityProfile | null> => {
+    const q = `type=${type}&ref=${encodeURIComponent(ref)}`
+    const res = await fetch('/api/v2/profiles?' + q)
+    return res.json()
+  },
+  saveProfile: (type: ProfileEntityType, ref: string, description: string) =>
+    putJSON<EntityProfile>('/api/v2/profiles', { type, ref, description }),
+  regenerateProfile: (type: ProfileEntityType, ref: string) =>
+    postBody<{ queued: boolean }>('/api/v2/profiles/regenerate', { type, ref }),
+  profilesStatus: async (): Promise<ProfilesStatus> => {
+    const res = await fetch('/api/v2/profiles/status')
+    return res.json()
+  },
+  startProfiling: () => postBody<{ enabled: boolean }>('/api/v2/profiles/status', {}),
+  removeTaskCircle: (id: number, circleId: number) =>
+    del(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
   deleteCircle: (id: number) => del(`/api/v2/circles/${id}`),
   addCircleMember: (id: number, member_type: MemberType, member_ref: string) =>
     postBody<{ success: boolean }>(`/api/v2/circles/${id}/members`, { member_type, member_ref }),

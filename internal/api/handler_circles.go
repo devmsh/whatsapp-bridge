@@ -213,6 +213,8 @@ func (s *Server) handleCircleByID(w http.ResponseWriter, r *http.Request) {
 		s.handleCircleSuggestions(w, r, id)
 	case "contacts":
 		s.handleCircleContacts(w, r, id)
+	case "extract":
+		s.handleCircleExtract(w, r, id)
 	default:
 		s.handleCircleEntity(w, r, id)
 	}

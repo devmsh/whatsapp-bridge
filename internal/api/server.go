@@ -20,6 +20,12 @@ type Server struct {
 	cfg        *config.Config
 	webFS      fs.FS
 	fileServer http.Handler
+	profiles   *ProfileManager
+}
+
+// StartProfiler starts the background entity-profiling worker and daily refresh.
+func (s *Server) StartProfiler() {
+	s.profiles.Start()
 }
 
 // NewServer creates a new API server. webFS is the embedded web UI (may be nil).
@@ -36,6 +42,7 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 	if webFS != nil {
 		s.fileServer = http.FileServerFS(webFS)
 	}
+	s.profiles = newProfileManager(s)
 	s.registerRoutes()
 	return s
 }
@@ -127,6 +134,20 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/circles/recommendations/restore", s.handleRecRestore)
 	s.mux.HandleFunc("/api/v2/circles/for-member", s.handleCircleForMember)
 	s.mux.HandleFunc("/api/v2/circles/", s.handleCircleByID)
+
+	// Tasks (work items on top of WhatsApp content)
+	s.mux.HandleFunc("/api/v2/tasks", s.handleTasks)
+	s.mux.HandleFunc("/api/v2/tasks/extract", s.handleTaskExtract)
+	s.mux.HandleFunc("/api/v2/tasks/", s.handleTaskByID)
+
+	// Extraction history (read straight from the Agent SDK session store, no DB)
+	s.mux.HandleFunc("/api/v2/extractions", s.handleExtractions)
+	s.mux.HandleFunc("/api/v2/extractions/transcript", s.handleExtractionTranscript)
+
+	// Entity profiles (AI-written purpose descriptions; background-refreshed)
+	s.mux.HandleFunc("/api/v2/profiles", s.handleProfile)
+	s.mux.HandleFunc("/api/v2/profiles/regenerate", s.handleProfileRegenerate)
+	s.mux.HandleFunc("/api/v2/profiles/status", s.handleProfilesStatus)
 
 	// Stats
 	s.mux.HandleFunc("/api/v2/stats/messages", s.handleStatsMessages)
