@@ -42,7 +42,7 @@ export function TaskView({
   circles: Circle[]
   nameMap: Map<string, string>
   version: number
-  onOpenChat: (jid: string) => void
+  onOpenChat: (jid: string, draft?: string) => void
   onChanged: () => void
   onDeleted: () => void
 }) {
@@ -182,6 +182,45 @@ export function TaskView({
           🗑
         </button>
       </header>
+
+      {/* Quick actions */}
+      <div className="flex flex-wrap gap-2 border-b border-neutral-800 bg-neutral-900/40 px-5 py-2 text-xs">
+        <button
+          disabled={!task.assignee_jid}
+          onClick={() => {
+            const who = assigneeName || 'there'
+            const due = task.due_at
+              ? ` (due ${new Date(task.due_at * 1000).toLocaleDateString()})`
+              : ''
+            const draft = `Hi ${who}, quick reminder: ${task.title}${due}.`
+            onOpenChat(task.assignee_jid, draft)
+          }}
+          className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+          title={
+            task.assignee_jid
+              ? 'Message the assignee with a reminder draft'
+              : 'No assignee set'
+          }
+        >
+          💬 Nudge {assigneeName ? assigneeName.split(' ')[0] : ''}
+        </button>
+        <button
+          disabled={!task.origin_chat_jid}
+          onClick={() => onOpenChat(task.origin_chat_jid)}
+          className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Open the chat where this task started"
+        >
+          ↩ Reply in origin
+        </button>
+        <button
+          disabled={task.status === 'done'}
+          onClick={() => patch({ status: 'done' })}
+          className="rounded border border-emerald-700 px-2 py-1 text-emerald-300 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+          title="Mark this task done"
+        >
+          ✓ Mark done
+        </button>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         {/* assignee + circles */}

@@ -1,17 +1,25 @@
-import { useEffect, useState } from 'react'
-import { api, type ExtractionRun, type ExtractionStep } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import {
+  api,
+  type ExtractionRun,
+  type ExtractionRunEvent,
+  type ExtractionRunState,
+  type ExtractionStep,
+} from '../api'
 
-// ExtractionsModal shows the history of AI task-extraction runs for one chat,
-// read straight from the Claude Agent SDK session store (no app DB). Picking a
-// run loads its full transcript: the agent's reasoning, every MCP tool call
-// with its arguments, and each tool's response.
+// ExtractionsModal shows extraction-run state for a chat or circle.
+// - If `liveRunId` is provided, it shows the LIVE run (SSE, with cancel).
+//   Once that run finishes it switches to showing its session transcript.
+// - Otherwise it lists past runs and lets you open any one's transcript.
 export function ExtractionsModal({
   title,
   fetchRuns,
+  liveRunId,
   onClose,
 }: {
   title: string
   fetchRuns: () => Promise<ExtractionRun[]>
+  liveRunId?: string | null
   onClose: () => void
 }) {
   const [runs, setRuns] = useState<ExtractionRun[] | null>(null)
@@ -72,7 +80,9 @@ export function ExtractionsModal({
           </div>
 
           <div className="min-w-0 flex-1 overflow-y-auto">
-            {selected ? (
+            {liveRunId ? (
+              <LiveRun runId={liveRunId} onSessionReady={(sid) => setSelected(sid)} />
+            ) : selected ? (
               <Transcript sessionId={selected} />
             ) : (
               <div className="p-6 text-sm text-neutral-600">
@@ -137,6 +147,137 @@ function Step({ step }: { step: ExtractionStep }) {
   // tool_result
   return (
     <ToolResult step={step} />
+  )
+}
+
+// LiveRun streams an in-progress extraction over SSE: state, every tool call,
+// agent text lines, and a final result/error. When the run completes and a
+// session_id is known, it calls onSessionReady so the parent can flip to the
+// historical transcript view (richer detail than the live stream).
+function LiveRun({
+  runId,
+  onSessionReady,
+}: {
+  runId: string
+  onSessionReady: (sessionId: string) => void
+}) {
+  const [state, setState] = useState<Partial<ExtractionRunState>>({})
+  const [events, setEvents] = useState<ExtractionRunEvent[]>([])
+  const [cancelling, setCancelling] = useState(false)
+  const sessionFiredRef = useRef(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const es = new EventSource(api.runStreamURL(runId))
+    es.addEventListener('state', (ev: MessageEvent) => {
+      try {
+        const next = JSON.parse(ev.data) as Partial<ExtractionRunState>
+        setState((prev) => ({ ...prev, ...next }))
+        if (next.session_id && !sessionFiredRef.current) {
+          sessionFiredRef.current = true
+          // Defer slightly so we don't yank the user away mid-stream.
+          const terminal = next.status === 'done' || next.status === 'failed' || next.status === 'cancelled'
+          if (terminal) setTimeout(() => onSessionReady(next.session_id!), 600)
+        }
+      } catch {}
+    })
+    es.addEventListener('event', (ev: MessageEvent) => {
+      try {
+        const e = JSON.parse(ev.data) as ExtractionRunEvent
+        setEvents((prev) => [...prev, e])
+      } catch {}
+    })
+    es.addEventListener('end', () => es.close())
+    es.onerror = () => es.close()
+    return () => es.close()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [events.length])
+
+  async function cancel() {
+    setCancelling(true)
+    try { await api.cancelRun(runId) } finally { setCancelling(false) }
+  }
+
+  const live = state.status === 'starting' || state.status === 'running'
+  const toolCount = events.filter((e) => e.kind === 'tool').length
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-3 border-b border-neutral-800 px-5 py-3 text-xs">
+        <span
+          className={
+            'inline-flex h-2 w-2 rounded-full ' +
+            (live ? 'animate-pulse bg-emerald-400' : state.status === 'done' ? 'bg-emerald-500' : state.status === 'cancelled' ? 'bg-amber-500' : 'bg-red-500')
+          }
+        />
+        <span className="font-medium text-neutral-200">
+          {state.status === 'done'
+            ? 'Done'
+            : state.status === 'cancelled'
+              ? 'Cancelled'
+              : state.status === 'failed'
+                ? 'Failed'
+                : 'Running…'}
+        </span>
+        <span className="text-neutral-500">
+          {toolCount} tool calls · {state.created ?? 0} task{(state.created ?? 0) === 1 ? '' : 's'} created
+        </span>
+        <div className="ml-auto flex gap-2">
+          {live && (
+            <button
+              onClick={cancel}
+              disabled={cancelling}
+              className="rounded border border-red-800 px-2 py-1 text-[11px] text-red-300 hover:bg-red-900/30 disabled:opacity-50"
+            >
+              {cancelling ? 'Cancelling…' : '✕ Cancel'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {events.length === 0 ? (
+          <div className="text-sm text-neutral-600">Waiting for the agent to start…</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {events.map((e) => (
+              <LiveEvent key={e.seq} ev={e} />
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        )}
+        {state.summary && !live && (
+          <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-neutral-500">Summary</div>
+            <div dir="auto" className="mt-1 whitespace-pre-wrap text-xs text-neutral-200">
+              {state.summary}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function LiveEvent({ ev }: { ev: ExtractionRunEvent }) {
+  if (ev.kind === 'tool') {
+    return (
+      <div className="rounded-md border border-sky-900/60 bg-sky-950/30 px-3 py-1.5 text-xs">
+        <span className="font-semibold text-sky-300">→ {ev.name}</span>
+      </div>
+    )
+  }
+  if (ev.kind === 'error') {
+    return <div className="text-xs text-red-400">{ev.text}</div>
+  }
+  return (
+    <div dir="auto" className="whitespace-pre-wrap text-xs leading-relaxed text-neutral-300">
+      {ev.text}
+    </div>
   )
 }
 

@@ -32,7 +32,9 @@ TOOLS (MCP server "whatsapp"):
 - wa_list_circles(): all OTHER circles with their purpose + keywords. Use to recognize when a DM message belongs to a DIFFERENT circle.
 - wa_get_profile(entity_type, ref): purpose description for a group/contact/circle.
 - wa_group_info(jid): a group's participants (names + admin). Resolve mentioned numbers to names; know who is IN the group.
-- wa_scan(since, chat_jid): bulk-read a chat oldest→newest (since=1 = full history). Paginate with a later "since" if it returns the limit.
+- wa_scan(since, chat_jid, limit): read a chat oldest→newest. Pages of up to 500 messages. If response has "truncated":true, call again with since=response.next_since until truncated is false.
+- wa_chat_since(chat_jid): the timestamp from which to start scanning this chat for THIS run. First-time runs return 1 (full history); follow-up runs return the watermark from the previous successful extraction (incremental — much cheaper). ALWAYS call this BEFORE wa_scan to pick the right "since".
+- wa_mark_extracted(chat_jid): call this AFTER you've finished scanning a chat (all pages). It advances the watermark to the chat's current max timestamp so the next run only sees newer messages.
 - wa_read_messages(chat_jid, since, limit, search): targeted reads.
 - wa_find_contact(query): resolve a name/number/JID (for people NOT in a group — "external" people).
 - wa_search_messages(query, chat_jid?): search message text across ALL chats. Use to TRACE a forwarded/echoed message into another chat.
@@ -42,7 +44,7 @@ TOOLS (MCP server "whatsapp"):
 
 ALGORITHM (follow exactly):
 1. Call wa_circle_info(${circleId}) to learn the circle's PURPOSE and the chats to read. Call wa_list_circles() to learn the OTHER circles (their purpose + keywords) — you need these to disambiguate shared people later.
-2. Read the chats, most-active first. For each GROUP: wa_group_info(jid) then wa_scan(since:1, chat_jid:jid). For each DM: wa_scan(since:1, chat_jid:jid).
+2. Read the chats, most-active first. For each chat: FIRST call wa_chat_since(chat_jid) to learn the right "since" timestamp. For groups call wa_group_info(jid) too. Then wa_scan(since:<that timestamp>, chat_jid:jid). If the response is truncated, keep paging via next_since until truncated is false. After you finish a chat, call wa_mark_extracted(chat_jid).
 3. DM DISAMBIGUATION (important): a DM partner may belong to several circles. For each DM message, judge whether it concerns THIS circle's purpose (use this circle's description/keywords) or a DIFFERENT circle (compare against the other circles from wa_list_circles and the DM's own profile). KEEP only messages relevant to THIS circle. Do NOT mix in tasks that clearly belong to another circle.
 4. Build ONE cross-chat understanding. The chat is noisy and several tasks run in parallel — distinguish and SPLIT them. A single message may update MULTIPLE tasks. Go chronologically; for each message consider its OWNER (sender), the TEXT, and MENTIONS (resolve to names).
 5. A task may START in one chat and be UPDATED or COMPLETED in a DIFFERENT chat (another group or a DM). Set origin_chat_jid to where it STARTED. Link later messages with their role and their OWN chat_jid — so the task records that the update/completion came from a different place.
@@ -76,6 +78,15 @@ const response = query({
       'mcp__whatsapp__wa_list_tasks',
       'mcp__whatsapp__wa_create_task',
       'mcp__whatsapp__wa_link_task_message',
+      'mcp__whatsapp__wa_chat_since',
+      'mcp__whatsapp__wa_mark_extracted',
+    ],
+    // Block built-ins so the agent stays inside the MCP toolset and can't
+    // pivot to shell/file tools when scan responses get big.
+    disallowedTools: [
+      'Bash', 'Read', 'Write', 'Edit', 'NotebookEdit',
+      'Glob', 'Grep', 'WebFetch', 'WebSearch',
+      'Task', 'Agent', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
     ],
     permissionMode: 'bypassPermissions',
     maxTurns: 300,

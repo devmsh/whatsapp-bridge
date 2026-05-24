@@ -276,11 +276,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at      INTEGER NOT NULL DEFAULT 0,
     origin_chat_jid   TEXT    NOT NULL DEFAULT '',
     origin_message_id TEXT    NOT NULL DEFAULT '',
+    review_status     TEXT    NOT NULL DEFAULT 'accepted', -- pending_review | accepted | rejected
     created_at        INTEGER NOT NULL DEFAULT 0,
     updated_at        INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_jid);
+-- review_status index is created by the migration in db.go after the ALTER.
 
 -- task_messages links a task to messages across any chats (cross-chat tasks).
 CREATE TABLE IF NOT EXISTS task_messages (
@@ -324,4 +326,15 @@ CREATE TABLE IF NOT EXISTS entity_profiles (
 );
 CREATE INDEX IF NOT EXISTS idx_profiles_generated ON entity_profiles(generated_at);
 CREATE INDEX IF NOT EXISTS idx_profiles_status ON entity_profiles(status);
+
+-- chat_extraction_state: per-chat watermark for INCREMENTAL task extraction.
+-- After a successful extraction sweep, last_msg_ts is set to the chat's max
+-- message timestamp at that moment. The next run starts at last_msg_ts and
+-- only sees new messages.
+CREATE TABLE IF NOT EXISTS chat_extraction_state (
+    chat_jid        TEXT    PRIMARY KEY,
+    last_msg_ts     INTEGER NOT NULL DEFAULT 0,
+    last_session_id TEXT    NOT NULL DEFAULT '',
+    updated_at      INTEGER NOT NULL DEFAULT 0
+);
 `

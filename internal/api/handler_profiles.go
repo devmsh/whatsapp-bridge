@@ -102,8 +102,11 @@ func (s *Server) handleProfilesStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stats.QueueSize = s.profiles.queued()
+	active := []string{}
 	s.profiles.mu.Lock()
-	active := s.profiles.active
+	for k := range s.profiles.active {
+		active = append(active, k)
+	}
 	s.profiles.mu.Unlock()
 	jsonOK(w, map[string]any{
 		"stats":   stats,

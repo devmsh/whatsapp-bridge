@@ -72,6 +72,10 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 	srv.AddTool(toolListCircles(), s.handleListCircles)
 	srv.AddTool(toolGetProfile(), s.handleGetProfile)
 
+	// Incremental extraction: per-chat watermark
+	srv.AddTool(toolChatSince(), s.handleChatSince)
+	srv.AddTool(toolMarkExtracted(), s.handleMarkExtracted)
+
 	// Write tools (via REST API)
 	srv.AddTool(toolSend(), s.handleSend)
 	srv.AddTool(toolReply(), s.handleReply)

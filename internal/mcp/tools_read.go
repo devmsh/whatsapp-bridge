@@ -95,16 +95,23 @@ func toolGroupInfo() mcp.Tool {
 
 func toolScan() mcp.Tool {
 	return mcp.NewTool("wa_scan",
-		mcp.WithDescription("Scan for new WhatsApp messages and groups since a timestamp. Returns enriched data for HQ intelligence pipeline. Use for /hq-scan."),
-		mcp.WithNumber("since", mcp.Required(), mcp.Description("Unix epoch timestamp — scan messages/groups created after this time")),
-		mcp.WithString("chat_jid", mcp.Description("Filter to a specific chat JID")),
+		mcp.WithDescription("Scan messages in chronological order (oldest→newest) starting AFTER a timestamp. Returns at most 'limit' messages (default 200, hard cap 500). If the response has \"truncated\":true, more messages exist — call wa_scan again with since = response.next_since to get the next page. Do NOT request a large limit and then process with shell — paginate via wa_scan."),
+		mcp.WithNumber("since", mcp.Required(), mcp.Description("Unix epoch timestamp — return messages with timestamp > since. Use 1 for full history. For incremental extraction, get the right value from wa_chat_since(chat_jid).")),
+		mcp.WithString("chat_jid", mcp.Description("Filter to a specific chat JID (strongly recommended — scanning all chats at once is rarely useful)")),
 		mcp.WithString("exclude", mcp.Description("Comma-separated JIDs to exclude")),
-		mcp.WithNumber("limit", mcp.Description("Max messages to return (default 5000)")),
+		mcp.WithNumber("limit", mcp.Description("Max messages to return (default 200, hard cap 500). Paginate by re-calling with since = response.next_since.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
 		}),
 	)
 }
+
+// Caps for wa_scan responses: keeps a single tool call's payload small enough
+// that the agent never feels the need to pivot to shell tools to chew through it.
+const (
+	scanDefaultLimit = 200
+	scanMaxLimit     = 500
+)
 
 // ── Handlers ────────────────────────────────────────────────────────
 
@@ -484,9 +491,12 @@ func (s *Server) handleScan(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 
 	chatFilter, _ := args["chat_jid"].(string)
 	excludeStr, _ := args["exclude"].(string)
-	limit := 5000
+	limit := scanDefaultLimit
 	if v, ok := args["limit"].(float64); ok && v > 0 {
 		limit = int(v)
+	}
+	if limit > scanMaxLimit {
+		limit = scanMaxLimit
 	}
 
 	var excludeJIDs []string
@@ -644,6 +654,14 @@ func (s *Server) handleScan(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		chatSummary[m.ChatJID]++
 	}
 
+	// Pagination: if we hit the limit, the agent should re-call with
+	// since = last message's timestamp to get the next page.
+	truncated := len(messages) >= limit
+	var nextSince int64
+	if truncated && len(messages) > 0 {
+		nextSince = messages[len(messages)-1].Timestamp
+	}
+
 	return marshalResult(map[string]any{
 		"since":         since,
 		"since_time":    time.Unix(since, 0).Format("2006-01-02 15:04:05"),
@@ -652,6 +670,9 @@ func (s *Server) handleScan(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		"chat_summary":  chatSummary,
 		"messages":      messages,
 		"new_groups":    groups,
+		"truncated":     truncated,
+		"next_since":    nextSince,
+		"limit":         limit,
 	})
 }
 

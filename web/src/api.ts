@@ -179,6 +179,7 @@ export interface Tag {
 }
 
 export type TaskStatus = 'open' | 'in_progress' | 'done' | 'cancelled'
+export type TaskReviewStatus = 'pending_review' | 'accepted' | 'rejected'
 
 export interface Task {
   id: number
@@ -192,6 +193,7 @@ export interface Task {
   completed_at: number
   origin_chat_jid: string
   origin_message_id: string
+  review_status: TaskReviewStatus
   created_at: number
   updated_at: number
   message_count: number
@@ -227,6 +229,33 @@ export interface ExtractionRun {
   first_prompt: string
   last_modified: number
   created_at: number
+}
+
+// A live extraction-run event (parsed from the sidecar's stderr).
+export interface ExtractionRunEvent {
+  ts: number
+  seq: number
+  kind: 'tool' | 'text' | 'info' | 'result' | 'error'
+  name?: string
+  text?: string
+}
+
+export type ExtractionRunStatus = 'starting' | 'running' | 'done' | 'failed' | 'cancelled'
+
+// Live run state from GET /api/v2/extractions/runs/{id}.
+export interface ExtractionRunState {
+  id: string
+  kind: 'chat' | 'circle'
+  subject: string
+  label: string
+  status: ExtractionRunStatus
+  started_at: number
+  ended_at?: number
+  session_id?: string
+  created?: number
+  summary?: string
+  error?: string
+  events?: ExtractionRunEvent[]
 }
 
 // One step in a run's transcript: agent reasoning, a tool call, or its result.
@@ -267,7 +296,7 @@ export interface ProfileStats {
 
 export interface ProfilesStatus {
   stats: ProfileStats
-  active: string
+  active: string[]
   enabled: boolean
 }
 
@@ -441,14 +470,19 @@ export const api = {
     del(`/api/v2/contacts/${encodeURIComponent(jid)}/tags`, { tag_id: tagId }),
 
   // --- tasks ---
-  tasks: async (params: { status?: string; chat?: string; circle?: number } = {}): Promise<Task[]> => {
+  tasks: async (
+    params: { status?: string; chat?: string; circle?: number; review?: TaskReviewStatus } = {},
+  ): Promise<Task[]> => {
     const q = new URLSearchParams()
     if (params.status) q.set('status', params.status)
     if (params.chat) q.set('chat', params.chat)
     if (params.circle) q.set('circle', String(params.circle))
+    if (params.review) q.set('review', params.review)
     const res = await fetch('/api/v2/tasks' + (q.toString() ? `?${q}` : ''))
     return res.json()
   },
+  reviewTask: (id: number, review: TaskReviewStatus) =>
+    postBody<Task>(`/api/v2/tasks/${id}/review`, { review_status: review }),
   createTask: (body: {
     title: string
     assignee_jid?: string
@@ -480,10 +514,14 @@ export const api = {
   addTaskCircle: (id: number, circleId: number) =>
     postBody<{ success: boolean }>(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
   extractTasks: (chatJid: string, groupName?: string) =>
-    postBody<{ ok: boolean; created: number; summary: string; session_id: string }>(
-      '/api/v2/tasks/extract',
-      { chat_jid: chatJid, group_name: groupName },
-    ),
+    postBody<{ run_id: string }>('/api/v2/tasks/extract', { chat_jid: chatJid, group_name: groupName }),
+  cancelRun: (runId: string) => postBody<{ cancelled: boolean }>(`/api/v2/extractions/runs/${runId}/cancel`, {}),
+  getRun: async (runId: string): Promise<ExtractionRunState> => {
+    const res = await fetch(`/api/v2/extractions/runs/${runId}`)
+    return res.json()
+  },
+  // SSE URL (open with `new EventSource(...)`).
+  runStreamURL: (runId: string) => `/api/v2/extractions/runs/${runId}/stream`,
   listExtractions: async (chatJid: string): Promise<ExtractionRun[]> => {
     const res = await fetch('/api/v2/extractions?chat=' + encodeURIComponent(chatJid))
     const data = await res.json()
@@ -495,10 +533,7 @@ export const api = {
     return data.runs || []
   },
   extractCircleTasks: (circleId: number, name?: string) =>
-    postBody<{ ok: boolean; created: number; summary: string; session_id: string }>(
-      `/api/v2/circles/${circleId}/extract`,
-      { name },
-    ),
+    postBody<{ run_id: string }>(`/api/v2/circles/${circleId}/extract`, { name }),
   extractionTranscript: async (sessionId: string): Promise<ExtractionStep[]> => {
     const res = await fetch('/api/v2/extractions/transcript?session=' + encodeURIComponent(sessionId))
     const data = await res.json()

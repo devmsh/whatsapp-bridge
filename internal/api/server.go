@@ -21,6 +21,7 @@ type Server struct {
 	webFS      fs.FS
 	fileServer http.Handler
 	profiles   *ProfileManager
+	runs       *RunManager
 }
 
 // StartProfiler starts the background entity-profiling worker and daily refresh.
@@ -43,6 +44,7 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 		s.fileServer = http.FileServerFS(webFS)
 	}
 	s.profiles = newProfileManager(s)
+	s.runs = newRunManager()
 	s.registerRoutes()
 	return s
 }
@@ -143,6 +145,9 @@ func (s *Server) registerRoutes() {
 	// Extraction history (read straight from the Agent SDK session store, no DB)
 	s.mux.HandleFunc("/api/v2/extractions", s.handleExtractions)
 	s.mux.HandleFunc("/api/v2/extractions/transcript", s.handleExtractionTranscript)
+	s.mux.HandleFunc("/api/v2/extractions/mark", s.handleExtractionMark)
+	s.mux.HandleFunc("/api/v2/extractions/runs", s.handleRunsRoot)
+	s.mux.HandleFunc("/api/v2/extractions/runs/", s.handleRunsRoot)
 
 	// Entity profiles (AI-written purpose descriptions; background-refreshed)
 	s.mux.HandleFunc("/api/v2/profiles", s.handleProfile)

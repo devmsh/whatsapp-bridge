@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -18,6 +19,10 @@ const (
 	RoleComment    = "comment"
 	RoleAttachment = "attachment"
 	RoleRelated    = "related"
+
+	ReviewPending  = "pending_review"
+	ReviewAccepted = "accepted"
+	ReviewRejected = "rejected"
 )
 
 // Task is a work item built on WhatsApp content. It may span multiple chats.
@@ -33,6 +38,7 @@ type Task struct {
 	CompletedAt     int64   `json:"completed_at"`
 	OriginChatJID   string  `json:"origin_chat_jid"`
 	OriginMessageID string  `json:"origin_message_id"`
+	ReviewStatus    string  `json:"review_status"` // pending_review | accepted | rejected
 	CreatedAt       int64   `json:"created_at"`
 	UpdatedAt       int64   `json:"updated_at"`
 	MessageCount    int     `json:"message_count"`         // computed
@@ -59,13 +65,13 @@ type TaskMessageLink struct {
 
 func taskColumns() string {
 	return `id, title, description, status, priority, assignee_jid, creator_jid,
-		due_at, completed_at, origin_chat_jid, origin_message_id, created_at, updated_at`
+		due_at, completed_at, origin_chat_jid, origin_message_id, review_status, created_at, updated_at`
 }
 
 func scanTask(sc scanner, t *Task) error {
 	return sc.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.AssigneeJID,
 		&t.CreatorJID, &t.DueAt, &t.CompletedAt, &t.OriginChatJID, &t.OriginMessageID,
-		&t.CreatedAt, &t.UpdatedAt)
+		&t.ReviewStatus, &t.CreatedAt, &t.UpdatedAt)
 }
 
 // CreateTask inserts a task and an origin link if an origin message is given.
@@ -82,12 +88,15 @@ func (s *Store) CreateTask(t *Task) (*Task, error) {
 	if t.Status == TaskDone && t.CompletedAt == 0 {
 		t.CompletedAt = now
 	}
+	if t.ReviewStatus == "" {
+		t.ReviewStatus = ReviewAccepted // manual creates skip review by default
+	}
 	res, err := s.DB.Exec(`INSERT INTO tasks
 		(title, description, status, priority, assignee_jid, creator_jid, due_at, completed_at,
-		 origin_chat_jid, origin_message_id, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 origin_chat_jid, origin_message_id, review_status, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.Title, t.Description, t.Status, t.Priority, t.AssigneeJID, t.CreatorJID, t.DueAt,
-		t.CompletedAt, t.OriginChatJID, t.OriginMessageID, t.CreatedAt, t.UpdatedAt)
+		t.CompletedAt, t.OriginChatJID, t.OriginMessageID, t.ReviewStatus, t.CreatedAt, t.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +141,36 @@ func (s *Store) scanTaskList(rows *sql.Rows) ([]Task, error) {
 		out[i].CircleIDs = s.taskCircleIDs(out[i].ID)
 	}
 	return out, nil
+}
+
+// SetTaskReview moves a task to accepted or rejected. Used by the triage UI.
+func (s *Store) SetTaskReview(id int64, review string) error {
+	switch review {
+	case ReviewPending, ReviewAccepted, ReviewRejected:
+	default:
+		return fmt.Errorf("invalid review status %q", review)
+	}
+	_, err := s.DB.Exec(`UPDATE tasks SET review_status = ?, updated_at = ? WHERE id = ?`,
+		review, time.Now().Unix(), id)
+	return err
+}
+
+// CountTasksByReview returns a map review_status -> count (only accepted+pending are typically interesting).
+func (s *Store) CountTasksByReview() map[string]int {
+	out := map[string]int{}
+	rows, err := s.DB.Query(`SELECT review_status, COUNT(*) FROM tasks GROUP BY review_status`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		var n int
+		if rows.Scan(&k, &n) == nil {
+			out[k] = n
+		}
+	}
+	return out
 }
 
 // ListTasks returns tasks, optionally filtered by status and/or assignee.

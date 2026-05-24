@@ -75,6 +75,9 @@ func (s *Server) handleCreateTask(ctx context.Context, req mcp.CallToolRequest) 
 	if v, ok := args["circle_id"].(float64); ok && v > 0 {
 		payload["circle_id"] = int64(v)
 	}
+	// AI-created tasks land in the review queue by default — the user accepts
+	// or rejects each one in the triage inbox.
+	payload["review_status"] = "pending_review"
 	return s.postAPIAny("/tasks", payload)
 }
 

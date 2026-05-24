@@ -19,6 +19,8 @@ export function MessageThread({
   circles,
   allTags,
   contactTags,
+  initialDraft = '',
+  onDraftConsumed,
   onCirclesChanged,
   onTagsChanged,
   onOpenTask,
@@ -33,6 +35,8 @@ export function MessageThread({
   circles: Circle[]
   allTags: Tag[]
   contactTags: Record<string, Tag[]>
+  initialDraft?: string
+  onDraftConsumed?: () => void
   onCirclesChanged: () => void
   onTagsChanged: () => void
   onOpenTask: (id: number) => void
@@ -46,6 +50,7 @@ export function MessageThread({
   const [hasMore, setHasMore] = useState(false)
   const [extracting, setExtracting] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [liveRunId, setLiveRunId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -153,11 +158,10 @@ export function MessageThread({
               setExtracting(true)
               try {
                 const r = await api.extractTasks(jid, title)
-                onTasksChanged()
-                onOpenChatTasks(jid)
-                alert(`Extracted ${r.created} task(s).\n\n${r.summary || ''}`)
+                setLiveRunId(r.run_id)
+                setShowHistory(true)
               } catch (e) {
-                alert('Extraction failed: ' + (e as Error).message)
+                alert('Extraction failed to start: ' + (e as Error).message)
               } finally {
                 setExtracting(false)
               }
@@ -218,13 +222,30 @@ export function MessageThread({
         )}
       </div>
 
-      {canSend && <Composer jid={jid} group={group} onSent={handleSent} />}
+      {canSend && (
+        <Composer
+          jid={jid}
+          group={group}
+          initialText={initialDraft}
+          onDraftConsumed={onDraftConsumed}
+          onSent={handleSent}
+        />
+      )}
 
       {showHistory && (
         <ExtractionsModal
           title={title}
           fetchRuns={() => api.listExtractions(jid)}
-          onClose={() => setShowHistory(false)}
+          liveRunId={liveRunId}
+          onClose={() => {
+            setShowHistory(false)
+            // After a fresh run, refresh tasks counter / show the chat tasks list.
+            if (liveRunId) {
+              onTasksChanged()
+              onOpenChatTasks(jid)
+            }
+            setLiveRunId(null)
+          }}
         />
       )}
     </div>
@@ -236,10 +257,14 @@ export function MessageThread({
 function Composer({
   jid,
   group,
+  initialText = '',
+  onDraftConsumed,
   onSent,
 }: {
   jid: string
   group: boolean
+  initialText?: string
+  onDraftConsumed?: () => void
   onSent: (m: Message) => void
 }) {
   const [text, setText] = useState('')
@@ -253,6 +278,24 @@ function Composer({
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }
+
+  // Apply a draft from a "Nudge" / "Reply in origin" action exactly once.
+  // We don't overwrite user-typed text: only fill when the field is empty.
+  useEffect(() => {
+    if (!initialText) return
+    if (text.trim() === '') {
+      setText(initialText)
+      requestAnimationFrame(resize)
+      taRef.current?.focus()
+      // place caret at the end so the user can keep typing
+      requestAnimationFrame(() => {
+        const el = taRef.current
+        if (el) el.setSelectionRange(initialText.length, initialText.length)
+      })
+    }
+    onDraftConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialText])
 
   async function send() {
     const body = text.trim()

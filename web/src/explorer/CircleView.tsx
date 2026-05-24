@@ -71,6 +71,7 @@ export function CircleView({
   const [expand, setExpand] = useState({ circles: false, groups: false, contacts: false })
   const [extracting, setExtracting] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [liveRunId, setLiveRunId] = useState<string | null>(null)
 
   function reload() {
     return Promise.all([
@@ -264,10 +265,10 @@ export function CircleView({
             setExtracting(true)
             try {
               const r = await api.extractCircleTasks(circleId, circle.name)
-              onOpenTasks(circleId)
-              alert(`Extracted ${r.created} task(s) across the circle.\n\n${r.summary || ''}`)
+              setLiveRunId(r.run_id)
+              setShowHistory(true)
             } catch (e) {
-              alert('Circle extraction failed: ' + (e as Error).message)
+              alert('Circle extraction failed to start: ' + (e as Error).message)
             } finally {
               setExtracting(false)
             }
@@ -581,7 +582,14 @@ export function CircleView({
         <ExtractionsModal
           title={'Circle: ' + circle.name}
           fetchRuns={() => api.listCircleExtractions(circleId)}
-          onClose={() => setShowHistory(false)}
+          liveRunId={liveRunId}
+          onClose={() => {
+            setShowHistory(false)
+            if (liveRunId) {
+              onOpenTasks(circleId)
+            }
+            setLiveRunId(null)
+          }}
         />
       )}
     </div>

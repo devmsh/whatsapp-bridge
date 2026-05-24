@@ -16,3 +16,4 @@ web/node_modules/
 *.tsv
 web/tsconfig.tsbuildinfo
 agent/node_modules/
+/internal/mcp/whatsapp-bridge-v2

@@ -45,6 +45,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [liveMsg, setLiveMsg] = useState<Message | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
+  // pending composer drafts per chat — set by "Nudge" / "Reply" buttons in
+  // TaskView, consumed once by MessageThread when it opens that chat.
+  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({})
 
   const selectedRef = useRef<string | null>(null)
   selectedRef.current = selected
@@ -109,11 +112,24 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
   const bumpTasks = useCallback(() => setTaskVersion((v) => v + 1), [])
 
-  const openChat = useCallback((jid: string) => {
+  const openChat = useCallback((jid: string, draft?: string) => {
     setRecoOpen(false)
     setSelectedTask(null)
+    setTab('chats')
     setSelected(jid)
     setChats((prev) => prev.map((c) => (c.jid === jid ? { ...c, unread_count: 0 } : c)))
+    if (draft) setChatDrafts((d) => ({ ...d, [jid]: draft }))
+  }, [])
+
+  // Called by MessageThread once it has loaded a draft into its composer,
+  // so the draft is single-use and doesn't reappear on re-render.
+  const consumeChatDraft = useCallback((jid: string) => {
+    setChatDrafts((d) => {
+      if (!d[jid]) return d
+      const next = { ...d }
+      delete next[jid]
+      return next
+    })
   }, [])
 
   const openTask = useCallback((id: number) => {
@@ -275,6 +291,8 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             circles={circles}
             allTags={tags}
             contactTags={contactTags}
+            initialDraft={chatDrafts[selected] || ''}
+            onDraftConsumed={() => consumeChatDraft(selected)}
             onCirclesChanged={reloadCircles}
             onTagsChanged={reloadTags}
             onOpenTask={openTask}

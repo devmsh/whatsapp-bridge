@@ -16,9 +16,10 @@ import (
 // instant stub (no model call). Profiles refresh on a 7-working-day cadence.
 
 const (
-	profileMsgSample = 80 // recent messages fed to the summarizer
-	profileMaxMsgLen = 280 // per-message cap (chars)
-	profileQueueCap  = 12000
+	profileMsgSample   = 80    // recent messages fed to the summarizer
+	profileMaxMsgLen   = 280   // per-message cap (chars)
+	profileQueueCap    = 12000
+	profileConcurrency = 5     // chats/groups summarized in parallel
 )
 
 type profileJob struct {
@@ -26,17 +27,22 @@ type profileJob struct {
 	ref        string
 }
 
-// ProfileManager runs the background profiling worker.
+// ProfileManager runs the background profiling worker pool.
 type ProfileManager struct {
 	s       *Server
 	jobs    chan profileJob
 	mu      sync.Mutex
 	inQueue map[string]bool
-	active  string // entity currently being generated, for status display
+	active  map[string]bool // entities currently being generated (for status)
 }
 
 func newProfileManager(s *Server) *ProfileManager {
-	return &ProfileManager{s: s, jobs: make(chan profileJob, profileQueueCap), inQueue: map[string]bool{}}
+	return &ProfileManager{
+		s:       s,
+		jobs:    make(chan profileJob, profileQueueCap),
+		inQueue: map[string]bool{},
+		active:  map[string]bool{},
+	}
 }
 
 // profilesEnabledKey gates the bulk runs. Profiling only auto-scans once the
@@ -54,11 +60,13 @@ func (m *ProfileManager) Enable() {
 	go m.EnqueueStale()
 }
 
-// Start launches the worker and the daily refresh scan. The worker always runs
+// Start launches the worker pool and the daily refresh scan. Workers always run
 // (to service manual regenerate requests); the daily auto-scan only enqueues
 // once profiling has been enabled.
 func (m *ProfileManager) Start() {
-	go m.worker()
+	for i := 0; i < profileConcurrency; i++ {
+		go m.worker()
+	}
 	go func() {
 		time.Sleep(20 * time.Second)
 		if m.enabled() {
@@ -177,18 +185,17 @@ func (m *ProfileManager) RegenerateNow(entityType, ref string) {
 
 func (m *ProfileManager) worker() {
 	for job := range m.jobs {
+		k := key(job.entityType, job.ref)
 		m.mu.Lock()
-		m.active = key(job.entityType, job.ref)
+		m.active[k] = true
 		m.mu.Unlock()
 
 		m.generate(job.entityType, job.ref)
 
 		m.mu.Lock()
-		delete(m.inQueue, key(job.entityType, job.ref))
-		m.active = ""
+		delete(m.inQueue, k)
+		delete(m.active, k)
 		m.mu.Unlock()
-
-		time.Sleep(500 * time.Millisecond) // be gentle on the subscription
 	}
 }
 

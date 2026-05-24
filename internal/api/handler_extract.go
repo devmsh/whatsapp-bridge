@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,13 +25,21 @@ func envOr(key, def string) string {
 
 // runAgent spawns the Node sidecar (script in agent/) and returns its stdout.
 // It strips ANTHROPIC_API_KEY so the sidecar uses the Claude subscription, and
-// passes the bridge's DB/API/MCP locations.
+// passes the bridge's DB/API/MCP locations. No live progress tracking.
 func (s *Server) runAgent(timeout time.Duration, script string, args ...string) (string, error) {
-	return s.runAgentInput(timeout, "", script, args...)
+	return s.runAgentTracked(context.Background(), timeout, "", nil, script, args...)
 }
 
-// runAgentInput is runAgent with optional data piped to the sidecar's stdin.
+// runAgentInput is runAgent with stdin (used by the profile sidecar). No tracking.
 func (s *Server) runAgentInput(timeout time.Duration, stdin, script string, args ...string) (string, error) {
+	return s.runAgentTracked(context.Background(), timeout, stdin, nil, script, args...)
+}
+
+// runAgentTracked is the full spawner: takes an external context (so callers
+// can cancel via Run.Cancel), an optional Run (whose stderr we'll consume line
+// by line into RunEvents), and the usual stdin/script/args. Stderr is also
+// mirrored to os.Stderr so the bridge log keeps its existing format.
+func (s *Server) runAgentTracked(parentCtx context.Context, timeout time.Duration, stdin string, run *Run, script string, args ...string) (string, error) {
 	cwd, _ := os.Getwd()
 	nodeBin := envOr("AGENT_NODE", "node")
 	scriptPath := filepath.Join(envOr("AGENT_DIR", filepath.Join(cwd, "agent")), script)
@@ -37,7 +47,7 @@ func (s *Server) runAgentInput(timeout time.Duration, stdin, script string, args
 	dbAbs, _ := filepath.Abs(s.cfg.DBPath)
 	apiURL := fmt.Sprintf("http://127.0.0.1:%d/api/v2", s.port)
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, nodeBin, append([]string{scriptPath}, args...)...)
@@ -58,7 +68,30 @@ func (s *Server) runAgentInput(timeout time.Duration, stdin, script string, args
 	}
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = os.Stderr
+	if run == nil {
+		cmd.Stderr = os.Stderr
+	} else {
+		// Pipe stderr through a scanner that produces Run events line by line.
+		pr, pw := io.Pipe()
+		cmd.Stderr = pw
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			sc := bufio.NewScanner(pr)
+			sc.Buffer(make([]byte, 64*1024), 1024*1024)
+			for sc.Scan() {
+				line := sc.Text()
+				os.Stderr.WriteString(line + "\n") // keep the bridge log readable
+				if e := parseProgressLine(line); e.Kind != "" {
+					run.AddEvent(e)
+				}
+			}
+		}()
+		err := cmd.Run()
+		pw.Close()
+		<-done
+		return stdout.String(), err
+	}
 	err := cmd.Run()
 	return stdout.String(), err
 }
@@ -75,8 +108,10 @@ func lastJSONLine(out string) []byte {
 	return nil
 }
 
-// handleTaskExtract runs the extraction agent on one chat/group (Max-plan auth).
-// POST /api/v2/tasks/extract  {"chat_jid","group_name"}
+// handleTaskExtract starts the chat-extraction agent on one chat/group.
+// Returns immediately with a run_id; the work continues in the background
+// and progress is available via the run's SSE stream.
+// POST /api/v2/tasks/extract  {"chat_jid","group_name"} -> {"run_id"}
 func (s *Server) handleTaskExtract(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -91,8 +126,23 @@ func (s *Server) handleTaskExtract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("Task extraction starting for %s\n", req.ChatJID)
-	out, runErr := s.runAgent(15*time.Minute, "extract.mjs", req.ChatJID, req.GroupName)
+	label := req.GroupName
+	if label == "" {
+		label = req.ChatJID
+	}
+	run, ctx := s.runs.Start("chat", req.ChatJID, label)
+	go s.executeExtraction(ctx, run, 15*time.Minute, "extract.mjs", req.ChatJID, req.GroupName)
+
+	fmt.Printf("Task extraction starting for %s (run=%s)\n", req.ChatJID, run.ID)
+	jsonOK(w, map[string]any{"run_id": run.ID})
+}
+
+// executeExtraction is the goroutine body for any extraction sidecar call.
+// It spawns the sidecar with progress tracking, parses the final JSON, and
+// resolves the Run to its terminal state (Done | Failed | Cancelled).
+func (s *Server) executeExtraction(ctx context.Context, run *Run, timeout time.Duration, script string, args ...string) {
+	run.SetRunning()
+	out, runErr := s.runAgentTracked(ctx, timeout, "", run, script, args...)
 
 	var result struct {
 		OK        bool   `json:"ok"`
@@ -103,20 +153,20 @@ func (s *Server) handleTaskExtract(w http.ResponseWriter, r *http.Request) {
 	if line := lastJSONLine(out); line != nil {
 		json.Unmarshal(line, &result)
 	}
+
+	if ctx.Err() == context.Canceled {
+		run.Finish(RunCancelled, result.SessionID, "Cancelled by user.", result.Created, "")
+		return
+	}
 	if runErr != nil && !result.OK {
 		msg := result.Summary
 		if msg == "" {
 			msg = runErr.Error()
 		}
-		jsonError(w, 500, "extraction failed: "+msg)
+		run.Finish(RunFailed, result.SessionID, msg, result.Created, msg)
 		return
 	}
-	jsonOK(w, map[string]interface{}{
-		"ok":         result.OK,
-		"created":    result.Created,
-		"summary":    result.Summary,
-		"session_id": result.SessionID,
-	})
+	run.Finish(RunDone, result.SessionID, result.Summary, result.Created, "")
 }
 
 // handleExtractions lists past extraction runs (read from the SDK's session
@@ -154,8 +204,9 @@ func (s *Server) handleExtractions(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"runs":[]}`))
 }
 
-// handleCircleExtract runs the circle-level extraction agent (Max-plan auth).
-// POST /api/v2/circles/{id}/extract
+// handleCircleExtract starts the circle-level extraction agent. Returns
+// immediately with a run_id; progress streams via SSE.
+// POST /api/v2/circles/{id}/extract -> {"run_id"}
 func (s *Server) handleCircleExtract(w http.ResponseWriter, r *http.Request, id int64) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -167,32 +218,12 @@ func (s *Server) handleCircleExtract(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	fmt.Printf("Circle task extraction starting for circle %d (%s)\n", id, circle.Name)
-	out, runErr := s.runAgent(30*time.Minute, "extract-circle.mjs", strconv.FormatInt(id, 10), circle.Name)
+	run, ctx := s.runs.Start("circle", strconv.FormatInt(id, 10), circle.Name)
+	go s.executeExtraction(ctx, run, 30*time.Minute, "extract-circle.mjs",
+		strconv.FormatInt(id, 10), circle.Name)
 
-	var result struct {
-		OK        bool   `json:"ok"`
-		Created   int    `json:"created"`
-		Summary   string `json:"summary"`
-		SessionID string `json:"session_id"`
-	}
-	if line := lastJSONLine(out); line != nil {
-		json.Unmarshal(line, &result)
-	}
-	if runErr != nil && !result.OK {
-		msg := result.Summary
-		if msg == "" {
-			msg = runErr.Error()
-		}
-		jsonError(w, 500, "extraction failed: "+msg)
-		return
-	}
-	jsonOK(w, map[string]interface{}{
-		"ok":         result.OK,
-		"created":    result.Created,
-		"summary":    result.Summary,
-		"session_id": result.SessionID,
-	})
+	fmt.Printf("Circle task extraction starting for circle %d (%s, run=%s)\n", id, circle.Name, run.ID)
+	jsonOK(w, map[string]any{"run_id": run.ID})
 }
 
 // handleExtractionTranscript returns a run's full transcript from the SDK.

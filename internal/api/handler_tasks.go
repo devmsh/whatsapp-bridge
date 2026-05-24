@@ -9,7 +9,7 @@ import (
 )
 
 // handleTasks: GET list (filters), POST create.
-// GET /api/v2/tasks?status=&assignee=&chat=&circle=
+// GET /api/v2/tasks?status=&assignee=&chat=&circle=&review=
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -33,6 +33,16 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		if tasks == nil {
 			tasks = []db.Task{}
 		}
+		// Optional review_status filter (applies on top of any prior filter).
+		if rev := q.Get("review"); rev != "" {
+			filtered := tasks[:0]
+			for _, t := range tasks {
+				if t.ReviewStatus == rev {
+					filtered = append(filtered, t)
+				}
+			}
+			tasks = filtered
+		}
 		jsonOK(w, tasks)
 	case http.MethodPost:
 		var req struct {
@@ -44,6 +54,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			DueAt           int64  `json:"due_at"`
 			OriginChatJID   string `json:"origin_chat_jid"`
 			OriginMessageID string `json:"origin_message_id"`
+			ReviewStatus    string `json:"review_status"` // pending_review for AI-created
 			CircleID        int64  `json:"circle_id"`
 		}
 		if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.Title) == "" {
@@ -59,6 +70,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			DueAt:           req.DueAt,
 			OriginChatJID:   req.OriginChatJID,
 			OriginMessageID: req.OriginMessageID,
+			ReviewStatus:    req.ReviewStatus,
 		})
 		if err != nil {
 			jsonError(w, 500, err.Error())
@@ -92,9 +104,33 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		s.handleTaskMessages(w, r, id)
 	case "circles":
 		s.handleTaskCircles(w, r, id)
+	case "review":
+		s.handleTaskReview(w, r, id)
 	default:
 		s.handleTaskEntity(w, r, id)
 	}
+}
+
+// handleTaskReview moves a task to accepted/rejected/pending_review.
+// POST /api/v2/tasks/{id}/review  {"review_status"}
+func (s *Server) handleTaskReview(w http.ResponseWriter, r *http.Request, id int64) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		ReviewStatus string `json:"review_status"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.ReviewStatus == "" {
+		jsonError(w, 400, "review_status required")
+		return
+	}
+	if err := s.store.SetTaskReview(id, req.ReviewStatus); err != nil {
+		jsonError(w, 400, err.Error())
+		return
+	}
+	t, _ := s.store.GetTask(id)
+	jsonOK(w, t)
 }
 
 // handleTaskEntity: GET detail (+messages), PUT update, DELETE.

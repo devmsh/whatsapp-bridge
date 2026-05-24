@@ -24,7 +24,7 @@ const apiURL = process.env.WA_API_URL || 'http://127.0.0.1:8082/api/v2'
 const systemPrompt = `You extract actionable TASKS from a noisy WhatsApp group and save them via tools.
 
 You have these tools (MCP server "whatsapp"):
-- wa_scan(since, chat_jid): bulk-read a chat's messages in chronological order (oldest first). Pass since=1 to get the full history. Each message has: message_id, timestamp/time, sender_name, sender_phone, content, mentions (JIDs), is_forwarded, has_media/media_type, reply.
+- wa_scan(since, chat_jid, limit): read a chat's messages in chronological order (oldest→newest). Pass since=1 for full history. Pages of up to 500 messages. If the response has "truncated":true, call wa_scan AGAIN with since=response.next_since to get the next page. Keep paginating until truncated is false. Each message has: message_id, timestamp/time, sender_name, sender_phone, content, mentions (JIDs), is_forwarded, has_media/media_type, reply.
 - wa_read_messages(chat_jid, since, limit, search): targeted reads.
 - wa_group_info(jid): the group's participants with names + admin status. Use it to resolve mentioned numbers to names and to know who is IN the group.
 - wa_find_contact(query): resolve a name/number/JID to a contact (use for people NOT in the group — "external" people).
@@ -32,9 +32,11 @@ You have these tools (MCP server "whatsapp"):
 - wa_list_tasks(chat_jid?): existing tasks — check before creating to avoid duplicates.
 - wa_create_task({title, description, assignee_jid, priority, due_at, origin_chat_jid, origin_message_id}): create a task. Returns JSON with the new "id". The origin message is linked automatically.
 - wa_link_task_message({task_id, chat_jid, message_id, role}): attach a message to a task. role: "completion" (marks done, can be in another chat), "comment" (update/discussion), "attachment" (file/media), "related".
+- wa_chat_since(chat_jid): the timestamp from which to start scanning this chat in THIS run (1 the first time, the watermark from the previous successful run after that — incremental & cheap). ALWAYS call this BEFORE wa_scan.
+- wa_mark_extracted(chat_jid): call AFTER you have scanned all pages of a chat. It advances the watermark so the next run only sees newer messages.
 
 ALGORITHM (follow exactly):
-1. First call wa_group_info(${'`${chatJid}`'}) to learn the participants and their names/JIDs and admins. Then call wa_scan(since:1, chat_jid:"${chatJid}") to load ALL messages oldest→newest. If it returns the limit, continue with wa_scan using a later "since" to paginate until you've covered everything.
+1. First call wa_group_info(${'`${chatJid}`'}) to learn the participants and their names/JIDs and admins. Then call wa_chat_since(chat_jid:"${chatJid}") to learn the starting timestamp for this run. Then wa_scan(since:<that timestamp>, chat_jid:"${chatJid}") to load messages oldest→newest. If the response has "truncated":true, call wa_scan again with since=response.next_since until truncated is false. After you've covered everything, call wa_mark_extracted(chat_jid:"${chatJid}").
 2. Go through the messages strictly in chronological order. For each message consider: the message OWNER (sender_name/sender_phone), the TEXT, and any MENTIONS — resolve mentioned JIDs/numbers to names (wa_group_info participants first, else wa_find_contact).
 3. The chat is messy: several tasks run in parallel in the same time window. Distinguish and SPLIT them. A single message can contain updates about MULTIPLE tasks — handle each.
 4. Track a confidence score per task. If a message is unclear in the sequence (low confidence), DO NOT guess — hold it in mind and keep reading; later messages often add detail that raises confidence. Only create/append once you are reasonably confident.
@@ -69,6 +71,15 @@ const response = query({
       'mcp__whatsapp__wa_list_tasks',
       'mcp__whatsapp__wa_create_task',
       'mcp__whatsapp__wa_link_task_message',
+      'mcp__whatsapp__wa_chat_since',
+      'mcp__whatsapp__wa_mark_extracted',
+    ],
+    // Block the Claude Code built-ins so the agent stays inside the MCP toolset
+    // and can't pivot to shell/file tools when scan responses get big.
+    disallowedTools: [
+      'Bash', 'Read', 'Write', 'Edit', 'NotebookEdit',
+      'Glob', 'Grep', 'WebFetch', 'WebSearch',
+      'Task', 'Agent', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet',
     ],
     permissionMode: 'bypassPermissions',
     maxTurns: 120,

@@ -72,12 +72,18 @@ export function ProfilingStatusModal({ onClose }: { onClose: () => void }) {
             {inFlight > 0 ? (
               <div className="mb-3 rounded-xl border border-sky-700/40 bg-sky-500/5 p-3">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-sky-200">Generating…</span>
+                  <span className="font-medium text-sky-200">
+                    Generating… ({st?.active.length || 0} in parallel)
+                  </span>
                   <span className="text-sky-300">{inFlight} left</span>
                 </div>
-                {st?.active && (
-                  <div className="mt-1 truncate text-[11px] text-neutral-500">
-                    Now: {st.active}
+                {st && st.active.length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {st.active.map((a) => (
+                      <div key={a} className="truncate text-[11px] text-neutral-500">
+                        {a}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

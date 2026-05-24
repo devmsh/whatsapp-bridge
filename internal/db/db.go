@@ -37,6 +37,9 @@ func NewStore(path string) (*Store, error) {
 	// Errors (e.g. "duplicate column name") are expected and ignored.
 	for _, stmt := range []string{
 		`ALTER TABLE circles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN review_status TEXT NOT NULL DEFAULT 'accepted'`,
+		// Indexes after the columns they depend on exist (so re-runs are safe).
+		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 	} {
 		sqlDB.Exec(stmt)
 	}
