@@ -43,24 +43,36 @@ func handleMarkChatAsRead(c *Client, evt *events.MarkChatAsRead) {
 // Unlike a revoke (sent to everyone), this is purely a personal-view deletion
 // — we mark the message as deleted in our local store so it shows the same
 // "🚫 This message was deleted" placeholder the UI already renders for revokes.
+//
+// Storage shape: messages are stored under their phone-based JID, but app-
+// state events arrive with LID-based JIDs (`<n>@lid`). We resolve the LID
+// before updating, and fall back to the raw LID in case our storage is mixed.
 func handleDeleteForMe(c *Client, evt *events.DeleteForMe) {
 	if evt.MessageID == "" {
 		return
 	}
-	chatJID := evt.ChatJID.String()
+	rawChat := evt.ChatJID.String()
+	resolvedChat := resolveLIDToPhone(c, evt.ChatJID, rawChat)
 	deletedBy := evt.SenderJID.String()
-	if deletedBy == "" {
+	if deletedBy == "" && c.WA.Store.ID != nil {
 		deletedBy = c.WA.Store.ID.String()
 	}
 	ts := evt.Timestamp.Unix()
 	if ts == 0 {
 		ts = time.Now().Unix()
 	}
-	if err := c.Store.MarkDeleted(evt.MessageID, chatJID, deletedBy, ts); err != nil {
-		c.Log.Errorf("MarkDeleted (DeleteForMe) failed: %v", err)
-		return
+	// Try the resolved JID first, fall back to the raw LID. Whichever the
+	// message was stored under will match — the other UPDATE is a no-op.
+	jids := []string{resolvedChat}
+	if rawChat != resolvedChat {
+		jids = append(jids, rawChat)
 	}
-	c.Log.Infof("Message %s deleted-for-me in %s", evt.MessageID, chatJID)
+	for _, j := range jids {
+		if err := c.Store.MarkDeleted(evt.MessageID, j, deletedBy, ts); err != nil {
+			c.Log.Errorf("MarkDeleted (DeleteForMe %s) failed: %v", j, err)
+		}
+	}
+	c.Log.Infof("Message %s deleted-for-me in %s", evt.MessageID, resolvedChat)
 }
 
 // handleDeleteChat mirrors a "Delete chat" the user did on another device.
@@ -68,7 +80,8 @@ func handleDeleteForMe(c *Client, evt *events.DeleteForMe) {
 // appear cleared in the UI (the chat row itself stays so future messages land
 // naturally; the preview shows the deleted placeholder).
 func handleDeleteChat(c *Client, evt *events.DeleteChat) {
-	jid := evt.JID.String()
+	rawChat := evt.JID.String()
+	resolvedChat := resolveLIDToPhone(c, evt.JID, rawChat)
 	ts := evt.Timestamp.Unix()
 	if ts == 0 {
 		ts = time.Now().Unix()
@@ -77,12 +90,20 @@ func handleDeleteChat(c *Client, evt *events.DeleteChat) {
 	if c.WA.Store.ID != nil {
 		by = c.WA.Store.ID.String()
 	}
-	n, err := c.Store.MarkChatMessagesDeleted(jid, by, ts)
-	if err != nil {
-		c.Log.Errorf("MarkChatMessagesDeleted failed: %v", err)
-		return
+	jids := []string{resolvedChat}
+	if rawChat != resolvedChat {
+		jids = append(jids, rawChat)
 	}
-	c.Log.Infof("Chat %s cleared (delete-chat) — %d messages marked deleted", jid, n)
+	total := int64(0)
+	for _, j := range jids {
+		n, err := c.Store.MarkChatMessagesDeleted(j, by, ts)
+		if err != nil {
+			c.Log.Errorf("MarkChatMessagesDeleted (%s) failed: %v", j, err)
+			continue
+		}
+		total += n
+	}
+	c.Log.Infof("Chat %s cleared (delete-chat) — %d messages marked deleted", resolvedChat, total)
 }
 
 func handleAppStateSyncComplete(c *Client, evt *events.AppStateSyncComplete) {

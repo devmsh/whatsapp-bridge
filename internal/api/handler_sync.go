@@ -1,10 +1,13 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"go.mau.fi/whatsmeow/appstate"
 
 	"whatsapp-bridge-v2/internal/wa"
 )
@@ -64,6 +67,41 @@ func (s *Server) handleSyncContacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]bool{"success": true})
+}
+
+// handleSyncAppStateReplay forces whatsmeow to re-replay every app-state
+// collection with fullSync=true. Used to retroactively pick up DeleteForMe /
+// DeleteChat events that arrived before this bridge had a handler for them,
+// plus any other app-state mutations (pins/mutes/archives).
+//
+// POST /api/v2/sync/app-state-replay
+func (s *Server) handleSyncAppStateReplay(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	waClient := s.client.GetWhatsmeowClient()
+	if waClient == nil || !waClient.IsConnected() {
+		jsonError(w, 503, "not connected")
+		return
+	}
+
+	// Make sure events are emitted while we re-fetch — by default whatsmeow
+	// suppresses some app-state events on full sync.
+	waClient.EmitAppStateEventsOnFullSync = true
+
+	// Kick off the replay in the background so the HTTP call returns fast.
+	go func() {
+		ctx := context.Background()
+		for _, name := range appstate.AllPatchNames {
+			if err := waClient.FetchAppState(ctx, name, true, false); err != nil {
+				s.client.Log.Errorf("app-state replay (%s) failed: %v", name, err)
+				continue
+			}
+			s.client.Log.Infof("app-state replay (%s) complete", name)
+		}
+	}()
+	jsonOK(w, map[string]any{"status": "app-state replay started"})
 }
 
 func (s *Server) handleSyncHistory(w http.ResponseWriter, r *http.Request) {
