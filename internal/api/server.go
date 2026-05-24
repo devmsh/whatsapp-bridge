@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
 
 	"whatsapp-bridge-v2/internal/config"
@@ -11,16 +12,18 @@ import (
 
 // Server holds the HTTP server state.
 type Server struct {
-	store    *db.Store
-	client   *wa.Client
-	mediaDir string
-	port     int
-	mux      *http.ServeMux
-	cfg      *config.Config
+	store      *db.Store
+	client     *wa.Client
+	mediaDir   string
+	port       int
+	mux        *http.ServeMux
+	cfg        *config.Config
+	webFS      fs.FS
+	fileServer http.Handler
 }
 
-// NewServer creates a new API server.
-func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cfg *config.Config) *Server {
+// NewServer creates a new API server. webFS is the embedded web UI (may be nil).
+func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cfg *config.Config, webFS fs.FS) *Server {
 	s := &Server{
 		store:    store,
 		client:   client,
@@ -28,6 +31,10 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 		port:     port,
 		mux:      http.NewServeMux(),
 		cfg:      cfg,
+		webFS:    webFS,
+	}
+	if webFS != nil {
+		s.fileServer = http.FileServerFS(webFS)
 	}
 	s.registerRoutes()
 	return s
@@ -36,6 +43,12 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 func (s *Server) registerRoutes() {
 	// Health
 	s.mux.HandleFunc("/api/v2/health", s.handleHealth)
+
+	// Auth / onboarding
+	s.mux.HandleFunc("/api/v2/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("/api/v2/auth/stream", s.handleAuthStream)
+	s.mux.HandleFunc("/api/v2/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("/api/v2/auth/logout", s.handleAuthLogout)
 
 	// Send operations
 	s.mux.HandleFunc("/api/v2/send", s.handleSend)
@@ -58,7 +71,12 @@ func (s *Server) registerRoutes() {
 	// Contacts
 	s.mux.HandleFunc("/api/v2/contacts", s.handleContacts)
 	s.mux.HandleFunc("/api/v2/contacts/check", s.handleContactsCheck)
+	s.mux.HandleFunc("/api/v2/contacts/tags", s.handleContactTagsMap)
 	s.mux.HandleFunc("/api/v2/contacts/", s.handleContactByJID)
+
+	// Tags
+	s.mux.HandleFunc("/api/v2/tags", s.handleTags)
+	s.mux.HandleFunc("/api/v2/tags/", s.handleTagByID)
 
 	// Groups
 	s.mux.HandleFunc("/api/v2/groups", s.handleGroups)
@@ -102,16 +120,41 @@ func (s *Server) registerRoutes() {
 	// Stream (SSE real-time message push)
 	s.mux.HandleFunc("/api/v2/stream", s.handleStream)
 
+	// Circles (clusters of groups/contacts/circles)
+	s.mux.HandleFunc("/api/v2/circles", s.handleCircles)
+	s.mux.HandleFunc("/api/v2/circles/recommendations", s.handleCircleRecommendations)
+	s.mux.HandleFunc("/api/v2/circles/recommendations/dismiss", s.handleRecDismiss)
+	s.mux.HandleFunc("/api/v2/circles/recommendations/restore", s.handleRecRestore)
+	s.mux.HandleFunc("/api/v2/circles/for-member", s.handleCircleForMember)
+	s.mux.HandleFunc("/api/v2/circles/", s.handleCircleByID)
+
+	// Stats
+	s.mux.HandleFunc("/api/v2/stats/messages", s.handleStatsMessages)
+
+	// Settings
+	s.mux.HandleFunc("/api/v2/settings/media", s.handleSettingsMedia)
+	s.mux.HandleFunc("/api/v2/settings/history", s.handleSettingsHistory)
+
 	// Sync
+	s.mux.HandleFunc("/api/v2/sync/progress", s.handleSyncProgress)
 	s.mux.HandleFunc("/api/v2/sync/contacts", s.handleSyncContacts)
 	s.mux.HandleFunc("/api/v2/sync/history", s.handleSyncHistory)
 	s.mux.HandleFunc("/api/v2/sync/migrate-lid", s.handleSyncMigrateLID)
 	s.mux.HandleFunc("/api/v2/sync/state/", s.handleSyncState)
+
+	// Embedded web UI (catch-all — least specific, matched last).
+	if s.fileServer != nil {
+		s.mux.HandleFunc("/", s.handleSPA)
+	}
 }
 
-// Start begins listening on the configured port.
+// Start begins listening on the configured bind address and port.
 func (s *Server) Start() error {
-	addr := fmt.Sprintf(":%d", s.port)
-	fmt.Printf("API server starting on %s\n", addr)
+	bind := s.cfg.BindAddr
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	addr := fmt.Sprintf("%s:%d", bind, s.port)
+	fmt.Printf("Server listening on http://%s\n", addr)
 	return http.ListenAndServe(addr, s.mux)
 }

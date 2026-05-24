@@ -89,8 +89,14 @@ func RegisterHandlers(c *Client) {
 			handleAppStateSyncComplete(c, evt)
 
 		// Connection lifecycle
+		case *events.PairSuccess:
+			handlePairSuccess(c, evt)
 		case *events.Connected:
 			handleConnected(c, evt)
+		case *events.OfflineSyncPreview:
+			handleOfflineSyncPreview(c, evt)
+		case *events.OfflineSyncCompleted:
+			handleOfflineSyncCompleted(c, evt)
 		case *events.LoggedOut:
 			handleLoggedOut(c, evt)
 		case *events.Disconnected:

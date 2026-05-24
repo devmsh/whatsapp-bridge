@@ -36,17 +36,36 @@ func main() {
 	// Register event handlers
 	wa.RegisterHandlers(client)
 
-	// Connect to WhatsApp
-	if err := client.Connect(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to connect: %v\n", err)
-		os.Exit(1)
+	// One-time backfill: pull participants of groups already in circles in as
+	// contacts (group members added before auto-import existed). Future group
+	// adds are handled automatically by the API layer.
+	if v, _, _ := store.GetSyncState("circle_contact_backfill_v1"); v == "" {
+		ownPhone := ""
+		if client.WA.Store.ID != nil {
+			ownPhone = client.WA.Store.ID.User
+		}
+		if n := store.BackfillGroupContacts(ownPhone); n > 0 {
+			fmt.Printf("Backfilled %d circle contacts from group members\n", n)
+		}
+		store.PutSyncState("circle_contact_backfill_v1", "done")
 	}
 
-	// Start periodic sync (every 6 hours)
-	wa.StartPeriodicSync(client, 6*time.Hour)
+	// Media auto-download policy: env defaults, overridden by any GUI choice
+	// persisted in the DB.
+	client.InitMediaPolicy(wa.MediaPolicy{
+		Images:    cfg.MediaImages,
+		Video:     cfg.MediaVideo,
+		Audio:     cfg.MediaAudio,
+		Documents: cfg.MediaDocuments,
+		Stickers:  cfg.MediaStickers,
+		MaxSizeMB: cfg.MediaMaxSizeMB,
+	})
 
-	// Start API server (blocks in goroutine)
-	server := api.NewServer(store, client, cfg.MediaDir, cfg.Port, cfg)
+	// History sync period: applied to whatsmeow's device props before pairing.
+	wa.ApplyHistoryPeriod(client.HistoryPeriodOr(cfg.HistoryPeriod))
+
+	// Start API server first so the GUI is reachable during QR login.
+	server := api.NewServer(store, client, cfg.MediaDir, cfg.Port, cfg, webUI())
 	go func() {
 		if err := server.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "API server error: %v\n", err)
@@ -54,7 +73,18 @@ func main() {
 		}
 	}()
 
-	fmt.Printf("Bridge running. API at http://localhost:%d/api/v2/health\n", cfg.Port)
+	// Connect to WhatsApp (begins QR login if no session). Non-blocking:
+	// login state is surfaced through the auth API for the GUI to render.
+	go func() {
+		if err := client.Connect(); err != nil {
+			client.Log.Errorf("Connect failed: %v", err)
+		}
+	}()
+
+	// Start periodic sync (every 6 hours)
+	wa.StartPeriodicSync(client, 6*time.Hour)
+
+	fmt.Printf("Bridge running. Open the GUI at http://localhost:%d/\n", cfg.Port)
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)

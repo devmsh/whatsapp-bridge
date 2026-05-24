@@ -222,4 +222,43 @@ CREATE TABLE IF NOT EXISTS sync_state (
     value      TEXT    NOT NULL DEFAULT '',
     updated_at INTEGER NOT NULL DEFAULT 0
 );
+
+-- Circles: user-defined clusters of groups, contacts, and other circles.
+-- Membership is many-to-many and circles may nest (cycles are rejected in code).
+CREATE TABLE IF NOT EXISTS circles (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    color      TEXT    NOT NULL DEFAULT '',
+    notes      TEXT    NOT NULL DEFAULT '',
+    keywords   TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS circle_members (
+    circle_id   INTEGER NOT NULL,
+    member_type TEXT    NOT NULL,            -- 'group' | 'contact' | 'circle'
+    member_ref  TEXT    NOT NULL,            -- JID for group/contact; circle id for circle
+    added_at    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (circle_id, member_type, member_ref),
+    FOREIGN KEY (circle_id) REFERENCES circles(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_circle_members_ref ON circle_members(member_type, member_ref);
+
+-- Tags: user-defined labels (company, position, anything) for contacts.
+CREATE TABLE IF NOT EXISTS tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL UNIQUE,
+    color      TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS contact_tags (
+    contact_jid TEXT    NOT NULL,
+    tag_id      INTEGER NOT NULL,
+    added_at    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (contact_jid, tag_id),
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contact_tags_jid ON contact_tags(contact_jid);
 `

@@ -112,9 +112,10 @@ func SyncGroups(c *Client) error {
 				UpdatedAt:    now,
 			})
 		}
-
-		// Rate limit
-		time.Sleep(2 * time.Second)
+		// No per-group network call here — participants come from the single
+		// GetJoinedGroups response above — so there is nothing to rate-limit.
+		// (A previous 2s sleep here made the initial sync take 30+ min and
+		// blocked SyncContacts behind it.)
 	}
 
 	c.Log.Infof("Groups sync complete: %d groups", len(groups))

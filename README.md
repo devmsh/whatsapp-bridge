@@ -38,17 +38,42 @@ The key insight: **don't abstract whatsmeow, map it.** The V1 tried to create a 
 ## Quick Start
 
 ```bash
-# Build
-go build -o whatsapp-bridge-v2
+# Build the web UI + bridge into one binary
+make build
 
-# Run (first time — scan the QR code in terminal)
+# Run it
 ./whatsapp-bridge-v2
+
+# Open the GUI (onboarding, QR, sync, explorer)
+open http://localhost:8082/
 
 # Health check
 curl http://localhost:8082/api/v2/health
 ```
 
-On first run, a QR code appears in the terminal. Scan it with WhatsApp to link the device. The phone will push a full history sync automatically.
+On first run the bridge is not linked. Open the GUI and scan the QR code with
+WhatsApp (Settings → Linked Devices → Link a Device). The QR also prints in the
+terminal for headless use. After linking, the phone pushes a full history sync,
+and the GUI shows live progress.
+
+## Web UI
+
+A React + Vite + Tailwind app lives in `web/`. It is built to `web/dist` and
+embedded into the Go binary with `go:embed`, so the production build is still a
+single binary. The UI is served on the same port as the API and binds to
+`127.0.0.1` only (set `BRIDGE_BIND=0.0.0.0` to expose it).
+
+```bash
+# One-off production build (UI + binary)
+make build
+
+# Frontend development with hot reload:
+make run        # terminal 1 — the Go bridge on :8082
+make dev-web    # terminal 2 — Vite on :5173, proxies /api to the bridge
+```
+
+What the UI covers today: onboarding (QR linking), live history-sync progress,
+and a connected dashboard. A chat / media / contact explorer is next.
 
 ## Configuration
 
@@ -56,7 +81,8 @@ All configuration via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BRIDGE_PORT` | `8082` | HTTP API port |
+| `BRIDGE_PORT` | `8082` | HTTP API + web UI port |
+| `BRIDGE_BIND` | `127.0.0.1` | Bind address (`0.0.0.0` to expose on the network) |
 | `BRIDGE_DB_PATH` | `store/messages.db` | SQLite database path |
 | `BRIDGE_WA_DB_PATH` | `store/whatsapp.db` | WhatsApp session database path |
 | `BRIDGE_MEDIA_DIR` | `store` | Directory for downloaded media |

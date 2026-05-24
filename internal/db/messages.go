@@ -172,6 +172,45 @@ func (s *Store) GetMessage(id, chatJID string) (*Message, error) {
 	return m, err
 }
 
+// ChatPreview is a compact view of a chat's most recent message, for the
+// chat-list second line (like WhatsApp's preview).
+type ChatPreview struct {
+	ChatJID      string `json:"chat_jid"`
+	Sender       string `json:"sender"`
+	SenderName   string `json:"sender_name"`
+	PushName     string `json:"push_name"`
+	Content      string `json:"content"`
+	MediaType    string `json:"media_type"`
+	MediaCaption string `json:"media_caption"`
+	IsFromMe     bool   `json:"is_from_me"`
+	IsGroup      bool   `json:"is_group"`
+	IsDeleted    bool   `json:"is_deleted"`
+	Timestamp    int64  `json:"timestamp"`
+}
+
+// GetChatPreviews returns the latest message per chat, keyed by chat JID.
+func (s *Store) GetChatPreviews() (map[string]ChatPreview, error) {
+	rows, err := s.DB.Query(`SELECT m.chat_jid, m.sender, m.sender_name, m.push_name, m.content,
+		m.media_type, m.media_caption, m.is_from_me, m.is_group, m.is_deleted, m.timestamp
+		FROM messages m
+		JOIN (SELECT chat_jid, MAX(timestamp) AS mt FROM messages GROUP BY chat_jid) l
+		  ON m.chat_jid = l.chat_jid AND m.timestamp = l.mt`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]ChatPreview)
+	for rows.Next() {
+		var p ChatPreview
+		if err := rows.Scan(&p.ChatJID, &p.Sender, &p.SenderName, &p.PushName, &p.Content,
+			&p.MediaType, &p.MediaCaption, &p.IsFromMe, &p.IsGroup, &p.IsDeleted, &p.Timestamp); err != nil {
+			return out, err
+		}
+		out[p.ChatJID] = p
+	}
+	return out, rows.Err()
+}
+
 // MarkDeleted marks a message as deleted.
 func (s *Store) MarkDeleted(id, chatJID, deletedBy string, deletedAt int64) error {
 	_, err := s.DB.Exec(

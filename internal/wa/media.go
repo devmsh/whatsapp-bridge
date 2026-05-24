@@ -12,8 +12,6 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
-const maxMediaSize = 50 * 1024 * 1024 // 50MB
-
 // MediaInfo holds metadata about a downloaded media file.
 type MediaInfo struct {
 	Type          string `json:"type"`
@@ -36,20 +34,29 @@ type mediaDesc struct {
 	thumbnail []byte
 }
 
-// DownloadMedia inspects a waE2E.Message and downloads any media it contains.
-// Returns nil if no media is present.
-func DownloadMedia(wa *whatsmeow.Client, msg *waE2E.Message, msgID, baseDir string, log waLog.Logger) *MediaInfo {
+// DownloadMedia inspects a waE2E.Message and downloads any media it contains,
+// subject to the given policy. Returns nil if no media is present. When the
+// policy skips a file (disabled type or over the size cap), it returns
+// metadata only (no Path) so the message still records that media exists.
+func DownloadMedia(wa *whatsmeow.Client, msg *waE2E.Message, msgID, baseDir string, policy MediaPolicy, log waLog.Logger) *MediaInfo {
 	desc := detectMedia(msg)
 	if desc == nil {
 		return nil
 	}
 
-	dir := filepath.Join(baseDir, desc.subdir)
-	if desc.size > uint64(maxMediaSize) {
-		log.Warnf("Media too large (%d bytes), skipping download", desc.size)
-		return &MediaInfo{Type: desc.mediaType, Mime: desc.mime, Size: int(desc.size),
-			Caption: desc.caption, Filename: desc.filename}
+	metaOnly := &MediaInfo{Type: desc.mediaType, Mime: desc.mime, Size: int(desc.size),
+		Caption: desc.caption, Filename: desc.filename}
+
+	if !policy.allows(desc.mediaType) {
+		log.Debugf("Media type %s disabled by policy, recording metadata only", desc.mediaType)
+		return metaOnly
 	}
+	if cap := policy.maxBytes(); cap > 0 && desc.size > cap {
+		log.Infof("Media %s over size cap (%d bytes), recording metadata only", desc.mediaType, desc.size)
+		return metaOnly
+	}
+
+	dir := filepath.Join(baseDir, desc.subdir)
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		log.Warnf("Failed to create media dir %s: %v", dir, err)

@@ -33,6 +33,14 @@ func NewStore(path string) (*Store, error) {
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
 
+	// Idempotent column migrations for tables that predate a column.
+	// Errors (e.g. "duplicate column name") are expected and ignored.
+	for _, stmt := range []string{
+		`ALTER TABLE circles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''`,
+	} {
+		sqlDB.Exec(stmt)
+	}
+
 	return &Store{DB: sqlDB}, nil
 }
 

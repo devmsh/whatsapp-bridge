@@ -22,10 +22,23 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 500, err.Error())
 		return
 	}
-	if chats == nil {
-		chats = []db.Chat{}
+
+	previews, _ := s.store.GetChatPreviews()
+
+	type chatWithPreview struct {
+		db.Chat
+		LastMessage *db.ChatPreview `json:"last_message,omitempty"`
 	}
-	jsonOK(w, chats)
+	out := make([]chatWithPreview, 0, len(chats))
+	for _, c := range chats {
+		row := chatWithPreview{Chat: c}
+		if p, ok := previews[c.JID]; ok {
+			pv := p
+			row.LastMessage = &pv
+		}
+		out = append(out, row)
+	}
+	jsonOK(w, out)
 }
 
 func (s *Server) handleChatByJID(w http.ResponseWriter, r *http.Request) {

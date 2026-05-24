@@ -4,8 +4,22 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
+func handlePairSuccess(c *Client, evt *events.PairSuccess) {
+	c.Log.Infof("Paired with %s (platform=%s)", evt.ID.String(), evt.Platform)
+	dev := &DeviceInfo{
+		JID:          evt.ID.String(),
+		Platform:     evt.Platform,
+		BusinessName: evt.BusinessName,
+	}
+	if !evt.LID.IsEmpty() {
+		dev.LID = evt.LID.String()
+	}
+	c.Auth.onPairSuccess(dev)
+}
+
 func handleConnected(c *Client, _ *events.Connected) {
 	c.Log.Infof("Connected to WhatsApp")
+	c.Auth.onConnected()
 
 	// Trigger immediate sync after connection
 	go func() {
@@ -16,12 +30,24 @@ func handleConnected(c *Client, _ *events.Connected) {
 		if err := SyncContacts(c); err != nil {
 			c.Log.Warnf("Initial contact sync failed: %v", err)
 		}
+		c.Sync.MarkInitialSyncDone()
 		c.Log.Infof("Initial sync complete")
 	}()
 }
 
+func handleOfflineSyncPreview(c *Client, evt *events.OfflineSyncPreview) {
+	c.Log.Infof("Offline sync preview: %d messages queued", evt.Messages)
+	c.Sync.RecordOfflinePreview(evt.Messages)
+}
+
+func handleOfflineSyncCompleted(c *Client, evt *events.OfflineSyncCompleted) {
+	c.Log.Infof("Offline sync completed: %d items", evt.Count)
+	c.Sync.RecordOfflineCompleted(evt.Count)
+}
+
 func handleLoggedOut(c *Client, evt *events.LoggedOut) {
 	c.Log.Errorf("Logged out: onConnect=%v reason=%s", evt.OnConnect, evt.Reason.String())
+	c.Auth.onLoggedOut()
 }
 
 func handleDisconnected(c *Client, _ *events.Disconnected) {

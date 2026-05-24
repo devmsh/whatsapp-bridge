@@ -73,7 +73,7 @@ func handleMessage(c *Client, evt *events.Message) {
 	extractContextFields(msg, rec)
 
 	// Handle media (image, video, audio, document, sticker)
-	mediaInfo := DownloadMedia(c.WA, msg, info.ID, c.MediaDir, c.Log)
+	mediaInfo := DownloadMedia(c.WA, msg, info.ID, c.MediaDir, c.MediaPolicy(), c.Log)
 	if mediaInfo != nil {
 		rec.MediaType = mediaInfo.Type
 		rec.MediaPath = mediaInfo.Path

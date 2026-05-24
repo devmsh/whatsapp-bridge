@@ -89,6 +89,8 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleContactAvatar(w, r, jid)
 	case "name":
 		s.handleContactName(w, r, jid)
+	case "tags":
+		s.handleContactTags(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)

@@ -6,8 +6,12 @@ vendor/
 .DS_Store
 .env
 
+# Web UI (frontend deps; built dist/ is committed so `go build` works)
+web/node_modules/
+
 # Personal transcripts / scratch
 3A5FC99E43BDF9C89972.*
 *.srt
 *.vtt
 *.tsv
+web/tsconfig.tsbuildinfo

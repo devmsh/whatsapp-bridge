@@ -3,11 +3,9 @@ package wa
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
-	"github.com/mdp/qrterminal"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -23,8 +21,13 @@ type Client struct {
 	MediaDir    string
 	Log         waLog.Logger
 	Broadcaster *Broadcaster
+	Auth        *AuthManager
+	Sync        *SyncTracker
 	startTime   time.Time
 	mu          sync.RWMutex
+
+	mediaPolicy MediaPolicy
+	policyMu    sync.RWMutex
 }
 
 // NewClient creates a new WhatsApp client backed by the given DB paths.
@@ -46,40 +49,27 @@ func NewClient(waDBPath string, store *db.Store, mediaDir string, logLevel strin
 
 	waClient := whatsmeow.NewClient(device, logger)
 
-	return &Client{
+	c := &Client{
 		WA:          waClient,
 		Store:       store,
 		MediaDir:    mediaDir,
 		Log:         logger,
 		Broadcaster: NewBroadcaster(),
-	}, nil
+		Sync:        NewSyncTracker(),
+		mediaPolicy: DefaultMediaPolicy(),
+	}
+	c.Auth = newAuthManager(c)
+	return c, nil
 }
 
-// Connect establishes the WhatsApp connection. Shows QR if needed.
+// Connect establishes the WhatsApp connection. When no session exists it begins
+// the QR login flow (surfaced through the AuthManager); otherwise it dials in.
+// It returns quickly — login state is driven by events, not by blocking here.
 func (c *Client) Connect() error {
-	if c.WA.Store.ID == nil {
-		// No session, need QR scan
-		qrChan, _ := c.WA.GetQRChannel(context.Background())
-		if err := c.WA.Connect(); err != nil {
-			return fmt.Errorf("connect: %w", err)
-		}
-		for evt := range qrChan {
-			if evt.Event == "code" {
-				qrterminal.GenerateHalfBlock(evt.Code, qrterminal.M, os.Stdout)
-				fmt.Println("Scan the QR code above to log in")
-			} else {
-				fmt.Println("QR event:", evt.Event)
-			}
-		}
-	} else {
-		if err := c.WA.Connect(); err != nil {
-			return fmt.Errorf("connect: %w", err)
-		}
-	}
 	c.mu.Lock()
 	c.startTime = time.Now()
 	c.mu.Unlock()
-	return nil
+	return c.Auth.StartLogin(context.Background())
 }
 
 // Disconnect cleanly shuts down the WhatsApp connection.
@@ -123,6 +113,25 @@ func (c *Client) ResolvePhoneForLID(lidJID string) string {
 		return ""
 	}
 	return pn.String()
+}
+
+// deviceInfo reads the linked account details from the device store.
+// Returns nil when no device is linked.
+func (c *Client) deviceInfo() *DeviceInfo {
+	store := c.WA.Store
+	if store == nil || store.ID == nil {
+		return nil
+	}
+	d := &DeviceInfo{
+		JID:          store.ID.String(),
+		PushName:     store.PushName,
+		Platform:     store.Platform,
+		BusinessName: store.BusinessName,
+	}
+	if !store.LID.IsEmpty() {
+		d.LID = store.LID.String()
+	}
+	return d
 }
 
 // Uptime returns how long the client has been running.

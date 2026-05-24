@@ -77,7 +77,7 @@ func handleNewsletterLiveUpdate(c *Client, evt *events.NewsletterLiveUpdate) {
 			MessageType: msg.Type,
 			Content:     extractContent(msg.Message),
 		}
-		mediaInfo := DownloadMedia(c.WA, msg.Message, msg.MessageID, c.MediaDir, c.Log)
+		mediaInfo := DownloadMedia(c.WA, msg.Message, msg.MessageID, c.MediaDir, c.MediaPolicy(), c.Log)
 		if mediaInfo != nil {
 			rec.MediaType = mediaInfo.Type
 			rec.MediaPath = mediaInfo.Path

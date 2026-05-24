@@ -67,8 +67,10 @@ func handleHistorySync(c *Client, evt *events.HistorySync) {
 		return
 	}
 
-	c.Log.Infof("History sync: type=%s, conversations=%d",
-		data.GetSyncType().String(), len(data.GetConversations()))
+	syncType := data.GetSyncType().String()
+	c.Log.Infof("History sync: type=%s, progress=%d%%, conversations=%d",
+		syncType, data.GetProgress(), len(data.GetConversations()))
+	c.Sync.RecordHistory(syncType)
 
 	for _, conv := range data.GetConversations() {
 		chatJID := conv.GetID()
