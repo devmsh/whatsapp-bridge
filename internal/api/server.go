@@ -20,13 +20,19 @@ type Server struct {
 	cfg        *config.Config
 	webFS      fs.FS
 	fileServer http.Handler
-	profiles   *ProfileManager
-	runs       *RunManager
+	profiles           *ProfileManager
+	runs               *RunManager
+	autoExtract        *AutoExtractor
+	mediaUnderstanding *MediaUnderstandingManager
 }
 
 // StartProfiler starts the background entity-profiling worker and daily refresh.
+// Also starts the continuous-extraction scheduler and media-understanding
+// workers (all idle unless enabled).
 func (s *Server) StartProfiler() {
 	s.profiles.Start()
+	s.autoExtract.Start()
+	s.mediaUnderstanding.Start()
 }
 
 // NewServer creates a new API server. webFS is the embedded web UI (may be nil).
@@ -45,6 +51,8 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 	}
 	s.profiles = newProfileManager(s)
 	s.runs = newRunManager()
+	s.autoExtract = newAutoExtractor(s)
+	s.mediaUnderstanding = newMediaManager(s)
 	s.registerRoutes()
 	return s
 }
@@ -148,6 +156,19 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/extractions/mark", s.handleExtractionMark)
 	s.mux.HandleFunc("/api/v2/extractions/runs", s.handleRunsRoot)
 	s.mux.HandleFunc("/api/v2/extractions/runs/", s.handleRunsRoot)
+
+	// Daily briefings (AI digest of tasks + signal chats + awaiting-reply)
+	s.mux.HandleFunc("/api/v2/briefings", s.handleBriefingsRoot)
+	s.mux.HandleFunc("/api/v2/briefings/", s.handleBriefingsRoot)
+
+	// Auto / continuous extraction
+	s.mux.HandleFunc("/api/v2/extractions/auto", s.handleAutoExtract)
+
+	// Universal search (contacts + groups + circles + tasks + messages)
+	s.mux.HandleFunc("/api/v2/search", s.handleSearch)
+
+	// Media understanding (voice transcription + image description)
+	s.mux.HandleFunc("/api/v2/media/understanding", s.handleMediaUnderstanding)
 
 	// Entity profiles (AI-written purpose descriptions; background-refreshed)
 	s.mux.HandleFunc("/api/v2/profiles", s.handleProfile)

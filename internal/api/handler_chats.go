@@ -56,6 +56,8 @@ func (s *Server) handleChatByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleChatAction(w, r, jid)
 	case "disappearing":
 		s.handleChatDisappearing(w, r, jid)
+	case "draft-replies":
+		s.handleDraftReplies(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)

@@ -6,6 +6,8 @@ import { ChatCircles } from './ChatCircles'
 import { TagChips, TagEditor } from './Tags'
 import { ExtractionsModal } from './Extractions'
 import { ProfileCard } from './ProfileCard'
+import { DraftRepliesPopover } from './DraftReplies'
+import { DashboardModal } from './Dashboard'
 
 const PAGE = 100
 
@@ -26,6 +28,7 @@ export function MessageThread({
   onOpenTask,
   onTasksChanged,
   onOpenChatTasks,
+  onOpenCircle,
   onSent,
 }: {
   jid: string
@@ -42,6 +45,7 @@ export function MessageThread({
   onOpenTask: (id: number) => void
   onTasksChanged: () => void
   onOpenChatTasks: (jid: string) => void
+  onOpenCircle?: (id: number) => void
   onSent?: (m: Message) => void
 }) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -51,6 +55,9 @@ export function MessageThread({
   const [extracting, setExtracting] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [liveRunId, setLiveRunId] = useState<string | null>(null)
+  const [showDrafts, setShowDrafts] = useState(false)
+  const [composerDraft, setComposerDraft] = useState('')
+  const [showDashboard, setShowDashboard] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -122,14 +129,16 @@ export function MessageThread({
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b border-neutral-800 px-4 py-3">
-        <div
+        <button
+          onClick={() => setShowDashboard(true)}
+          title="See everything about this chat"
           className={
-            'flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold ' +
+            'flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition hover:opacity-80 ' +
             (group ? 'bg-sky-600/30 text-sky-300' : 'bg-neutral-700 text-neutral-200')
           }
         >
           {(title.replace(/^\+/, '')[0] || '?').toUpperCase()}
-        </div>
+        </button>
         <div className="min-w-0 flex-1">
           <div dir="auto" className="truncate text-sm font-semibold">
             {title}
@@ -183,6 +192,13 @@ export function MessageThread({
           </button>
         )}
         <button
+          onClick={() => setShowDrafts(true)}
+          className="shrink-0 rounded-lg bg-sky-500/15 px-2.5 py-1.5 text-xs font-medium text-sky-300 transition hover:bg-sky-500/30"
+          title="Draft 2-3 candidate replies (AI)"
+        >
+          ✨ Draft
+        </button>
+        <button
           onClick={() => onOpenChatTasks(jid)}
           className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800"
           title="Tasks in this chat"
@@ -226,9 +242,44 @@ export function MessageThread({
         <Composer
           jid={jid}
           group={group}
-          initialText={initialDraft}
-          onDraftConsumed={onDraftConsumed}
+          initialText={composerDraft || initialDraft}
+          onDraftConsumed={() => {
+            if (composerDraft) setComposerDraft('')
+            else onDraftConsumed?.()
+          }}
           onSent={handleSent}
+        />
+      )}
+
+      {showDrafts && (
+        <DraftRepliesPopover
+          jid={jid}
+          onPick={(text) => {
+            setComposerDraft(text)
+            setShowDrafts(false)
+          }}
+          onClose={() => setShowDrafts(false)}
+        />
+      )}
+
+      {showDashboard && (
+        <DashboardModal
+          kind={group ? 'group' : 'contact'}
+          jid={jid}
+          onOpenChat={(j) => {
+            setShowDashboard(false)
+            // Same chat: noop. Different chat would require an explorer-level open.
+            if (j !== jid) onOpenChatTasks(j) // best-effort fallback
+          }}
+          onOpenTask={(id) => {
+            setShowDashboard(false)
+            onOpenTask(id)
+          }}
+          onOpenCircle={(id) => {
+            setShowDashboard(false)
+            onOpenCircle?.(id)
+          }}
+          onClose={() => setShowDashboard(false)}
         />
       )}
 

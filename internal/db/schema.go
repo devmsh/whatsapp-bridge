@@ -327,6 +327,34 @@ CREATE TABLE IF NOT EXISTS entity_profiles (
 CREATE INDEX IF NOT EXISTS idx_profiles_generated ON entity_profiles(generated_at);
 CREATE INDEX IF NOT EXISTS idx_profiles_status ON entity_profiles(status);
 
+-- media_understanding: AI-derived text for media messages.
+-- One row per (message, kind). Used to enrich extractions and the UI:
+--   kind='transcript'  — voice notes / audio, via whisper-cli (local).
+--   kind='description' — images, via Claude vision.
+CREATE TABLE IF NOT EXISTS media_understanding (
+    chat_jid     TEXT    NOT NULL,
+    message_id   TEXT    NOT NULL,
+    kind         TEXT    NOT NULL,            -- 'transcript' | 'description'
+    content      TEXT    NOT NULL DEFAULT '',
+    status       TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'ok' | 'error' | 'skipped'
+    error        TEXT    NOT NULL DEFAULT '',
+    generated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (chat_jid, message_id, kind),
+    FOREIGN KEY (chat_jid, message_id) REFERENCES messages(chat_jid, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mu_status ON media_understanding(status);
+
+-- briefings: AI-written daily digests (today / overdue / signal chats /
+-- awaiting reply). One row per generated briefing. The data column is the
+-- full JSON blob that the UI renders directly.
+CREATE TABLE IF NOT EXISTS briefings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    for_date      TEXT    NOT NULL,            -- YYYY-MM-DD (local)
+    data          TEXT    NOT NULL DEFAULT '', -- JSON
+    generated_at  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_briefings_date ON briefings(for_date);
+
 -- chat_extraction_state: per-chat watermark for INCREMENTAL task extraction.
 -- After a successful extraction sweep, last_msg_ts is set to the chat's max
 -- message timestamp at that moment. The next run starts at last_msg_ts and

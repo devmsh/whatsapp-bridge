@@ -21,6 +21,8 @@ import { TaskView } from './TaskView'
 import { MessageThread } from './MessageThread'
 import { MediaSettings } from '../Settings'
 import { ProfilingStatusModal } from './ProfilingStatus'
+import { BriefingModal } from './BriefingView'
+import { SearchBar } from './Search'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks'
 
@@ -45,6 +47,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [liveMsg, setLiveMsg] = useState<Message | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
+  const [showBriefing, setShowBriefing] = useState(false)
   // pending composer drafts per chat — set by "Nudge" / "Reply" buttons in
   // TaskView, consumed once by MessageThread when it opens that chat.
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({})
@@ -194,6 +197,19 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
       {showProfiling && <ProfilingStatusModal onClose={() => setShowProfiling(false)} />}
+      {showBriefing && (
+        <BriefingModal
+          onOpenTask={(id) => {
+            setShowBriefing(false)
+            openTask(id)
+          }}
+          onOpenChat={(jid) => {
+            setShowBriefing(false)
+            openChat(jid)
+          }}
+          onClose={() => setShowBriefing(false)}
+        />
+      )}
 
       <aside className="flex w-80 shrink-0 flex-col border-r border-neutral-800">
         <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
@@ -209,6 +225,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <IconButton title="Today’s briefing" onClick={() => setShowBriefing(true)}>
+              📊
+            </IconButton>
             <IconButton title="Profiles & AI context" onClick={() => setShowProfiling(true)}>
               🧠
             </IconButton>
@@ -220,6 +239,17 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             </IconButton>
           </div>
         </header>
+
+        <div className="border-b border-neutral-800 px-3 py-2">
+          <SearchBar
+            onPick={(h) => {
+              if (h.kind === 'contact' || h.kind === 'group') openChat(h.id)
+              else if (h.kind === 'circle') openCircle(parseInt(h.id, 10))
+              else if (h.kind === 'task') openTask(parseInt(h.id, 10))
+              else if (h.kind === 'message' && h.chat_jid) openChat(h.chat_jid)
+            }}
+          />
+        </div>
 
         <div className="flex border-b border-neutral-800 text-sm">
           <TabButton active={tab === 'chats'} onClick={() => setTab('chats')}>
@@ -298,6 +328,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onOpenTask={openTask}
             onTasksChanged={bumpTasks}
             onOpenChatTasks={openChatTasks}
+            onOpenCircle={openCircle}
             onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
           />
         ) : selectedTask != null ? (

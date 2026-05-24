@@ -175,6 +175,8 @@ func (s *Server) handleGroupByJID(w http.ResponseWriter, r *http.Request) {
 	switch sub {
 	case "":
 		s.handleGroupGet(w, r, jid)
+	case "dashboard":
+		s.handleGroupDashboard(w, r, jid)
 	case "name":
 		s.handleGroupName(w, r, jid)
 	case "description":

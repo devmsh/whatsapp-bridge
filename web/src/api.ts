@@ -300,6 +300,139 @@ export interface ProfilesStatus {
   enabled: boolean
 }
 
+// Daily briefing — AI-written digest of tasks + recent signal + awaiting-reply.
+export interface BriefingTask {
+  id: number
+  title: string
+  priority: string
+  status: string
+  assignee?: string
+  assignee_jid?: string
+  due_at?: number
+  circle_name?: string
+}
+
+export interface BriefingChat {
+  jid: string
+  name: string
+  last_active_at: number
+  new_messages: number
+  narrative?: string
+}
+
+export interface BriefingAwaiting {
+  jid: string
+  name: string
+  last_message_at: number
+  last_from_name: string
+  preview?: string
+}
+
+export interface BriefingPayload {
+  for_date: string
+  generated_at: number
+  summary: string
+  today: BriefingTask[]
+  overdue: BriefingTask[]
+  signal_chats: BriefingChat[]
+  awaiting_reply: BriefingAwaiting[]
+  stats_tasks_open: number
+}
+
+// Stored briefing row (the "data" field is BriefingPayload JSON).
+export interface BriefingRow {
+  id: number
+  for_date: string
+  data: string
+  generated_at: number
+}
+
+export interface DashRecent {
+  timestamp: number
+  is_from_me: boolean
+  sender_jid?: string
+  from: string
+  content: string
+}
+
+export interface DashContact {
+  jid: string
+  name: string
+  phone?: string
+  business_name?: string
+  is_business?: boolean
+  profile: EntityProfile | null
+  tags: Tag[]
+  circles: Circle[]
+  tasks_open: Task[]
+  tasks_done_count: number
+  last_active: number
+  message_count: number
+  recent: DashRecent[]
+}
+
+export interface DashContributor {
+  jid: string
+  name: string
+  messages: number
+  is_admin?: boolean
+}
+
+// Universal search hit (any kind).
+export interface SearchHit {
+  kind: 'contact' | 'group' | 'circle' | 'task' | 'message'
+  id: string
+  title: string
+  subtitle?: string
+  snippet?: string
+  chat_jid?: string
+  ts?: number
+}
+
+// Voice + image understanding status.
+export interface MediaUnderstandingStats {
+  audio_total: number
+  audio_transcribed: number
+  audio_pending: number
+  audio_error: number
+  image_total: number
+  image_described: number
+  image_pending: number
+  image_error: number
+}
+
+export interface MediaUnderstandingStatus {
+  audio_enabled: boolean
+  image_enabled: boolean
+  whisper_detected: boolean
+  whisper_binary?: string
+  stats: MediaUnderstandingStats
+}
+
+// Auto-extract scheduler status.
+export interface AutoExtractStatus {
+  enabled: boolean
+  interval_hours: number
+  running: boolean
+  last_run_id?: string
+  last_ticked_at?: number
+}
+
+export interface DashGroup {
+  jid: string
+  name: string
+  topic?: string
+  participant_count: number
+  profile: EntityProfile | null
+  circles: Circle[]
+  tasks_open: Task[]
+  tasks_done_count: number
+  last_active: number
+  message_count: number
+  top_contributors: DashContributor[]
+  recent: DashRecent[]
+}
+
 export interface CircleContact {
   jid: string
   group_count: number
@@ -555,6 +688,61 @@ export const api = {
     return res.json()
   },
   startProfiling: () => postBody<{ enabled: boolean }>('/api/v2/profiles/status', {}),
+
+  // Briefings.
+  briefingToday: async (): Promise<BriefingRow | null> => {
+    const res = await fetch('/api/v2/briefings/today')
+    return res.json()
+  },
+  generateBriefing: () => postBody<BriefingRow>('/api/v2/briefings/generate', {}),
+  listBriefings: async (): Promise<BriefingRow[]> => {
+    const res = await fetch('/api/v2/briefings')
+    return res.json()
+  },
+
+  draftReplies: async (
+    jid: string,
+  ): Promise<{ drafts: { text: string; style?: string; reason?: string }[] }> => {
+    const res = await fetch(`/api/v2/chats/${encodeURIComponent(jid)}/draft-replies`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error(`${res.status}`)
+    return res.json()
+  },
+
+  contactDashboard: async (jid: string): Promise<DashContact> => {
+    const res = await fetch(`/api/v2/contacts/${encodeURIComponent(jid)}/dashboard`)
+    return res.json()
+  },
+  groupDashboard: async (jid: string): Promise<DashGroup> => {
+    const res = await fetch(`/api/v2/groups/${encodeURIComponent(jid)}/dashboard`)
+    return res.json()
+  },
+
+  search: async (q: string): Promise<{ q: string; hits: SearchHit[] }> => {
+    const res = await fetch('/api/v2/search?q=' + encodeURIComponent(q))
+    return res.json()
+  },
+
+  autoExtractStatus: async (): Promise<AutoExtractStatus> => {
+    const res = await fetch('/api/v2/extractions/auto')
+    return res.json()
+  },
+  autoExtractSet: (enabled?: boolean, intervalHours?: number) =>
+    postBody<AutoExtractStatus>('/api/v2/extractions/auto', {
+      enabled,
+      interval_hours: intervalHours,
+    }),
+
+  mediaUnderstandingStatus: async (): Promise<MediaUnderstandingStatus> => {
+    const res = await fetch('/api/v2/media/understanding')
+    return res.json()
+  },
+  mediaUnderstandingSet: (audio?: boolean, image?: boolean) =>
+    postBody<MediaUnderstandingStatus>('/api/v2/media/understanding', {
+      audio_enabled: audio,
+      image_enabled: image,
+    }),
   removeTaskCircle: (id: number, circleId: number) =>
     del(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
   deleteCircle: (id: number) => del(`/api/v2/circles/${id}`),

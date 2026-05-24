@@ -91,6 +91,8 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleContactName(w, r, jid)
 	case "tags":
 		s.handleContactTags(w, r, jid)
+	case "dashboard":
+		s.handleContactDashboard(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
