@@ -24,6 +24,7 @@ type Server struct {
 	runs               *RunManager
 	autoExtract        *AutoExtractor
 	mediaUnderstanding *MediaUnderstandingManager
+	hiddenUnlocker     *HiddenUnlocker
 }
 
 // StartProfiler starts the background entity-profiling worker and daily refresh.
@@ -53,6 +54,7 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 	s.runs = newRunManager()
 	s.autoExtract = newAutoExtractor(s)
 	s.mediaUnderstanding = newMediaManager(s)
+	s.hiddenUnlocker = newHiddenUnlocker()
 	s.registerRoutes()
 	return s
 }
@@ -169,6 +171,17 @@ func (s *Server) registerRoutes() {
 
 	// Media understanding (voice transcription + image description)
 	s.mux.HandleFunc("/api/v2/media/understanding", s.handleMediaUnderstanding)
+
+	// Hidden chats — lock / unlock with PIN + Touch ID.
+	s.mux.HandleFunc("/api/v2/hidden/status", s.handleHiddenStatus)
+	s.mux.HandleFunc("/api/v2/hidden/list", s.handleHiddenList)
+	s.mux.HandleFunc("/api/v2/hidden/pin/setup", s.handleHiddenPinSetup)
+	s.mux.HandleFunc("/api/v2/hidden/unlock/pin", s.handleHiddenUnlockPin)
+	s.mux.HandleFunc("/api/v2/hidden/webauthn/register/options", s.handleHiddenWARegisterOptions)
+	s.mux.HandleFunc("/api/v2/hidden/webauthn/register/verify", s.handleHiddenWARegisterVerify)
+	s.mux.HandleFunc("/api/v2/hidden/webauthn/auth/options", s.handleHiddenWAAuthOptions)
+	s.mux.HandleFunc("/api/v2/hidden/webauthn/auth/verify", s.handleHiddenWAAuthVerify)
+	s.mux.HandleFunc("/api/v2/hidden/lock", s.handleHiddenLock)
 
 	// Entity profiles (AI-written purpose descriptions; background-refreshed)
 	s.mux.HandleFunc("/api/v2/profiles", s.handleProfile)

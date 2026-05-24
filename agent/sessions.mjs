@@ -8,7 +8,7 @@
 // Sessions live under the cwd they were created in, so run this with the same
 // cwd as extract.mjs (the bridge sets that).
 
-import { listSessions, getSessionMessages } from '@anthropic-ai/claude-agent-sdk'
+import { listSessions, getSessionMessages, deleteSession } from '@anthropic-ai/claude-agent-sdk'
 
 const mode = process.argv[2]
 const arg = process.argv[3]
@@ -76,5 +76,26 @@ if (mode === 'show') {
   process.exit(0)
 }
 
-out({ error: 'usage: sessions.mjs list <chat_jid> | show <session_id>' })
+if (mode === 'delete-for-chat') {
+  // Delete every session tagged for this chat (chat-level extraction) OR
+  // whose firstPrompt contains the chat JID (untagged legacy runs).
+  const chatJid = arg || ''
+  if (!chatJid) {
+    out({ error: 'chat_jid required' })
+    process.exit(2)
+  }
+  const tag = 'wa-extract:' + chatJid
+  const sessions = await listSessions({ dir }).catch(() => [])
+  let deleted = 0
+  for (const s of sessions) {
+    if (s.tag === tag || (s.firstPrompt || '').includes(chatJid)) {
+      await deleteSession(s.sessionId, { dir }).catch(() => {})
+      deleted++
+    }
+  }
+  out({ deleted })
+  process.exit(0)
+}
+
+out({ error: 'usage: sessions.mjs list <tag> [match] | show <session_id> | delete-for-chat <chat_jid>' })
 process.exit(2)

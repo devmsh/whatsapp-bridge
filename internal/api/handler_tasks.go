@@ -43,6 +43,19 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			}
 			tasks = filtered
 		}
+		// Hidden chats: drop tasks whose origin is hidden, unless unlocked.
+		if !s.isUnlocked(r) {
+			hidden := s.store.HiddenChatJIDs()
+			if len(hidden) > 0 {
+				out := tasks[:0]
+				for _, t := range tasks {
+					if !hidden[t.OriginChatJID] {
+						out = append(out, t)
+					}
+				}
+				tasks = out
+			}
+		}
 		jsonOK(w, tasks)
 	case http.MethodPost:
 		var req struct {

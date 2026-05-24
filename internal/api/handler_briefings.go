@@ -157,7 +157,7 @@ func (s *Server) buildBriefing() (*briefingPayload, error) {
 		LIMIT 5`)
 
 	// ── signal chats (top by new-message count in last 24h) ──────────
-	// Skip newsletters / status / chats with under 3 messages.
+	// Skip newsletters / status / hidden chats / under 3 messages.
 	if rows, err := s.store.DB.Query(`
 		SELECT m.chat_jid,
 		       MAX(m.timestamp) AS last_ts,
@@ -171,6 +171,7 @@ func (s *Server) buildBriefing() (*briefingPayload, error) {
 		WHERE m.timestamp >= ?
 		  AND m.chat_jid NOT LIKE '%@newsletter'
 		  AND m.chat_jid != 'status@broadcast'
+		  AND m.chat_jid NOT IN (SELECT chat_jid FROM hidden_chats)
 		  AND COALESCE(m.content,'') != ''
 		GROUP BY m.chat_jid
 		HAVING n >= 3
@@ -192,6 +193,7 @@ func (s *Server) buildBriefing() (*briefingPayload, error) {
 		  FROM messages m
 		  WHERE m.chat_jid LIKE '%@s.whatsapp.net'
 		    AND m.timestamp >= ?
+		    AND m.chat_jid NOT IN (SELECT chat_jid FROM hidden_chats)
 		  GROUP BY m.chat_jid
 		)
 		SELECT m.chat_jid, m.timestamp,

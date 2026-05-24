@@ -77,6 +77,11 @@ func (s *Server) handleProfileRegenerate(w http.ResponseWriter, r *http.Request)
 		jsonError(w, 503, "profiler not running")
 		return
 	}
+	// AI never processes hidden chats — even on manual regeneration request.
+	if (req.Type == db.ProfileGroup || req.Type == db.ProfileContact) && s.store.IsChatHidden(req.Ref) {
+		jsonError(w, 403, "AI features are disabled for hidden chats")
+		return
+	}
 	s.profiles.RegenerateNow(req.Type, req.Ref)
 	jsonOK(w, map[string]any{"queued": true})
 }

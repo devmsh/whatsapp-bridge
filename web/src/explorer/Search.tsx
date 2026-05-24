@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type SearchHit } from '../api'
+import { HiddenLockModal } from './HiddenLock'
 
 // SearchBar is the top-bar universal search. Type a query; the dropdown lists
 // matching contacts, groups, circles, tasks, and message snippets. Picking
 // any result routes through onPick.
+//
+// Special: typing a digits-only query that looks like a PIN (4-12 digits)
+// pops the lock-unlock modal pre-filled with that PIN — matches the WhatsApp
+// pattern for revealing locked chats.
 export function SearchBar({
   onPick,
 }: {
   onPick: (h: SearchHit) => void
 }) {
   const [q, setQ] = useState('')
+  const [pinForUnlock, setPinForUnlock] = useState<string | null>(null)
   const [hits, setHits] = useState<SearchHit[]>([])
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -59,6 +65,15 @@ export function SearchBar({
           setOpen(true)
         }}
         onFocus={() => q && setOpen(true)}
+        onKeyDown={(e) => {
+          // Enter on a digits-only query is treated as a PIN attempt.
+          if (e.key === 'Enter' && /^\d{4,12}$/.test(q.trim())) {
+            e.preventDefault()
+            setPinForUnlock(q.trim())
+            setQ('')
+            setOpen(false)
+          }
+        }}
         placeholder="🔎  Search people, groups, tasks, messages…"
         className="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none"
       />
@@ -113,6 +128,13 @@ export function SearchBar({
             </div>
           )}
         </div>
+      )}
+      {pinForUnlock && (
+        <HiddenLockModal
+          prefilledPin={pinForUnlock}
+          onUnlocked={() => setPinForUnlock(null)}
+          onClose={() => setPinForUnlock(null)}
+        />
       )}
     </div>
   )

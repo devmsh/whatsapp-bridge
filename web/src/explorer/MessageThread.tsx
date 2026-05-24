@@ -8,6 +8,9 @@ import { ExtractionsModal } from './Extractions'
 import { ProfileCard } from './ProfileCard'
 import { DraftRepliesPopover } from './DraftReplies'
 import { DashboardModal } from './Dashboard'
+import { HideChatDialog } from './HideChatDialog'
+import { HiddenLockModal } from './HiddenLock'
+import { isUnlocked } from '../hidden'
 
 const PAGE = 100
 
@@ -58,6 +61,8 @@ export function MessageThread({
   const [showDrafts, setShowDrafts] = useState(false)
   const [composerDraft, setComposerDraft] = useState('')
   const [showDashboard, setShowDashboard] = useState(false)
+  const [showHideDialog, setShowHideDialog] = useState(false)
+  const [showUnlockForHide, setShowUnlockForHide] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -199,6 +204,16 @@ export function MessageThread({
           ✨ Draft
         </button>
         <button
+          onClick={() => {
+            if (!isUnlocked()) setShowUnlockForHide(true)
+            else setShowHideDialog(true)
+          }}
+          className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-400 transition hover:bg-neutral-800"
+          title="Hide this chat (and delete its AI-derived data)"
+        >
+          🔒
+        </button>
+        <button
           onClick={() => onOpenChatTasks(jid)}
           className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800"
           title="Tasks in this chat"
@@ -280,6 +295,36 @@ export function MessageThread({
             onOpenCircle?.(id)
           }}
           onClose={() => setShowDashboard(false)}
+        />
+      )}
+
+      {showHideDialog && (
+        <HideChatDialog
+          jid={jid}
+          title={title}
+          onDone={(res) => {
+            setShowHideDialog(false)
+            alert(
+              `Hidden. Removed: ${res.tasks_deleted} tasks, ${res.task_links_deleted} links, ` +
+                `${res.media_rows_deleted} audio/image rows, ${res.briefings_deleted} briefings, ` +
+                `${res.circle_edges_deleted} circle memberships.`,
+            )
+            onTasksChanged() // tasks may have been deleted
+            onCirclesChanged()
+            // Send the user back to the chat list since this chat is now hidden.
+            window.location.reload()
+          }}
+          onClose={() => setShowHideDialog(false)}
+        />
+      )}
+
+      {showUnlockForHide && (
+        <HiddenLockModal
+          onUnlocked={() => {
+            setShowUnlockForHide(false)
+            setShowHideDialog(true)
+          }}
+          onClose={() => setShowUnlockForHide(false)}
         />
       )}
 

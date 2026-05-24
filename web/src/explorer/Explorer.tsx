@@ -23,6 +23,8 @@ import { MediaSettings } from '../Settings'
 import { ProfilingStatusModal } from './ProfilingStatus'
 import { BriefingModal } from './BriefingView'
 import { SearchBar } from './Search'
+import { HiddenLockModal } from './HiddenLock'
+import { HiddenBadge } from './HiddenBadge'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks'
 
@@ -48,6 +50,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showSettings, setShowSettings] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
+  const [showUnlock, setShowUnlock] = useState(false)
   // pending composer drafts per chat — set by "Nudge" / "Reply" buttons in
   // TaskView, consumed once by MessageThread when it opens that chat.
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({})
@@ -57,21 +60,28 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
   const nameMap = useMemo(() => buildNameMap(contacts, groups), [contacts, groups])
 
+  // Initial loads. Also re-runs whenever the hidden-chats unlock state changes
+  // so freshly-unlocked chats appear (or relocked ones disappear).
   useEffect(() => {
-    api.chats().then((c) => setChats(c || [])).catch(() => {})
-    api.contacts().then((c) => setContacts(c || [])).catch(() => {})
-    api.groups().then((g) => setGroups(g || [])).catch(() => {})
-    api
-      .chatStats()
-      .then((stats) => {
-        const m = new Map<string, number>()
-        for (const st of stats || []) m.set(st.chat_jid, st.count)
-        setActivity(m)
-      })
-      .catch(() => {})
-    api.circles().then((c) => setCircles(c || [])).catch(() => {})
-    api.tags().then((t) => setTags(t || [])).catch(() => {})
-    api.contactTagsMap().then((m) => setContactTags(m || {})).catch(() => {})
+    function loadAll() {
+      api.chats().then((c) => setChats(c || [])).catch(() => {})
+      api.contacts().then((c) => setContacts(c || [])).catch(() => {})
+      api.groups().then((g) => setGroups(g || [])).catch(() => {})
+      api
+        .chatStats()
+        .then((stats) => {
+          const m = new Map<string, number>()
+          for (const st of stats || []) m.set(st.chat_jid, st.count)
+          setActivity(m)
+        })
+        .catch(() => {})
+      api.circles().then((c) => setCircles(c || [])).catch(() => {})
+      api.tags().then((t) => setTags(t || [])).catch(() => {})
+      api.contactTagsMap().then((m) => setContactTags(m || {})).catch(() => {})
+    }
+    loadAll()
+    window.addEventListener('wa.unlock-changed', loadAll)
+    return () => window.removeEventListener('wa.unlock-changed', loadAll)
   }, [])
 
   const reloadCircles = useCallback(() => {
@@ -197,6 +207,12 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
       {showProfiling && <ProfilingStatusModal onClose={() => setShowProfiling(false)} />}
+      {showUnlock && (
+        <HiddenLockModal
+          onUnlocked={() => setShowUnlock(false)}
+          onClose={() => setShowUnlock(false)}
+        />
+      )}
       {showBriefing && (
         <BriefingModal
           onOpenTask={(id) => {
@@ -225,6 +241,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <HiddenBadge onClick={() => setShowUnlock(true)} />
             <IconButton title="Today’s briefing" onClick={() => setShowBriefing(true)}>
               📊
             </IconButton>

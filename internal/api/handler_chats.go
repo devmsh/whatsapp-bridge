@@ -24,14 +24,26 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	previews, _ := s.store.GetChatPreviews()
+	// Hidden chats: include only if the request is unlocked.
+	hidden := map[string]bool{}
+	if !s.isUnlocked(r) {
+		hidden = s.store.HiddenChatJIDs()
+	}
 
 	type chatWithPreview struct {
 		db.Chat
 		LastMessage *db.ChatPreview `json:"last_message,omitempty"`
+		IsHidden    bool            `json:"is_hidden,omitempty"`
 	}
 	out := make([]chatWithPreview, 0, len(chats))
 	for _, c := range chats {
+		if hidden[c.JID] {
+			continue
+		}
 		row := chatWithPreview{Chat: c}
+		if s.store.IsChatHidden(c.JID) {
+			row.IsHidden = true // unlocked: still mark them so the UI can show the lock icon
+		}
 		if p, ok := previews[c.JID]; ok {
 			pv := p
 			row.LastMessage = &pv
@@ -58,6 +70,12 @@ func (s *Server) handleChatByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleChatDisappearing(w, r, jid)
 	case "draft-replies":
 		s.handleDraftReplies(w, r, jid)
+	case "hide":
+		s.handleChatHide(w, r, jid)
+	case "hide-preview":
+		s.handleChatHidePreview(w, r, jid)
+	case "unhide":
+		s.handleChatUnhide(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)

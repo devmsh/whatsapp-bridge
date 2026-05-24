@@ -30,6 +30,9 @@ func (s *Server) handleDraftReplies(w http.ResponseWriter, r *http.Request, jid 
 		jsonError(w, 400, "jid required")
 		return
 	}
+	if s.notAllowedForAI(w, jid) {
+		return
+	}
 	isGroup := strings.HasSuffix(jid, "@g.us")
 	kind := "contact"
 	entityType := db.ProfileContact

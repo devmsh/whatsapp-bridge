@@ -120,11 +120,15 @@ func (m *ProfileManager) EnqueueStale() {
 	store := m.s.store
 	counts := store.ChatMessageCounts()
 	existing := store.AllProfiles()
+	hidden := store.HiddenChatJIDs() // AI never profiles hidden chats
 
 	var stubs []db.ProfileRef
 
 	// consider a chat-like entity (group or DM) given its message count.
 	consider := func(entityType, ref string) {
+		if hidden[ref] {
+			return // hidden chat — never profile
+		}
 		p := existing[entityType+":"+ref]
 		if counts[ref] == 0 {
 			if p == nil { // empty and unseen → stub once, no model

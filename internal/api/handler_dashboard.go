@@ -62,6 +62,10 @@ func (s *Server) handleContactDashboard(w http.ResponseWriter, r *http.Request, 
 		methodNotAllowed(w)
 		return
 	}
+	// Hidden chats: 404 unless unlocked (UI never reaches the dashboard for them).
+	if s.notFoundIfHidden(w, r, jid) {
+		return
+	}
 	d := &dashContact{JID: jid, Tags: []db.Tag{}, Circles: []db.Circle{}, TasksOpen: []db.Task{}, Recent: []dashRecent{}}
 
 	// Identity / profile metadata from contacts row.
@@ -117,6 +121,9 @@ func (s *Server) handleContactDashboard(w http.ResponseWriter, r *http.Request, 
 func (s *Server) handleGroupDashboard(w http.ResponseWriter, r *http.Request, jid string) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
+		return
+	}
+	if s.notFoundIfHidden(w, r, jid) {
 		return
 	}
 	d := &dashGroup{JID: jid, Circles: []db.Circle{}, TasksOpen: []db.Task{}, TopContributors: []dashContributor{}, Recent: []dashRecent{}}

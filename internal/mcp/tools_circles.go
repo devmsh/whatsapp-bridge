@@ -154,15 +154,22 @@ func (s *Server) handleCircleInfo(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	groups, contacts, subIDs := s.circleClosure(id)
+	hidden := s.hiddenChatJIDs()
 
 	chats := make([]circleChat, 0, len(groups)+len(contacts))
 	for _, g := range groups {
+		if hidden[g] {
+			continue // AI never sees hidden chats
+		}
 		chats = append(chats, circleChat{
 			Type: "group", JID: g, Name: s.groupNameMCP(g),
 			MessageCount: s.msgCount(g), Description: s.profileDesc("group", g),
 		})
 	}
 	for _, c := range contacts {
+		if hidden[c] {
+			continue
+		}
 		chats = append(chats, circleChat{
 			Type: "contact", JID: c, Name: s.contactNameMCP(c),
 			MessageCount: s.msgCount(c), Description: s.profileDesc("contact", c),
@@ -233,6 +240,11 @@ func (s *Server) handleGetProfile(ctx context.Context, req mcp.CallToolRequest) 
 	ref, _ := args["ref"].(string)
 	if entityType == "" || ref == "" {
 		return mcp.NewToolResultError("entity_type and ref are required"), nil
+	}
+	// AI never sees data for hidden chats.
+	if (entityType == "group" || entityType == "contact") && s.hiddenChatJIDs()[ref] {
+		b, _ := json.Marshal(map[string]any{"entity_type": entityType, "ref": ref, "description": "", "status": "hidden"})
+		return mcp.NewToolResultText(string(b)), nil
 	}
 	var desc, source, status string
 	err := s.db.QueryRow(`SELECT description, source, status FROM entity_profiles WHERE entity_type = ? AND entity_ref = ?`,

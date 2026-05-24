@@ -327,6 +327,15 @@ CREATE TABLE IF NOT EXISTS entity_profiles (
 CREATE INDEX IF NOT EXISTS idx_profiles_generated ON entity_profiles(generated_at);
 CREATE INDEX IF NOT EXISTS idx_profiles_status ON entity_profiles(status);
 
+-- hidden_chats: chats the user has explicitly hidden. They are FILTERED OUT
+-- of every AI feature unconditionally (extraction, profiling, briefing, draft
+-- replies, search, dashboards) and from UI lists unless the request carries a
+-- valid unlock token. AI never processes hidden chats — not even when unlocked.
+CREATE TABLE IF NOT EXISTS hidden_chats (
+    chat_jid TEXT    PRIMARY KEY,
+    added_at INTEGER NOT NULL DEFAULT 0
+);
+
 -- media_understanding: AI-derived text for media messages.
 -- One row per (message, kind). Used to enrich extractions and the UI:
 --   kind='transcript'  — voice notes / audio, via whisper-cli (local).

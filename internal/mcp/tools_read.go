@@ -164,6 +164,10 @@ func (s *Server) handleReadMessages(ctx context.Context, req mcp.CallToolRequest
 	if chatJID == "" {
 		return mcp.NewToolResultError("chat_jid is required"), nil
 	}
+	// AI never reads from hidden chats.
+	if s.hiddenChatJIDs()[chatJID] {
+		return marshalResult(map[string]any{"messages": []any{}, "count": 0, "hidden": true})
+	}
 
 	since := time.Now().Add(-24 * time.Hour).Unix()
 	if v, ok := args["since"].(float64); ok && v > 0 {
@@ -541,6 +545,11 @@ func (s *Server) handleScan(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		msgQuery += " AND m.chat_jid != ?"
 		msgArgs = append(msgArgs, ej)
 	}
+	// AI never sees hidden chats. Unconditional filter.
+	if hf, ha := s.hiddenChatFilter("m.chat_jid"); hf != "" {
+		msgQuery += hf
+		msgArgs = append(msgArgs, ha...)
+	}
 	msgQuery += " ORDER BY m.timestamp ASC LIMIT ?"
 	msgArgs = append(msgArgs, limit)
 
@@ -780,6 +789,11 @@ func (s *Server) handleSearchMessages(ctx context.Context, req mcp.CallToolReque
 	if chatJID != "" {
 		searchSQL += " AND m.chat_jid = ?"
 		sqlArgs = append(sqlArgs, chatJID)
+	}
+	// AI never sees hidden chats.
+	if hf, ha := s.hiddenChatFilter("m.chat_jid"); hf != "" {
+		searchSQL += hf
+		sqlArgs = append(sqlArgs, ha...)
 	}
 
 	searchSQL += " ORDER BY m.timestamp DESC LIMIT ?"

@@ -401,6 +401,36 @@ export interface MediaUnderstandingStats {
   image_error: number
 }
 
+// Hidden / locked chats.
+export interface HiddenStatus {
+  pin_set: boolean
+  webauthn_registered: boolean
+  unlocked: boolean
+  hidden_count: number
+}
+
+export interface HideChatPreview {
+  jid: string
+  is_group: boolean
+  tasks_originated_here: number
+  tasks_linked: number
+  task_message_links: number
+  profile_exists: boolean
+  media_understanding_rows: number
+  extraction_watermark_set: boolean
+  circle_membership_count: number
+}
+
+export interface HideChatResult extends HideChatPreview {
+  tasks_deleted: number
+  task_links_deleted: number
+  profile_deleted: boolean
+  media_rows_deleted: number
+  briefings_deleted: number
+  circle_edges_deleted: number
+  watermark_deleted: boolean
+}
+
 export interface MediaUnderstandingStatus {
   audio_enabled: boolean
   image_enabled: boolean
@@ -743,6 +773,33 @@ export const api = {
       audio_enabled: audio,
       image_enabled: image,
     }),
+
+  // Hidden chats / lock.
+  hiddenStatus: async (): Promise<HiddenStatus> => {
+    const res = await fetch('/api/v2/hidden/status')
+    return res.json()
+  },
+  hiddenPinSetup: (pin: string, currentPin?: string) =>
+    postBody<{ pin_set: boolean }>('/api/v2/hidden/pin/setup', {
+      pin,
+      current_pin: currentPin,
+    }),
+  // Returns a pin_passed_token used for the subsequent WebAuthn assertion/registration.
+  hiddenUnlockPin: (pin: string) =>
+    postBody<{ pin_passed_token: string; webauthn_registered: boolean }>(
+      '/api/v2/hidden/unlock/pin',
+      { pin },
+    ),
+  // Lock the session.
+  hiddenLock: () => postBody<{ locked: boolean }>('/api/v2/hidden/lock', {}),
+  hideChatPreview: async (jid: string): Promise<HideChatPreview> => {
+    const res = await fetch(`/api/v2/chats/${encodeURIComponent(jid)}/hide-preview`)
+    return res.json()
+  },
+  hideChat: (jid: string) =>
+    postBody<HideChatResult>(`/api/v2/chats/${encodeURIComponent(jid)}/hide`, {}),
+  unhideChat: (jid: string) =>
+    postBody<{ jid: string; hidden: boolean }>(`/api/v2/chats/${encodeURIComponent(jid)}/unhide`, {}),
   removeTaskCircle: (id: number, circleId: number) =>
     del(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
   deleteCircle: (id: number) => del(`/api/v2/circles/${id}`),
