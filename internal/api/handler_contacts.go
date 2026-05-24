@@ -29,19 +29,17 @@ func (s *Server) handleContacts(w http.ResponseWriter, r *http.Request) {
 	if contacts == nil {
 		contacts = []db.Contact{}
 	}
-	// Hidden contacts: drop when not unlocked.
-	if !s.isUnlocked(r) {
-		hidden := s.store.HiddenChatJIDs()
-		if len(hidden) > 0 {
-			out := contacts[:0]
-			for _, c := range contacts {
-				if !hidden[c.JID] {
-					out = append(out, c)
-				}
-			}
-			contacts = out
+	// Private mode (see handler_chats.go): unlocked shows ONLY hidden, locked
+	// excludes hidden.
+	hidden := s.store.HiddenChatJIDs()
+	unlocked := s.isUnlocked(r)
+	out := contacts[:0]
+	for _, c := range contacts {
+		if hidden[c.JID] == unlocked {
+			out = append(out, c)
 		}
 	}
+	contacts = out
 	jsonOK(w, contacts)
 }
 

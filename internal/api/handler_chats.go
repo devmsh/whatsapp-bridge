@@ -24,11 +24,12 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	previews, _ := s.store.GetChatPreviews()
-	// Hidden chats: include only if the request is unlocked.
-	hidden := map[string]bool{}
-	if !s.isUnlocked(r) {
-		hidden = s.store.HiddenChatJIDs()
-	}
+	// "Private mode": when the request is unlocked, the chat list shows ONLY
+	// hidden chats (replacing the normal list). When locked, the normal list
+	// is returned with hidden chats excluded. The two never mix — same model
+	// as WhatsApp's locked-chats secret code.
+	hidden := s.store.HiddenChatJIDs()
+	unlocked := s.isUnlocked(r)
 
 	type chatWithPreview struct {
 		db.Chat
@@ -37,13 +38,12 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]chatWithPreview, 0, len(chats))
 	for _, c := range chats {
-		if hidden[c.JID] {
+		isHidden := hidden[c.JID]
+		// Locked → drop hidden. Unlocked → drop non-hidden.
+		if unlocked != isHidden {
 			continue
 		}
-		row := chatWithPreview{Chat: c}
-		if s.store.IsChatHidden(c.JID) {
-			row.IsHidden = true // unlocked: still mark them so the UI can show the lock icon
-		}
+		row := chatWithPreview{Chat: c, IsHidden: isHidden}
 		if p, ok := previews[c.JID]; ok {
 			pv := p
 			row.LastMessage = &pv

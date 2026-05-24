@@ -84,6 +84,7 @@ export interface Chat {
   is_archived: boolean
   is_pinned: boolean
   is_muted: boolean
+  is_hidden?: boolean // only true when returned in unlocked "private mode"
   last_message?: ChatPreview
 }
 
@@ -800,6 +801,13 @@ export const api = {
     postBody<HideChatResult>(`/api/v2/chats/${encodeURIComponent(jid)}/hide`, {}),
   unhideChat: (jid: string) =>
     postBody<{ jid: string; hidden: boolean }>(`/api/v2/chats/${encodeURIComponent(jid)}/unhide`, {}),
+
+  // Backend handler accepts action: archive|unarchive|pin|unpin|mute|unmute|read|unread
+  chatAction: (jid: string, action: string, duration?: number) =>
+    postBody<{ success: boolean }>(`/api/v2/chats/${encodeURIComponent(jid)}/action`, {
+      action,
+      duration,
+    }),
   removeTaskCircle: (id: number, circleId: number) =>
     del(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
   deleteCircle: (id: number) => del(`/api/v2/circles/${id}`),

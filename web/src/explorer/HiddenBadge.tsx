@@ -34,10 +34,10 @@ export function HiddenBadge({ onClick }: { onClick: () => void }) {
     return (
       <button
         onClick={relock}
-        title="Hidden chats are visible — click to lock"
+        title="You are viewing only your locked chats — click to lock and return to normal"
         className="flex shrink-0 items-center gap-1 rounded-lg bg-amber-500/20 px-2 py-1 text-[11px] font-medium text-amber-300 hover:bg-amber-500/30"
       >
-        🔓 Visible
+        🔓 Locked chats
       </button>
     )
   }

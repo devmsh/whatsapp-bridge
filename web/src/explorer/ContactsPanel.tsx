@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { Contact, Tag } from '../api'
-import { initial, jidUser } from './format'
+import { jidUser } from './format'
 import { TagChips, TagEditor } from './Tags'
+import { ChatAvatar } from './ChatAvatar'
 
 function contactName(c: Contact): string {
   return c.name || c.push_name || c.business_name || '+' + (c.phone || jidUser(c.jid))
@@ -73,9 +74,7 @@ export function ContactsPanel({
               className="group flex w-full items-center gap-3 px-3 py-2 transition hover:bg-neutral-900"
             >
               <button onClick={() => onOpen(c)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-700 text-sm font-semibold text-neutral-200">
-                  {initial(title)}
-                </div>
+                <ChatAvatar jid={c.jid} title={title} size={36} />
                 <div className="min-w-0 flex-1">
                   <div dir="auto" className="truncate text-sm">
                     {title}

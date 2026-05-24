@@ -24,6 +24,8 @@ import { ProfilingStatusModal } from './ProfilingStatus'
 import { BriefingModal } from './BriefingView'
 import { SearchBar } from './Search'
 import { HiddenLockModal } from './HiddenLock'
+import { HideChatDialog } from './HideChatDialog'
+import { setUnlockToken as setHiddenUnlockToken } from '../hidden'
 import { HiddenBadge } from './HiddenBadge'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks'
@@ -51,6 +53,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showUnlock, setShowUnlock] = useState(false)
+  // For the right-click "Hide chat…" flow we open the dialog at the Explorer
+  // level (so it works without first opening the chat). Hiding needs no auth.
+  const [hideTarget, setHideTarget] = useState<{ jid: string; title: string } | null>(null)
   // pending composer drafts per chat — set by "Nudge" / "Reply" buttons in
   // TaskView, consumed once by MessageThread when it opens that chat.
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({})
@@ -213,6 +218,23 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           onClose={() => setShowUnlock(false)}
         />
       )}
+      {/* Right-click "Hide chat…" flow rendered here so it works from the list. */}
+      {hideTarget && (
+        <HideChatDialog
+          jid={hideTarget.jid}
+          title={hideTarget.title}
+          onDone={() => {
+            setHideTarget(null)
+            // After hide: stay in the normal list view — drop any unlock token
+            // so the user doesn't get flipped into the "private mode" view.
+            setHiddenUnlockToken(null)
+            bumpTasks()
+            reloadCircles()
+            window.dispatchEvent(new CustomEvent('wa.unlock-changed'))
+          }}
+          onClose={() => setHideTarget(null)}
+        />
+      )}
       {showBriefing && (
         <BriefingModal
           onOpenTask={(id) => {
@@ -284,7 +306,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         </div>
 
         {tab === 'chats' && (
-          <ChatList chats={chats} nameMap={nameMap} selected={selected} onOpen={openChat} />
+          <ChatList
+            chats={chats}
+            nameMap={nameMap}
+            selected={selected}
+            onOpen={openChat}
+            onRequestHide={(jid, title) => setHideTarget({ jid, title })}
+            onChanged={() => window.dispatchEvent(new CustomEvent('wa.unlock-changed'))}
+          />
         )}
         {tab === 'contacts' && (
           <ContactsPanel

@@ -8,14 +8,13 @@ import (
 
 // handleChatHidePreview returns what will be deleted when this chat is hidden,
 // so the UI can show a confirmation dialog before the irreversible cleanup.
+// No auth needed — hiding is a low-stakes "remove from view" action. The PIN /
+// Touch ID gate sits on viewing the hidden list and on unhiding (where private
+// content actually gets revealed).
 // GET /api/v2/chats/{jid}/hide-preview
 func (s *Server) handleChatHidePreview(w http.ResponseWriter, r *http.Request, jid string) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
-		return
-	}
-	if !s.isUnlocked(r) {
-		jsonError(w, 401, "unlock required to manage hidden chats")
 		return
 	}
 	jsonOK(w, s.store.HidePreviewFor(jid))
@@ -23,15 +22,11 @@ func (s *Server) handleChatHidePreview(w http.ResponseWriter, r *http.Request, j
 
 // handleChatHide marks the chat hidden AND clears every piece of AI-derived
 // data about it. Returns a report of what was removed. Also wipes extraction
-// session files (out-of-band, via the sidecar).
+// session files (out-of-band, via the sidecar). No auth needed.
 // POST /api/v2/chats/{jid}/hide
 func (s *Server) handleChatHide(w http.ResponseWriter, r *http.Request, jid string) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
-		return
-	}
-	if !s.isUnlocked(r) {
-		jsonError(w, 401, "unlock required to manage hidden chats")
 		return
 	}
 	res, err := s.store.HideChatAndClear(jid)
@@ -63,8 +58,18 @@ func (s *Server) handleChatUnhide(w http.ResponseWriter, r *http.Request, jid st
 	jsonOK(w, map[string]any{"jid": jid, "hidden": false})
 }
 
-// handleHiddenList returns the hidden chat JIDs. Requires unlock so the list
-// isn't enumerable without authenticating.
+// hiddenChatRow is one entry in the Locked Chats panel.
+type hiddenChatRow struct {
+	JID           string `json:"jid"`
+	Name          string `json:"name"`
+	IsGroup       bool   `json:"is_group"`
+	AddedAt       int64  `json:"added_at"`
+	LastMessageAt int64  `json:"last_message_at,omitempty"`
+}
+
+// handleHiddenList returns rich rows for every hidden chat so the Locked Chats
+// modal can render them with names + activity. Requires unlock.
+// GET /api/v2/hidden/list
 func (s *Server) handleHiddenList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -74,7 +79,32 @@ func (s *Server) handleHiddenList(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 401, "unlock required")
 		return
 	}
-	jsonOK(w, map[string]any{"jids": s.store.HiddenChatJIDsList()})
+	rows, err := s.store.DB.Query(`
+		SELECT hc.chat_jid, hc.added_at,
+		       COALESCE(NULLIF(g.name,''),
+		                NULLIF(c.name,''), NULLIF(c.push_name,''), NULLIF(c.business_name,''),
+		                hc.chat_jid) AS name,
+		       (hc.chat_jid LIKE '%@g.us') AS is_group,
+		       (SELECT COALESCE(MAX(timestamp),0) FROM messages m WHERE m.chat_jid = hc.chat_jid) AS last_ts
+		FROM hidden_chats hc
+		LEFT JOIN groups g ON g.jid = hc.chat_jid
+		LEFT JOIN contacts c ON c.jid = hc.chat_jid
+		ORDER BY last_ts DESC, hc.added_at DESC`)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	out := []hiddenChatRow{}
+	for rows.Next() {
+		var h hiddenChatRow
+		var isGroup int
+		if rows.Scan(&h.JID, &h.AddedAt, &h.Name, &isGroup, &h.LastMessageAt) == nil {
+			h.IsGroup = isGroup == 1
+			out = append(out, h)
+		}
+	}
+	jsonOK(w, map[string]any{"chats": out})
 }
 
 // stripHiddenJIDs filters a slice of JIDs by removing the hidden ones, unless

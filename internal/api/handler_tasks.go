@@ -43,19 +43,19 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 			}
 			tasks = filtered
 		}
-		// Hidden chats: drop tasks whose origin is hidden, unless unlocked.
-		if !s.isUnlocked(r) {
-			hidden := s.store.HiddenChatJIDs()
-			if len(hidden) > 0 {
-				out := tasks[:0]
-				for _, t := range tasks {
-					if !hidden[t.OriginChatJID] {
-						out = append(out, t)
-					}
-				}
-				tasks = out
+		// Private mode (see handler_chats.go): unlocked shows ONLY tasks
+		// originated in hidden chats, locked shows the normal task list.
+		// (In practice hiding wipes a chat's tasks, so this list is usually
+		// empty when unlocked — kept for symmetry.)
+		hidden := s.store.HiddenChatJIDs()
+		unlocked := s.isUnlocked(r)
+		out := tasks[:0]
+		for _, t := range tasks {
+			if hidden[t.OriginChatJID] == unlocked {
+				out = append(out, t)
 			}
 		}
+		tasks = out
 		jsonOK(w, tasks)
 	case http.MethodPost:
 		var req struct {

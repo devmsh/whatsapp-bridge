@@ -131,6 +131,7 @@ func (s *Server) registerRoutes() {
 
 	// Media
 	s.mux.HandleFunc("/api/v2/media/", s.handleMedia)
+	s.mux.HandleFunc("/api/v2/avatars/", s.handleAvatar)
 
 	// Scan (CSV endpoints for HQ intelligence)
 	s.mux.HandleFunc("/api/v2/scan/messages", s.handleScanMessages)

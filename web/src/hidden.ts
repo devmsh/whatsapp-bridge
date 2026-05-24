@@ -114,8 +114,22 @@ export function encodeCredential(cred: PublicKeyCredential): any {
   return out
 }
 
+// assertSecureContext throws a clear, actionable error if WebAuthn isn't
+// available. Browsers only expose navigator.credentials over HTTPS or on a
+// localhost origin — bare `http://*.test` doesn't qualify.
+function assertSecureContext() {
+  if (typeof navigator === 'undefined' || !('credentials' in navigator) || !navigator.credentials) {
+    const host = typeof location !== 'undefined' ? location.host : ''
+    const fix = host && !host.startsWith('localhost') && !host.startsWith('127.')
+      ? `Open the bridge at http://localhost:8082 (current: ${location.protocol}//${host}). WebAuthn requires HTTPS or localhost.`
+      : 'WebAuthn is not available in this browser.'
+    throw new Error(fix)
+  }
+}
+
 // Run a Touch ID registration. Returns the encoded credential to POST back.
 export async function webauthnRegister(opts: any): Promise<any> {
+  assertSecureContext()
   const cred = (await navigator.credentials.create({
     publicKey: decodeCreationOptions(opts),
   })) as PublicKeyCredential | null
@@ -125,6 +139,7 @@ export async function webauthnRegister(opts: any): Promise<any> {
 
 // Run a Touch ID assertion. Returns the encoded credential to POST back.
 export async function webauthnAssert(opts: any): Promise<any> {
+  assertSecureContext()
   const cred = (await navigator.credentials.get({
     publicKey: decodeRequestOptions(opts),
   })) as PublicKeyCredential | null

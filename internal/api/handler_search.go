@@ -31,10 +31,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pat := "%" + strings.ReplaceAll(strings.ReplaceAll(q, `\`, `\\`), `%`, `\%`) + "%"
-	hidden := map[string]bool{}
-	if !s.isUnlocked(r) {
-		hidden = s.store.HiddenChatJIDs()
-	}
+	// Private mode: unlocked searches ONLY hidden chats, locked searches only
+	// the normal world. The two scopes never mix.
+	hidden := s.store.HiddenChatJIDs()
+	unlocked := s.isUnlocked(r)
+	// `skip[jid]` reports whether a chat should be filtered out of results.
+	skip := func(jid string) bool { return hidden[jid] != unlocked }
 
 	hits := []searchHit{}
 
@@ -48,7 +50,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var jid, name, phone string
 			if rows.Scan(&jid, &name, &phone) == nil {
-				if hidden[jid] {
+				if skip(jid) {
 					continue
 				}
 				if name == "" {
@@ -66,7 +68,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var jid, name, topic string
 			if rows.Scan(&jid, &name, &topic) == nil {
-				if hidden[jid] {
+				if skip(jid) {
 					continue
 				}
 				if name == "" {
@@ -122,7 +124,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			var chatJID, msgID, snippet, chatName string
 			var ts int64
 			if rows.Scan(&chatJID, &msgID, &ts, &snippet, &chatName) == nil {
-				if hidden[chatJID] {
+				if skip(chatJID) {
 					continue
 				}
 				hits = append(hits, searchHit{

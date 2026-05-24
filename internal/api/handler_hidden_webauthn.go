@@ -288,12 +288,19 @@ func (s *Server) handleHiddenWAAuthVerify(w http.ResponseWriter, r *http.Request
 		jsonError(w, 500, err.Error())
 		return
 	}
-	user := &hiddenWAUser{creds: []webauthn.Credential{*cred}}
 	parsed, err := protocol.ParseCredentialRequestResponseBody(strings.NewReader(string(req.Credential)))
 	if err != nil {
 		jsonError(w, 400, "parse: "+err.Error())
 		return
 	}
+	// macOS Touch ID can flip BackupEligible/BackupState between registration
+	// and assertion (iCloud Keychain availability), which go-webauthn rejects
+	// as "Backup Eligible flag inconsistency". Sync the stored credential's
+	// flags to the current assertion before validation so the check passes.
+	authFlags := parsed.Response.AuthenticatorData.Flags
+	cred.Flags.BackupEligible = authFlags.HasBackupEligible()
+	cred.Flags.BackupState = authFlags.HasBackupState()
+	user := &hiddenWAUser{creds: []webauthn.Credential{*cred}}
 	got, err := wa.ValidateLogin(user, *sd, parsed)
 	if err != nil {
 		jsonError(w, 401, "verify: "+err.Error())

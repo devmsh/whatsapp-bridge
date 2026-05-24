@@ -6,11 +6,11 @@ import { ChatCircles } from './ChatCircles'
 import { TagChips, TagEditor } from './Tags'
 import { ExtractionsModal } from './Extractions'
 import { ProfileCard } from './ProfileCard'
+import { ChatAvatar } from './ChatAvatar'
 import { DraftRepliesPopover } from './DraftReplies'
 import { DashboardModal } from './Dashboard'
 import { HideChatDialog } from './HideChatDialog'
-import { HiddenLockModal } from './HiddenLock'
-import { isUnlocked } from '../hidden'
+import { setUnlockToken } from '../hidden'
 
 const PAGE = 100
 
@@ -62,7 +62,6 @@ export function MessageThread({
   const [composerDraft, setComposerDraft] = useState('')
   const [showDashboard, setShowDashboard] = useState(false)
   const [showHideDialog, setShowHideDialog] = useState(false)
-  const [showUnlockForHide, setShowUnlockForHide] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -137,12 +136,9 @@ export function MessageThread({
         <button
           onClick={() => setShowDashboard(true)}
           title="See everything about this chat"
-          className={
-            'flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition hover:opacity-80 ' +
-            (group ? 'bg-sky-600/30 text-sky-300' : 'bg-neutral-700 text-neutral-200')
-          }
+          className="transition hover:opacity-80"
         >
-          {(title.replace(/^\+/, '')[0] || '?').toUpperCase()}
+          <ChatAvatar jid={jid} title={title} group={group} size={36} />
         </button>
         <div className="min-w-0 flex-1">
           <div dir="auto" className="truncate text-sm font-semibold">
@@ -203,16 +199,28 @@ export function MessageThread({
         >
           ✨ Draft
         </button>
-        <button
-          onClick={() => {
-            if (!isUnlocked()) setShowUnlockForHide(true)
-            else setShowHideDialog(true)
-          }}
-          className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-400 transition hover:bg-neutral-800"
-          title="Hide this chat (and delete its AI-derived data)"
-        >
-          🔒
-        </button>
+        {chat?.is_hidden ? (
+          <button
+            onClick={async () => {
+              await api.unhideChat(jid)
+              // Tell the rest of the UI the locked set changed; chat list
+              // refetches → now-unhidden chat moves out of "private mode".
+              window.dispatchEvent(new CustomEvent('wa.unlock-changed'))
+            }}
+            className="shrink-0 rounded-lg border border-emerald-700 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/15"
+            title="Unhide this chat — it will return to your main list"
+          >
+            🔓 Unhide
+          </button>
+        ) : (
+          <button
+            onClick={() => setShowHideDialog(true)}
+            className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-400 transition hover:bg-neutral-800"
+            title="Hide this chat (and delete its AI-derived data)"
+          >
+            🔒
+          </button>
+        )}
         <button
           onClick={() => onOpenChatTasks(jid)}
           className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800"
@@ -302,29 +310,17 @@ export function MessageThread({
         <HideChatDialog
           jid={jid}
           title={title}
-          onDone={(res) => {
+          onDone={() => {
             setShowHideDialog(false)
-            alert(
-              `Hidden. Removed: ${res.tasks_deleted} tasks, ${res.task_links_deleted} links, ` +
-                `${res.media_rows_deleted} audio/image rows, ${res.briefings_deleted} briefings, ` +
-                `${res.circle_edges_deleted} circle memberships.`,
-            )
-            onTasksChanged() // tasks may have been deleted
+            // Stay in the normal view after hiding — drop any unlock token so
+            // the chat list refreshes locked (the hidden chat just disappears
+            // from sight; the user is not flipped into "private mode").
+            setUnlockToken(null)
+            onTasksChanged()
             onCirclesChanged()
-            // Send the user back to the chat list since this chat is now hidden.
-            window.location.reload()
+            window.dispatchEvent(new CustomEvent('wa.unlock-changed'))
           }}
           onClose={() => setShowHideDialog(false)}
-        />
-      )}
-
-      {showUnlockForHide && (
-        <HiddenLockModal
-          onUnlocked={() => {
-            setShowUnlockForHide(false)
-            setShowHideDialog(true)
-          }}
-          onClose={() => setShowUnlockForHide(false)}
         />
       )}
 

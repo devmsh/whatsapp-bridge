@@ -1,20 +1,30 @@
 import { useMemo, useState } from 'react'
-import type { Chat } from '../api'
-import { chatListTime, chatTitle, initial, isGroup, previewText } from './format'
+import { api, type Chat } from '../api'
+import { chatListTime, chatTitle, isGroup, previewText } from './format'
+import { ChatAvatar } from './ChatAvatar'
+import { ContextMenu, type MenuItem } from './ContextMenu'
 
 // ChatList shows the searchable, time-ordered list of chats.
+// Right-click on any row opens a context menu with quick actions (Open, Hide,
+// Unhide, Archive, Pin, Mark read/unread) so the user can act without first
+// opening the chat.
 export function ChatList({
   chats,
   nameMap,
   selected,
   onOpen,
+  onRequestHide,
+  onChanged,
 }: {
   chats: Chat[]
   nameMap: Map<string, string>
   selected: string | null
   onOpen: (jid: string) => void
+  onRequestHide: (jid: string, title: string) => void
+  onChanged: () => void
 }) {
   const [q, setQ] = useState('')
+  const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
 
   const rows = useMemo(() => {
     const withTitle = chats.map((c) => ({ chat: c, title: chatTitle(c, nameMap) }))
@@ -43,12 +53,16 @@ export function ChatList({
           <button
             key={chat.jid}
             onClick={() => onOpen(chat.jid)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setMenu({ jid: chat.jid, title, x: e.clientX, y: e.clientY })
+            }}
             className={
               'flex w-full items-center gap-3 px-3 py-2.5 text-left transition ' +
               (selected === chat.jid ? 'bg-neutral-800' : 'hover:bg-neutral-900')
             }
           >
-            <Avatar title={title} group={isGroup(chat.jid)} />
+            <ChatAvatar jid={chat.jid} title={title} group={isGroup(chat.jid)} size={40} />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
                 <span dir="auto" className="truncate text-sm font-medium">
@@ -74,19 +88,87 @@ export function ChatList({
           </button>
         ))}
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={buildChatMenu(
+            chats.find((c) => c.jid === menu.jid),
+            menu.title,
+            { onOpen, onRequestHide, onChanged },
+          )}
+          onClose={() => setMenu(null)}
+        />
+      )}
     </div>
   )
 }
 
-function Avatar({ title, group }: { title: string; group: boolean }) {
-  return (
-    <div
-      className={
-        'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold ' +
-        (group ? 'bg-sky-600/30 text-sky-300' : 'bg-neutral-700 text-neutral-200')
-      }
-    >
-      {initial(title)}
-    </div>
-  )
+// buildChatMenu returns the context menu items for one chat row. The menu is
+// state-aware: a hidden chat (only seen in "private mode" view) gets Unhide
+// instead of Hide; pinned/archived/muted/read toggle their inverse.
+function buildChatMenu(
+  chat: Chat | undefined,
+  title: string,
+  cb: {
+    onOpen: (jid: string) => void
+    onRequestHide: (jid: string, title: string) => void
+    onChanged: () => void
+  },
+): MenuItem[] {
+  if (!chat) return []
+  const jid = chat.jid
+
+  // Fire-and-refresh helper for chatAction calls.
+  const act = async (action: string) => {
+    try { await api.chatAction(jid, action) } catch {}
+    cb.onChanged()
+  }
+
+  const items: MenuItem[] = [
+    { label: 'Open chat', icon: '↗', onClick: () => cb.onOpen(jid) },
+    { divider: true },
+    {
+      label: chat.unread_count > 0 ? 'Mark as read' : 'Mark as unread',
+      icon: chat.unread_count > 0 ? '✓' : '●',
+      onClick: () => act(chat.unread_count > 0 ? 'read' : 'unread'),
+    },
+    {
+      label: chat.is_pinned ? 'Unpin' : 'Pin to top',
+      icon: '📌',
+      onClick: () => act(chat.is_pinned ? 'unpin' : 'pin'),
+    },
+    {
+      label: chat.is_muted ? 'Unmute' : 'Mute',
+      icon: '🔇',
+      onClick: () => act(chat.is_muted ? 'unmute' : 'mute'),
+    },
+    {
+      label: chat.is_archived ? 'Unarchive' : 'Archive',
+      icon: '📦',
+      onClick: () => act(chat.is_archived ? 'unarchive' : 'archive'),
+    },
+    { divider: true },
+  ]
+
+  if (chat.is_hidden) {
+    items.push({
+      label: 'Unhide chat',
+      icon: '🔓',
+      onClick: async () => {
+        try { await api.unhideChat(jid) } catch {}
+        cb.onChanged()
+      },
+    })
+  } else {
+    items.push({
+      label: 'Hide chat…',
+      icon: '🔒',
+      danger: true,
+      onClick: () => cb.onRequestHide(jid, title),
+    })
+  }
+
+  return items
 }
+
