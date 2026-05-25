@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api, type Chat, type Circle, type Message, type Tag } from '../api'
 import {
   chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, senderTitle,
@@ -423,7 +423,24 @@ function Composer({
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
+  // Staged attachment (paperclip-picked, paste-pasted, or drop-dropped). It
+  // lives entirely client-side until send() is called — at which point we
+  // upload it, then either api.send or api.reply with the returned path.
+  const [attachment, setAttachment] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  // Object URL of the attachment for the inline preview (image/video).
+  // Revoked when the attachment changes / clears so we don't leak memory.
+  const previewURL = useMemo(() => {
+    if (!attachment) return ''
+    if (!attachment.type.startsWith('image/') && !attachment.type.startsWith('video/')) return ''
+    return URL.createObjectURL(attachment)
+  }, [attachment])
+  useEffect(() => {
+    if (!previewURL) return
+    return () => URL.revokeObjectURL(previewURL)
+  }, [previewURL])
 
   // Focus + jump-to-end whenever a fresh reply target appears.
   useEffect(() => {
@@ -474,17 +491,37 @@ function Composer({
 
   async function send() {
     const body = text.trim()
-    if (!body || sending) return
+    // Allow caption-less media sends — WA does too.
+    if (!body && !attachment) return
+    if (sending) return
     setSending(true)
     setError('')
     try {
-      // Route through reply when a quote target is set, otherwise the regular
-      // send endpoint. Both return {message_id, timestamp}.
+      // Upload first if there's an attachment, so the bridge has a real
+      // server-side path to feed to whatsmeow's media upload.
+      let mediaPath: string | undefined
+      if (attachment) {
+        setUploading(true)
+        try {
+          const up = await api.upload(attachment)
+          mediaPath = up.path
+        } finally {
+          setUploading(false)
+        }
+      }
+      // Routing matrix:
+      //   reply + media  → /reply with media_path (already supported)
+      //   reply + text   → /reply
+      //   media          → /send with media_path
+      //   text           → /send
       const res = replyTo
-        ? await api.reply(jid, replyTo.id, body)
-        : await api.send(jid, body)
-      // Echo locally with reply_to_* populated so the new bubble shows its
-      // quote bar immediately, without waiting for an SSE round-trip.
+        ? await api.reply(jid, replyTo.id, body, mediaPath ? { mediaPath } : undefined)
+        : await api.send(jid, body, mediaPath ? { mediaPath } : undefined)
+      // Echo locally so the bubble lands instantly. For media we don't have
+      // the server's permanent path yet, but the caption + a placeholder
+      // media_type is enough to render a "Photo" / "Video" / "Document" chip
+      // until the SSE round-trip overwrites it with the real download.
+      const mediaKind = attachment ? guessMediaKind(attachment) : ''
       const echoed: Message = {
         id: res.message_id,
         chat_jid: jid,
@@ -495,7 +532,13 @@ function Composer({
         timestamp: res.timestamp,
         is_from_me: true,
         is_group: group,
-        message_type: 'text',
+        message_type: mediaKind ? 'media' : 'text',
+      }
+      if (mediaKind) {
+        echoed.media_type = mediaKind
+        echoed.media_caption = body
+        echoed.media_filename = attachment?.name
+        echoed.media_size = attachment?.size
       }
       if (replyTo) {
         echoed.reply_to_id = replyTo.id
@@ -506,6 +549,7 @@ function Composer({
       onSent(echoed)
       onClearReply?.()
       setText('')
+      setAttachment(null)
       requestAnimationFrame(resize)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to send')
@@ -521,6 +565,18 @@ function Composer({
     }
   }
 
+  // Paste-handler turns ⌘V of an image (or any file) on the textarea into a
+  // staged attachment — same shortcut WA users expect.
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const f = Array.from(e.clipboardData.files).find((f) => f.size > 0)
+    if (f) {
+      e.preventDefault()
+      setAttachment(f)
+    }
+  }
+
+  const canSendNow = (text.trim().length > 0 || attachment !== null) && !sending
+
   return (
     <div className="border-t border-neutral-800 px-4 py-3">
       {error && <div className="mb-1 text-xs text-red-400">{error}</div>}
@@ -531,7 +587,35 @@ function Composer({
           onClear={() => onClearReply?.()}
         />
       )}
+      {attachment && (
+        <AttachmentPreview
+          file={attachment}
+          previewURL={previewURL}
+          onClear={() => setAttachment(null)}
+        />
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) setAttachment(f)
+          // Reset so picking the same file again still fires onChange.
+          e.target.value = ''
+        }}
+      />
       <div className="flex items-end gap-2">
+        <button
+          onClick={() => fileRef.current?.click()}
+          title="Attach a file"
+          aria-label="Attach a file"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+        >
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49" />
+          </svg>
+        </button>
         <textarea
           ref={taRef}
           dir="auto"
@@ -542,20 +626,79 @@ function Composer({
             resize()
           }}
           onKeyDown={onKeyDown}
-          placeholder="Type a message"
+          onPaste={onPaste}
+          placeholder={attachment ? 'Add a caption…' : 'Type a message'}
           className="max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600"
         />
         <button
           onClick={send}
-          disabled={!text.trim() || sending}
+          disabled={!canSendNow}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          title="Send"
+          title={uploading ? 'Uploading…' : 'Send'}
         >
           {sending ? '…' : '➤'}
         </button>
       </div>
     </div>
   )
+}
+
+// AttachmentPreview shows the staged file above the textarea so the user can
+// confirm what they're about to send. Images and videos render as a small
+// thumbnail; everything else shows a paperclip + filename + size, the same
+// shorthand WA uses in its "send file" sheet.
+function AttachmentPreview({
+  file,
+  previewURL,
+  onClear,
+}: {
+  file: File
+  previewURL: string
+  onClear: () => void
+}) {
+  const sizeStr =
+    file.size < 1024
+      ? `${file.size} B`
+      : file.size < 1024 * 1024
+        ? `${(file.size / 1024).toFixed(0)} KB`
+        : `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+  const isImage = file.type.startsWith('image/')
+  const isVideo = file.type.startsWith('video/')
+  return (
+    <div className="mb-2 flex items-center gap-3 rounded-lg bg-neutral-900 p-2 text-xs">
+      {isImage && previewURL ? (
+        <img src={previewURL} alt="" className="h-14 w-14 rounded object-cover" />
+      ) : isVideo && previewURL ? (
+        <video src={previewURL} className="h-14 w-14 rounded object-cover" muted />
+      ) : (
+        <div className="flex h-14 w-14 items-center justify-center rounded bg-neutral-800 text-2xl">
+          📄
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-neutral-200">{file.name || 'Attachment'}</div>
+        <div className="text-neutral-500">{sizeStr}</div>
+      </div>
+      <button
+        onClick={onClear}
+        title="Remove attachment"
+        aria-label="Remove attachment"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
+// guessMediaKind maps a browser File's MIME type to the same media_type the
+// bridge stores — used to render an accurate local echo bubble before the
+// SSE re-fetch lands.
+function guessMediaKind(f: File): string {
+  if (f.type.startsWith('image/')) return 'image'
+  if (f.type.startsWith('video/')) return 'video'
+  if (f.type.startsWith('audio/')) return 'audio'
+  return 'document'
 }
 
 // ReplyQuote is the small chip the Composer renders above its textarea while a

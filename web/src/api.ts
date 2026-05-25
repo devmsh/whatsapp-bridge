@@ -612,19 +612,35 @@ export const api = {
     )
     return res.json()
   },
-  send: (jid: string, message: string) =>
+  send: (jid: string, message: string, opts?: { mediaPath?: string }) =>
     postBody<{ success: boolean; message_id: string; timestamp: number }>('/api/v2/send', {
       jid,
       message,
+      media_path: opts?.mediaPath,
     }),
+  // upload posts a single file as multipart/form-data, the bridge writes it
+  // under <MediaDir>/uploads/<yyyymm>/, and returns an absolute path that
+  // /send and /reply can consume in media_path.
+  upload: async (file: File): Promise<{ path: string; size: number; mime: string; filename: string }> => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    const res = await fetch('/api/v2/uploads', { method: 'POST', body: fd })
+    if (!res.ok) {
+      const t = await res.text().catch(() => '')
+      throw new Error(`upload failed: ${res.status} ${t || res.statusText}`)
+    }
+    return res.json()
+  },
   // reply quotes the message at `quotedID` and posts the new text into the same
   // chat. The bridge resolves the quoted body server-side, so callers only need
-  // to send the ID — same shape as official WA's "reply" composer.
-  reply: (jid: string, quotedID: string, message: string) =>
+  // to send the ID — same shape as official WA's "reply" composer. Pass
+  // opts.mediaPath (returned by api.upload) to reply with a photo/file.
+  reply: (jid: string, quotedID: string, message: string, opts?: { mediaPath?: string }) =>
     postBody<{ success: boolean; message_id: string; timestamp: number }>('/api/v2/reply', {
       chat_jid: jid,
       message_id: quotedID,
       message,
+      media_path: opts?.mediaPath,
     }),
   // react adds (or removes, when emoji is "") a reaction to a message — the
   // same /react endpoint the agents already use. WhatsApp treats reactions as

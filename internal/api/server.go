@@ -76,6 +76,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/tts-send", s.handleTTSSend)
 	s.mux.HandleFunc("/api/v2/mention", s.handleMention)
 	s.mux.HandleFunc("/api/v2/forward", s.handleForward)
+	s.mux.HandleFunc("/api/v2/uploads", s.handleUpload)
 
 	// Messages
 	s.mux.HandleFunc("/api/v2/messages", s.handleMessages)
