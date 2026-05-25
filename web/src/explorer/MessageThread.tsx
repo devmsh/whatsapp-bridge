@@ -17,6 +17,7 @@ import { HideChatDialog } from './HideChatDialog'
 import { setUnlockToken } from '../hidden'
 import { ImageLightbox, type LightboxImage } from './ImageLightbox'
 import { ForwardPicker } from './ForwardPicker'
+import { EmojiPicker } from './EmojiPicker'
 
 const PAGE = 100
 
@@ -775,6 +776,10 @@ function Composer({
   const recDiscardRef = useRef(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // Emoji picker open/closed. Lives next to the attach button on the left
+  // of the composer; click toggles, click-outside / Esc closes (handled
+  // inside EmojiPicker so the textarea keeps its own keydown wiring clean).
+  const [emojiOpen, setEmojiOpen] = useState(false)
   // Open mention-picker state: when the user is typing '@<query>' in the
   // textarea we open an autocomplete of group participants. `start` is the
   // caret position of the '@'; `query` is what's been typed after it.
@@ -1265,6 +1270,35 @@ function Composer({
     })
   }
 
+  // Insert one emoji at the textarea's current caret position, then keep
+  // the caret right after it. Mirrors how WA's mobile composer behaves —
+  // picker stays open so you can rattle off several in a row, only Esc /
+  // click-outside actually closes it. Also persists the draft (same path
+  // the textarea's onChange would have taken if the user had typed it).
+  function insertEmoji(emoji: string) {
+    const el = taRef.current
+    const caret = el?.selectionStart ?? text.length
+    const before = text.slice(0, caret)
+    const after = text.slice(caret)
+    const next = before + emoji + after
+    setText(next)
+    if (!editingMsg) {
+      try {
+        if (next.trim()) localStorage.setItem(draftKey(jid), next)
+        else localStorage.removeItem(draftKey(jid))
+        window.dispatchEvent(new CustomEvent('wa.draft-changed'))
+      } catch {}
+    }
+    requestAnimationFrame(() => {
+      const el2 = taRef.current
+      if (!el2) return
+      el2.focus()
+      const pos = before.length + emoji.length
+      el2.setSelectionRange(pos, pos)
+      resize()
+    })
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // While the @-picker is open, arrow keys / Enter / Tab / Esc target the
     // picker — never the textarea. Otherwise Enter sends, Shift+Enter is a
@@ -1384,6 +1418,33 @@ function Composer({
                 <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49" />
               </svg>
             </button>
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setEmojiOpen((v) => !v)}
+                title="Insert emoji"
+                aria-label="Insert emoji"
+                aria-expanded={emojiOpen}
+                className={
+                  'flex h-10 w-10 items-center justify-center rounded-full transition ' +
+                  (emojiOpen
+                    ? 'bg-neutral-800 text-amber-300'
+                    : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200')
+                }
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                  <circle cx="9" cy="10" r="0.6" fill="currentColor" />
+                  <circle cx="15" cy="10" r="0.6" fill="currentColor" />
+                </svg>
+              </button>
+              {emojiOpen && (
+                <EmojiPicker
+                  onPick={insertEmoji}
+                  onClose={() => setEmojiOpen(false)}
+                />
+              )}
+            </div>
             <div className="relative flex-1">
               {mention && filteredParticipants.length > 0 && (
                 <MentionPicker
