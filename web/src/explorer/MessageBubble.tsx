@@ -22,12 +22,17 @@ export function MessageBubble({
   onForward,
   onStar,
   onOpenImage,
+  selfDigits,
   firstInGroup = true,
 }: {
   msg: Message
   group: boolean
   nameMap: Map<string, string>
   mentionIndex: Map<string, MentionEntry>
+  /** Digit identifiers that map to the current user. Forwarded to RichText
+   *  so 'mention chips that ping you' render in emerald; also used here to
+   *  add a faint emerald ring around the whole bubble when you're pinged. */
+  selfDigits?: Set<string>
   onOpenTask?: (id: number) => void
   onTasksChanged?: () => void
   onOpenChat?: (jid: string) => void
@@ -54,6 +59,17 @@ export function MessageBubble({
       ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap)
       : ''
 
+  // True when an incoming message mentions the current user — used to put a
+  // soft emerald ring around the bubble so a ping in a busy thread stands
+  // out even before you've parsed the body. Skips outgoing messages (you
+  // can't @-mention yourself in any useful way) and any message without a
+  // self-digits set wired in.
+  const selfMentioned =
+    !mine &&
+    !!selfDigits?.size &&
+    !!(msg.content || msg.media_caption) &&
+    hasSelfMention(msg.content || msg.media_caption || '', selfDigits)
+
   return (
     <div className={'group/row flex items-center gap-1 ' + (mine ? 'justify-end' : 'justify-start')}>
       {/* Reply action hovers on the left of outgoing bubbles / right of incoming
@@ -73,7 +89,8 @@ export function MessageBubble({
       <div
         className={
           'group max-w-[78%] rounded-2xl px-3 py-2 text-sm ' +
-          (mine ? 'bg-emerald-700/40' : 'bg-neutral-800')
+          (mine ? 'bg-emerald-700/40' : 'bg-neutral-800') +
+          (selfMentioned ? ' ring-1 ring-emerald-400/60' : '')
         }
       >
         {sender && (
@@ -103,12 +120,18 @@ export function MessageBubble({
         ) : (
           <>
             <MediaContent msg={msg} onOpenImage={onOpenImage} />
-            <TextContent msg={msg} mentionIndex={mentionIndex} onOpenChat={onOpenChat} />
+            <TextContent
+              msg={msg}
+              mentionIndex={mentionIndex}
+              onOpenChat={onOpenChat}
+              selfDigits={selfDigits}
+            />
             <MediaUnderstanding
               msg={msg}
               mine={mine}
               mentionIndex={mentionIndex}
               onOpenChat={onOpenChat}
+              selfDigits={selfDigits}
             />
           </>
         )}
@@ -351,19 +374,21 @@ function TextContent({
   msg,
   mentionIndex,
   onOpenChat,
+  selfDigits,
 }: {
   msg: Message
   mentionIndex: Map<string, MentionEntry>
   onOpenChat?: (jid: string) => void
+  selfDigits?: Set<string>
 }) {
   if (msg.media_type) {
     const caption = msg.media_caption
     return caption ? (
-      <RichText text={caption} mentions={mentionIndex} onOpenChat={onOpenChat} />
+      <RichText text={caption} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} />
     ) : null
   }
   if (!msg.content) return null
-  return <RichText text={msg.content} mentions={mentionIndex} onOpenChat={onOpenChat} />
+  return <RichText text={msg.content} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} />
 }
 
 function MediaContent({
@@ -576,11 +601,13 @@ function MediaUnderstanding({
   mine,
   mentionIndex,
   onOpenChat,
+  selfDigits,
 }: {
   msg: Message
   mine: boolean
   mentionIndex: Map<string, MentionEntry>
   onOpenChat?: (jid: string) => void
+  selfDigits?: Set<string>
 }) {
   const isAudio = msg.media_type === 'voice_note' || msg.media_type === 'audio'
   const text = isAudio ? msg.transcript : msg.media_description
@@ -594,7 +621,7 @@ function MediaUnderstanding({
       }
     >
       <div className="mb-0.5 text-[10px] uppercase tracking-wider opacity-70">{label}</div>
-      <RichText text={text} mentions={mentionIndex} onOpenChat={onOpenChat} />
+      <RichText text={text} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} />
     </div>
   )
 }
@@ -644,6 +671,20 @@ function Tick({ offset = false }: { offset?: boolean }) {
       <path d="M1 6.5 L5 10.5 L15 0.5" />
     </svg>
   )
+}
+
+// hasSelfMention scans a message body for '@<digits>' tokens that match the
+// current user. Same digit shape RichText already tokenises (7-16 digits),
+// kept in sync so the bubble's emerald ring and the chip's emerald tint
+// trigger on the exact same matches.
+function hasSelfMention(text: string, self: Set<string>): boolean {
+  if (!text || self.size === 0) return false
+  const re = /@(\d{7,16})\b/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (self.has(m[1])) return true
+  }
+  return false
 }
 
 function label(type: string): string {

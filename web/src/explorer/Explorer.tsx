@@ -60,6 +60,21 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
+  // Digit identifiers of the current user — used to color "@you" mention
+  // chips in emerald so a ping in a busy group is obvious. WhatsApp's wire
+  // format sends LID digits as the mention identifier; we keep the phone
+  // form too so older messages and contacts still match.
+  const selfDigits = useMemo(() => {
+    const out = new Set<string>()
+    const addJID = (j?: string) => {
+      if (!j) return
+      const digits = j.split('@')[0].split(':')[0]
+      if (digits) out.add(digits)
+    }
+    addJID(device?.jid)
+    addJID(device?.lid)
+    return out
+  }, [device?.jid, device?.lid])
   const [showUnlock, setShowUnlock] = useState(false)
   // For the right-click "Hide chat…" flow we open the dialog at the Explorer
   // level (so it works without first opening the chat). Hiding needs no auth.
@@ -504,6 +519,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             chats={extraChats[selected] ? [...chats, extraChats[selected]] : chats}
             nameMap={nameMap}
             mentionIndex={mentionIndex}
+            selfDigits={selfDigits}
             liveMsg={liveMsg}
             circles={circles}
             allTags={tags}

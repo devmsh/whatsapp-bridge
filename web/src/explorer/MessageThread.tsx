@@ -27,6 +27,7 @@ export function MessageThread({
   chats,
   nameMap,
   mentionIndex,
+  selfDigits,
   liveMsg,
   circles,
   allTags,
@@ -46,6 +47,10 @@ export function MessageThread({
   chats: Chat[]
   nameMap: Map<string, string>
   mentionIndex: Map<string, MentionEntry>
+  /** Digit identifiers of the current user — bubbles use this to highlight
+   *  @-mention chips that ping you (and add a faint emerald ring on the
+   *  bubble itself when you've been mentioned). */
+  selfDigits?: Set<string>
   liveMsg: Message | null
   circles: Circle[]
   allTags: Tag[]
@@ -423,6 +428,7 @@ export function MessageThread({
               onForward={setForwardMsg}
               onStar={handleStar}
               onOpenImage={openLightboxFor}
+              selfDigits={selfDigits}
             />
           </>
         )}
@@ -1058,6 +1064,7 @@ function Timeline({
   onForward,
   onStar,
   onOpenImage,
+  selfDigits,
 }: {
   messages: Message[]
   group: boolean
@@ -1071,6 +1078,7 @@ function Timeline({
   onForward?: (msg: Message) => void
   onStar?: (msg: Message, starred: boolean) => void
   onOpenImage?: (msg: Message) => void
+  selfDigits?: Set<string>
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -1114,6 +1122,7 @@ function Timeline({
                 onForward={onForward}
                 onStar={onStar}
                 onOpenImage={onOpenImage}
+                selfDigits={selfDigits}
                 firstInGroup={firstInGroup}
               />
             </div>

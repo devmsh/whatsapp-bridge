@@ -19,11 +19,16 @@ export function RichText({
   text,
   mentions,
   onOpenChat,
+  selfDigits,
   className = '',
 }: {
   text: string
   mentions: Map<string, MentionEntry>
   onOpenChat?: (jid: string) => void
+  /** Digit identifiers that map to the current user (phone digits + LID
+   *  digits). A mention whose digits match any of these is rendered in
+   *  emerald so the user spots being pinged in a busy chat at a glance. */
+  selfDigits?: Set<string>
   className?: string
 }) {
   if (!text) return null
@@ -48,6 +53,7 @@ export function RichText({
         }
         // mention
         const r = resolveMention(p.digits, mentions)
+        const isSelf = selfDigits?.has(p.digits) ?? false
         return (
           <button
             key={i}
@@ -55,15 +61,23 @@ export function RichText({
               e.stopPropagation()
               onOpenChat?.(r.jid)
             }}
-            title={r.unknown ? 'Unknown contact — open chat anyway' : 'Open DM with ' + r.name}
+            title={
+              isSelf
+                ? 'You were mentioned'
+                : r.unknown
+                  ? 'Unknown contact — open chat anyway'
+                  : 'Open DM with ' + r.name
+            }
             className={
               'rounded px-1 font-medium ' +
-              (r.unknown
-                ? 'bg-neutral-700/40 text-neutral-300 hover:bg-neutral-700/70'
-                : 'bg-sky-500/15 text-sky-300 hover:bg-sky-500/30')
+              (isSelf
+                ? 'bg-emerald-500/25 text-emerald-200 hover:bg-emerald-500/40'
+                : r.unknown
+                  ? 'bg-neutral-700/40 text-neutral-300 hover:bg-neutral-700/70'
+                  : 'bg-sky-500/15 text-sky-300 hover:bg-sky-500/30')
             }
           >
-            @{r.unknown ? r.name.replace('+', '') : r.name}
+            @{isSelf ? 'You' : r.unknown ? r.name.replace('+', '') : r.name}
           </button>
         )
       })}
