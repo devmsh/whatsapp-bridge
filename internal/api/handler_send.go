@@ -163,11 +163,12 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		JID       string `json:"jid"`
-		Message   string `json:"message"`
-		MediaPath string `json:"media_path,omitempty"`
-		Sticker   bool   `json:"sticker,omitempty"` // true = send .webp as sticker; default = image
-		PTT       bool   `json:"ptt,omitempty"`     // true = send audio as voice note (push-to-talk)
+		JID           string   `json:"jid"`
+		Message       string   `json:"message"`
+		MediaPath     string   `json:"media_path,omitempty"`
+		Sticker       bool     `json:"sticker,omitempty"`         // true = send .webp as sticker; default = image
+		PTT           bool     `json:"ptt,omitempty"`             // true = send audio as voice note (push-to-talk)
+		MentionedJIDs []string `json:"mentioned_jids,omitempty"`  // JIDs to ping (filled into ContextInfo.MentionedJID)
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")
@@ -194,11 +195,39 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	wa := s.client.GetWhatsmeowClient()
 	msg := &waE2E.Message{}
 
+	// MentionedJIDs are surfaced via ContextInfo. Plain Conversation messages
+	// can't carry ContextInfo, so once there are mentions we upgrade the body
+	// to an ExtendedTextMessage — same shape /reply uses. Media messages
+	// attach ContextInfo to whichever variant buildMediaMessageEx populated.
+	var mentionsCtx *waE2E.ContextInfo
+	if len(req.MentionedJIDs) > 0 {
+		mentionsCtx = &waE2E.ContextInfo{MentionedJID: req.MentionedJIDs}
+	}
+
 	if req.MediaPath != "" {
 		// forceImage=true by default; sticker only when explicitly requested
 		if err := buildMediaMessageEx(wa, msg, req.MediaPath, req.Message, !req.Sticker, req.PTT); err != nil {
 			jsonError(w, 500, err.Error())
 			return
+		}
+		if mentionsCtx != nil {
+			switch {
+			case msg.ImageMessage != nil:
+				msg.ImageMessage.ContextInfo = mentionsCtx
+			case msg.VideoMessage != nil:
+				msg.VideoMessage.ContextInfo = mentionsCtx
+			case msg.AudioMessage != nil:
+				msg.AudioMessage.ContextInfo = mentionsCtx
+			case msg.DocumentMessage != nil:
+				msg.DocumentMessage.ContextInfo = mentionsCtx
+			case msg.StickerMessage != nil:
+				msg.StickerMessage.ContextInfo = mentionsCtx
+			}
+		}
+	} else if mentionsCtx != nil {
+		msg.ExtendedTextMessage = &waE2E.ExtendedTextMessage{
+			Text:        proto.String(req.Message),
+			ContextInfo: mentionsCtx,
 		}
 	} else {
 		msg.Conversation = proto.String(req.Message)

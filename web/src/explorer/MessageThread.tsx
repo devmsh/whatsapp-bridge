@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api, type Chat, type Circle, type Message, type PresenceEntry, type Tag } from '../api'
+import { api, type Chat, type Circle, type GroupParticipant, type Message, type PresenceEntry, type Tag } from '../api'
 import {
   chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, mediaURL, senderTitle,
   type MentionEntry,
@@ -587,6 +587,24 @@ function Composer({
   const [uploading, setUploading] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  // Open mention-picker state: when the user is typing '@<query>' in the
+  // textarea we open an autocomplete of group participants. `start` is the
+  // caret position of the '@'; `query` is what's been typed after it.
+  // Null when no picker is open.
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
+  const [mentionIdx, setMentionIdx] = useState(0)
+  // jidByDigits remembers which LID-digits we inserted as a mention token,
+  // so on send we can collect MentionedJIDs from the final text without
+  // re-querying anything. Survives across composer edits.
+  const jidByDigits = useRef<Map<string, string>>(new Map())
+  // Group participants, lazily loaded the first time we open the picker.
+  const [participants, setParticipants] = useState<GroupParticipant[] | null>(null)
+  useEffect(() => {
+    if (!group) return
+    let cancelled = false
+    api.groupParticipants(jid).then((p) => { if (!cancelled) setParticipants(p) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [group, jid])
   // Object URL of the attachment for the inline preview (image/video).
   // Revoked when the attachment changes / clears so we don't leak memory.
   const previewURL = useMemo(() => {
@@ -678,9 +696,14 @@ function Composer({
       //   reply + text   → /reply
       //   media          → /send with media_path
       //   text           → /send
+      const mentionedJIDs = collectMentionedJIDs()
+      const opts =
+        mediaPath || mentionedJIDs.length > 0
+          ? { mediaPath, mentionedJIDs: mentionedJIDs.length > 0 ? mentionedJIDs : undefined }
+          : undefined
       const res = replyTo
-        ? await api.reply(jid, replyTo.id, body, mediaPath ? { mediaPath } : undefined)
-        : await api.send(jid, body, mediaPath ? { mediaPath } : undefined)
+        ? await api.reply(jid, replyTo.id, body, opts)
+        : await api.send(jid, body, opts)
       // Echo locally so the bubble lands instantly. For media we don't have
       // the server's permanent path yet, but the caption + a placeholder
       // media_type is enough to render a "Photo" / "Video" / "Document" chip
@@ -722,7 +745,131 @@ function Composer({
     }
   }
 
+  // updateMentionContext re-scans the textarea around the caret to find an
+  // open '@<query>' token and open/close the picker accordingly. Triggered
+  // on input + on selection change. The token is the contiguous word the
+  // caret sits in, starting with '@' followed by letters/digits (no spaces,
+  // no newlines, no further '@').
+  function updateMentionContext(value: string, caret: number) {
+    if (!group) {
+      if (mention) setMention(null)
+      return
+    }
+    // Walk backward from caret until we hit whitespace or '@'.
+    let i = caret
+    while (i > 0) {
+      const ch = value[i - 1]
+      if (ch === '@') {
+        const start = i - 1
+        // The char before '@' must be start-of-text or whitespace — otherwise
+        // we're looking at an email-like string, not a mention.
+        if (start === 0 || /\s/.test(value[start - 1])) {
+          const query = value.slice(start + 1, caret)
+          // Reject if the query itself contains weird chars; bail otherwise.
+          if (/^[\p{L}\p{N}._-]*$/u.test(query)) {
+            setMention({ start, query })
+            setMentionIdx(0)
+            return
+          }
+        }
+        break
+      }
+      if (/\s/.test(ch)) break
+      i--
+    }
+    if (mention) setMention(null)
+  }
+
+  // Filter participants by the open query. Match against display name (any
+  // word starting with the query) AND phone digits / LID digits, so typing
+  // either a name or a prefix of the number works.
+  const filteredParticipants = useMemo<GroupParticipant[]>(() => {
+    if (!mention || !participants) return []
+    const q = mention.query.toLowerCase().trim()
+    const all = participants.slice()
+    if (!q) return all.slice(0, 8)
+    const out: GroupParticipant[] = []
+    for (const p of all) {
+      const name = (p.display_name || '').toLowerCase()
+      const phone = (p.phone || '').toLowerCase()
+      const lid = (p.lid || '').toLowerCase()
+      if (
+        name.includes(q) ||
+        phone.startsWith(q) ||
+        lid.startsWith(q) ||
+        nameMap?.get(p.jid)?.toLowerCase().includes(q)
+      ) {
+        out.push(p)
+        if (out.length >= 8) break
+      }
+    }
+    return out
+  }, [mention?.query, participants, nameMap])
+
+  // pickMention replaces the '@<query>' token in the textarea with
+  // '@<LID-digits> ' and remembers the JID so we can include it in
+  // mentioned_jids on send. LID-digits is the form WA's wire protocol
+  // expects in mention tokens, and matches what /messages stores.
+  function pickMention(p: GroupParticipant) {
+    if (!mention) return
+    // Prefer LID digits (the form WA stores mentions as), fall back to phone
+    // digits when the participant has no LID resolved yet.
+    const lidDigits = (p.lid || '').split('@')[0].split(':')[0]
+    const phoneDigits = (p.phone || p.jid || '').split('@')[0].split(':')[0]
+    const digits = lidDigits || phoneDigits
+    if (!digits) return
+    // Remember the digits → full JID mapping so send() can collect the
+    // MentionedJID list later. The bridge stores `lid` as bare digits but
+    // `jid` always carries the full suffix (@lid or @s.whatsapp.net),
+    // which is what whatsmeow needs to actually ping someone.
+    const fullJID = lidDigits ? `${lidDigits}@lid` : p.jid
+    jidByDigits.current.set(digits, fullJID)
+    // Splice the token into the textarea: drop '@<query>', insert
+    // '@<digits> ' (with a trailing space — feels right after picking).
+    const before = text.slice(0, mention.start)
+    const after = text.slice(mention.start + 1 + mention.query.length)
+    const insert = '@' + digits + ' '
+    const next = before + insert + after
+    setText(next)
+    setMention(null)
+    setMentionIdx(0)
+    // Restore focus + place caret right after the inserted token.
+    requestAnimationFrame(() => {
+      const el = taRef.current
+      if (!el) return
+      el.focus()
+      const pos = before.length + insert.length
+      el.setSelectionRange(pos, pos)
+      resize()
+    })
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // While the @-picker is open, arrow keys / Enter / Tab / Esc target the
+    // picker — never the textarea. Otherwise Enter sends, Shift+Enter is a
+    // newline (existing behavior).
+    if (mention && filteredParticipants.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIdx((i) => (i + 1) % filteredParticipants.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIdx((i) => (i - 1 + filteredParticipants.length) % filteredParticipants.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        pickMention(filteredParticipants[mentionIdx])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMention(null)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
@@ -737,6 +884,21 @@ function Composer({
       e.preventDefault()
       setAttachment(f)
     }
+  }
+
+  // collectMentionedJIDs walks the typed text, picks every '@<digits>' token
+  // whose digits we previously inserted via pickMention, and returns the
+  // matching JIDs. Done at send time (not before) so deleted mentions don't
+  // get pinged — if the user backspaces over a token it shouldn't ping.
+  function collectMentionedJIDs(): string[] {
+    const seen = new Set<string>()
+    const re = /@(\d{7,16})\b/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text)) !== null) {
+      const jid = jidByDigits.current.get(m[1])
+      if (jid) seen.add(jid)
+    }
+    return Array.from(seen)
   }
 
   const canSendNow = (text.trim().length > 0 || attachment !== null) && !sending
@@ -780,20 +942,34 @@ function Composer({
             <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49" />
           </svg>
         </button>
-        <textarea
-          ref={taRef}
-          dir="auto"
-          rows={1}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            resize()
-          }}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          placeholder={attachment ? 'Add a caption…' : 'Type a message'}
-          className="max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600"
-        />
+        <div className="relative flex-1">
+          {mention && filteredParticipants.length > 0 && (
+            <MentionPicker
+              participants={filteredParticipants}
+              nameMap={nameMap}
+              highlighted={mentionIdx}
+              onPick={pickMention}
+              onHover={setMentionIdx}
+            />
+          )}
+          <textarea
+            ref={taRef}
+            dir="auto"
+            rows={1}
+            value={text}
+            onChange={(e) => {
+              const v = e.target.value
+              setText(v)
+              resize()
+              updateMentionContext(v, e.target.selectionStart)
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onSelect={(e) => updateMentionContext(text, (e.target as HTMLTextAreaElement).selectionStart)}
+            placeholder={attachment ? 'Add a caption…' : 'Type a message'}
+            className="max-h-40 min-h-[2.5rem] w-full resize-none rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600"
+          />
+        </div>
         <button
           onClick={send}
           disabled={!canSendNow}
@@ -994,6 +1170,71 @@ function guessMediaKind(f: File): string {
 // reply target is staged — mirrors the official WA "you're replying to X"
 // preview: colored vertical stripe, sender name in their per-sender color, a
 // single-line snippet of the quoted body, and an × to cancel.
+// MentionPicker is the small autocomplete that floats above the textarea
+// while the user is typing '@<query>' inside a group. Up/Down highlight,
+// Enter/Tab pick, Esc cancels — all handled by the composer's onKeyDown.
+// We just render the list and call onHover/onPick for mouse interaction.
+function MentionPicker({
+  participants,
+  nameMap,
+  highlighted,
+  onPick,
+  onHover,
+}: {
+  participants: GroupParticipant[]
+  nameMap?: Map<string, string>
+  highlighted: number
+  onPick: (p: GroupParticipant) => void
+  onHover: (i: number) => void
+}) {
+  return (
+    <div className="absolute bottom-full left-0 right-0 z-30 mb-1 max-h-60 overflow-y-auto rounded-xl bg-neutral-900 shadow-lg ring-1 ring-neutral-800">
+      {participants.map((p, i) => {
+        // Label precedence matches the rest of the UI (chatTitle / senderTitle):
+        // GroupParticipant.display_name first, then the contact name resolved
+        // through nameMap (which buildNameMap stitches together from contacts
+        // and groups), then the raw '+<phone>' fallback so we never show
+        // just the JID.
+        const name =
+          p.display_name ||
+          nameMap?.get(p.jid) ||
+          ('+' + (p.phone || p.jid.split('@')[0] || ''))
+        const phone = p.phone ? '+' + p.phone : ''
+        const initial = (name.replace(/^\+/, '').trim()[0] || '?').toUpperCase()
+        const active = i === highlighted
+        return (
+          <button
+            key={p.jid}
+            onMouseDown={(e) => { e.preventDefault(); onPick(p) }}
+            onMouseEnter={() => onHover(i)}
+            className={
+              'flex w-full items-center gap-2 px-3 py-2 text-left transition ' +
+              (active ? 'bg-emerald-500/15' : 'hover:bg-neutral-800')
+            }
+          >
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-700 text-xs font-semibold text-neutral-200">
+              {initial}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div dir="auto" className="truncate text-sm text-neutral-100">
+                {name}
+              </div>
+              {phone && phone !== name && (
+                <div className="truncate text-[11px] text-neutral-500">{phone}</div>
+              )}
+            </div>
+            {(p.is_admin || p.is_super_admin) && (
+              <span className="shrink-0 text-[10px] uppercase tracking-wider text-emerald-300">
+                {p.is_super_admin ? 'owner' : 'admin'}
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function ReplyQuote({
   msg,
   nameMap,

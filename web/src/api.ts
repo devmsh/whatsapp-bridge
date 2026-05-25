@@ -167,6 +167,17 @@ export interface Group {
   name: string
 }
 
+// GroupParticipant mirrors the bridge's GroupParticipant row, surfaced via
+// GET /api/v2/groups/{jid}/participants. Used by the composer's @-picker.
+export interface GroupParticipant {
+  jid: string
+  lid?: string
+  phone?: string
+  is_admin: boolean
+  is_super_admin: boolean
+  display_name?: string
+}
+
 // PresenceEntry mirrors the presence_cache row the bridge stores from
 // whatsmeow's events.Presence / events.ChatPresence streams.
 //   status = 'available' | 'unavailable' | 'composing' | 'paused'
@@ -640,12 +651,24 @@ export const api = {
     )
     return res.json()
   },
-  send: (jid: string, message: string, opts?: { mediaPath?: string }) =>
+  send: (
+    jid: string,
+    message: string,
+    opts?: { mediaPath?: string; mentionedJIDs?: string[] },
+  ) =>
     postBody<{ success: boolean; message_id: string; timestamp: number }>('/api/v2/send', {
       jid,
       message,
       media_path: opts?.mediaPath,
+      mentioned_jids: opts?.mentionedJIDs,
     }),
+  // groupParticipants returns the full participant list of a group — used by
+  // the composer's @-picker to suggest who you might be tagging.
+  groupParticipants: async (jid: string): Promise<GroupParticipant[]> => {
+    const res = await fetch(`/api/v2/groups/${encodeURIComponent(jid)}/participants`)
+    if (!res.ok) return []
+    return res.json()
+  },
   // upload posts a single file as multipart/form-data, the bridge writes it
   // under <MediaDir>/uploads/<yyyymm>/, and returns an absolute path that
   // /send and /reply can consume in media_path.
@@ -663,12 +686,18 @@ export const api = {
   // chat. The bridge resolves the quoted body server-side, so callers only need
   // to send the ID — same shape as official WA's "reply" composer. Pass
   // opts.mediaPath (returned by api.upload) to reply with a photo/file.
-  reply: (jid: string, quotedID: string, message: string, opts?: { mediaPath?: string }) =>
+  reply: (
+    jid: string,
+    quotedID: string,
+    message: string,
+    opts?: { mediaPath?: string; mentionedJIDs?: string[] },
+  ) =>
     postBody<{ success: boolean; message_id: string; timestamp: number }>('/api/v2/reply', {
       chat_jid: jid,
       message_id: quotedID,
       message,
       media_path: opts?.mediaPath,
+      mentioned_jids: opts?.mentionedJIDs,
     }),
   // Presence: subscribe asks the bridge to push presence updates for this
   // contact (whatsmeow only delivers them after the first subscribe). get
