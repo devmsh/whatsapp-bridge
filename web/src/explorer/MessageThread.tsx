@@ -134,6 +134,13 @@ export function MessageThread({
   // — drives the small badge on the FAB, exactly like WhatsApp's "↓ 3" pill.
   // Own messages don't count; sending one already snaps the view to bottom.
   const [unreadBelow, setUnreadBelow] = useState(0)
+  // In-chat search state. The magnifying-glass in the header toggles the
+  // search bar; query filters the currently-loaded message window;
+  // matchIndex steps through hits via ↑/↓ / Enter. Mirrors WA's per-chat
+  // search UX — closed by Esc or the ✕ button.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchIdx, setSearchIdx] = useState(0)
 
   const chat = chats.find((c) => c.jid === jid)
   const title = chat ? chatTitle(chat, nameMap) : '+' + jidUser(jid)
@@ -177,7 +184,44 @@ export function MessageThread({
     setEditingMsg(null)
     setLightboxIdx(null)
     setForwardMsg(null)
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchIdx(0)
   }, [jid])
+
+  // Build the ordered list of message IDs that match the search query.
+  // Search runs only on the currently-loaded window (no backend round-trip
+  // for this v1); use "Load earlier messages" to widen the haystack.
+  const matchIds = useMemo<string[]>(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return []
+    const out: string[] = []
+    for (const m of messages) {
+      if (m.is_deleted) continue
+      const hay = ((m.content || '') + ' ' + (m.media_caption || '')).toLowerCase()
+      if (hay.includes(q)) out.push(m.id)
+    }
+    return out
+  }, [messages, searchQuery])
+
+  // Clamp the active index whenever the match list shrinks.
+  useEffect(() => {
+    if (searchIdx >= matchIds.length) setSearchIdx(Math.max(0, matchIds.length - 1))
+  }, [matchIds.length, searchIdx])
+
+  // Scroll the active match into view as it changes. Uses data-msg-id on
+  // the row wrappers Timeline emits — cheap querySelector, no prop drilling.
+  const activeMatchId = matchIds[searchIdx]
+  useEffect(() => {
+    if (!activeMatchId) return
+    const root = scrollRef.current
+    if (!root) return
+    const el = root.querySelector(`[data-msg-id="${CSS.escape(activeMatchId)}"]`) as HTMLElement | null
+    if (el) {
+      stickToBottom.current = false
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [activeMatchId])
 
   // Append a live message that belongs to this chat. If the user is scrolled
   // up reading older history, bump the unread-below counter so the FAB's
@@ -428,10 +472,38 @@ export function MessageThread({
         >
           ✓ Tasks
         </button>
+        <button
+          onClick={() => setSearchOpen((v) => !v)}
+          title="Search in this chat (Cmd-F)"
+          aria-label="Search in this chat"
+          className={
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition ' +
+            (searchOpen
+              ? 'border-emerald-600/60 bg-emerald-500/15 text-emerald-300'
+              : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
+          }
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+        </button>
         <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
       </header>
 
       {(group || isContact) && <ProfileCard type={group ? 'group' : 'contact'} ref_={jid} />}
+
+      {searchOpen && (
+        <SearchBar
+          query={searchQuery}
+          onQueryChange={(q) => { setSearchQuery(q); setSearchIdx(0) }}
+          matchCount={matchIds.length}
+          activeIdx={searchIdx}
+          onPrev={() => setSearchIdx((i) => (matchIds.length ? (i - 1 + matchIds.length) % matchIds.length : 0))}
+          onNext={() => setSearchIdx((i) => (matchIds.length ? (i + 1) % matchIds.length : 0))}
+          onClose={() => { setSearchOpen(false); setSearchQuery(''); setSearchIdx(0) }}
+        />
+      )}
 
       {/* Scroll wrapper: stays `relative` so the floating ↓ FAB + the drop
           overlay anchor to it (and don't scroll out of view) while the inner
@@ -505,6 +577,7 @@ export function MessageThread({
                 onEdit={canSend ? startEdit : undefined}
                 onOpenImage={openLightboxFor}
                 selfDigits={selfDigits}
+                highlightId={activeMatchId}
               />
             </>
           )}
@@ -1594,6 +1667,103 @@ function MentionPicker({
   )
 }
 
+// SearchBar is the slim find-in-chat strip that drops in between the chat
+// header and the message list when the user clicks the magnifying glass.
+// Mirrors the keyboard ergonomics of WA's own search bar: typing filters
+// matches, Enter or ↓ advances, Shift+Enter or ↑ steps back, Esc closes.
+// The "X / Y" counter goes faint while there are no matches so the user
+// can see at a glance that they've typed past anything in the loaded
+// window (use "Load earlier messages" to widen the haystack).
+function SearchBar({
+  query,
+  onQueryChange,
+  matchCount,
+  activeIdx,
+  onPrev,
+  onNext,
+  onClose,
+}: {
+  query: string
+  onQueryChange: (q: string) => void
+  matchCount: number
+  activeIdx: number
+  onPrev: () => void
+  onNext: () => void
+  onClose: () => void
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
+  const hasHits = matchCount > 0
+  const positionLabel = hasHits ? `${activeIdx + 1} / ${matchCount}` : query ? '0 / 0' : ''
+  return (
+    <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-4 py-2">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-neutral-500" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" />
+        <path d="m21 21-4.3-4.3" />
+      </svg>
+      <input
+        ref={ref}
+        value={query}
+        onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); onClose(); return }
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            e.shiftKey ? onPrev() : onNext()
+            return
+          }
+          if (e.key === 'ArrowDown') { e.preventDefault(); onNext(); return }
+          if (e.key === 'ArrowUp')   { e.preventDefault(); onPrev(); return }
+        }}
+        placeholder="Search in chat…"
+        className="flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-600"
+      />
+      {positionLabel && (
+        <span
+          className={
+            'shrink-0 text-[11px] tabular-nums ' +
+            (hasHits ? 'text-neutral-400' : 'text-red-400/80')
+          }
+        >
+          {positionLabel}
+        </span>
+      )}
+      <button
+        onClick={onPrev}
+        disabled={!hasHits}
+        title="Previous match (Shift+Enter)"
+        aria-label="Previous match"
+        className="flex h-7 w-7 items-center justify-center rounded text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="18 15 12 9 6 15" />
+        </svg>
+      </button>
+      <button
+        onClick={onNext}
+        disabled={!hasHits}
+        title="Next match (Enter)"
+        aria-label="Next match"
+        className="flex h-7 w-7 items-center justify-center rounded text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <button
+        onClick={onClose}
+        title="Close search (Esc)"
+        aria-label="Close search"
+        className="flex h-7 w-7 items-center justify-center rounded text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
 // RecordingBar takes over the composer footer while a voice note is being
 // recorded. Mirrors WhatsApp's recording UX in a desktop-friendly form: a
 // pulsing red dot, a mm:ss timer that ticks every second, a ✕ to discard
@@ -1814,6 +1984,7 @@ function Timeline({
   onEdit,
   onOpenImage,
   selfDigits,
+  highlightId,
 }: {
   messages: Message[]
   group: boolean
@@ -1829,6 +2000,9 @@ function Timeline({
   onEdit?: (msg: Message) => void
   onOpenImage?: (msg: Message) => void
   selfDigits?: Set<string>
+  /** Message ID of the current search match — gets an emerald ring around
+   *  its bubble + is the scrollIntoView target driven from MessageThread. */
+  highlightId?: string
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -1850,7 +2024,7 @@ function Timeline({
         lastKey = senderKey
         lastTs = m.timestamp
         return (
-          <div key={m.id + m.timestamp}>
+          <div key={m.id + m.timestamp} data-msg-id={m.id}>
             {sep && (
               <div className="my-3 flex justify-center">
                 <span className="rounded-full bg-neutral-800 px-3 py-1 text-[11px] text-neutral-400">
@@ -1875,6 +2049,7 @@ function Timeline({
                 onOpenImage={onOpenImage}
                 selfDigits={selfDigits}
                 firstInGroup={firstInGroup}
+                highlighted={highlightId === m.id}
               />
             </div>
           </div>

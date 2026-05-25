@@ -26,6 +26,7 @@ export function MessageBubble({
   onOpenImage,
   selfDigits,
   firstInGroup = true,
+  highlighted = false,
 }: {
   msg: Message
   group: boolean
@@ -59,6 +60,10 @@ export function MessageBubble({
    *  — the sender label is suppressed, matching the official WA "clustering"
    *  rule where the name only shows on the first bubble of a streak. */
   firstInGroup?: boolean
+  /** Visually emphasised because it's the current hit of an in-chat search.
+   *  Adds a strong amber ring around the bubble; MessageThread scrolls it
+   *  into view as the user steps ↑/↓ through matches. */
+  highlighted?: boolean
 }) {
   const mine = msg.is_from_me
   const sender =
@@ -147,9 +152,11 @@ export function MessageBubble({
       )}
       <div
         className={
-          'group max-w-[78%] rounded-2xl px-3 py-2 text-sm ' +
+          'group max-w-[78%] rounded-2xl px-3 py-2 text-sm transition ' +
           (mine ? 'bg-emerald-700/40' : 'bg-neutral-800') +
-          (selfMentioned ? ' ring-1 ring-emerald-400/60' : '')
+          (highlighted
+            ? ' ring-2 ring-amber-400/80 shadow-lg shadow-amber-500/20'
+            : selfMentioned ? ' ring-1 ring-emerald-400/60' : '')
         }
       >
         {sender && (
