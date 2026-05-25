@@ -177,6 +177,24 @@ export function MessageThread({
     setLimit((l) => l + PAGE)
   }
 
+  // Optimistic star/unstar: flip is_starred in the local message immediately
+  // so the bubble's footer ⭐ + the hover button update before the bridge
+  // round-trip. Roll back if /star or /unstar errors.
+  async function handleStar(target: Message, next: boolean) {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === target.id ? { ...m, is_starred: next } : m)),
+    )
+    try {
+      if (next) await api.star(jid, target.id)
+      else await api.unstar(jid, target.id)
+    } catch (e) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === target.id ? { ...m, is_starred: !next } : m)),
+      )
+      console.warn('star toggle failed:', e)
+    }
+  }
+
   // Apply my own reaction optimistically: hit /api/v2/react and append a
   // chip below the bubble immediately, replacing any previous reaction I had
   // on that message. WhatsApp treats reactions as self-replacing per user.
@@ -396,6 +414,7 @@ export function MessageThread({
               onReply={canSend ? setReplyTo : undefined}
               onReact={canSend ? handleReact : undefined}
               onForward={setForwardMsg}
+              onStar={handleStar}
               onOpenImage={openLightboxFor}
             />
           </>
@@ -981,6 +1000,7 @@ function Timeline({
   onReply,
   onReact,
   onForward,
+  onStar,
   onOpenImage,
 }: {
   messages: Message[]
@@ -993,6 +1013,7 @@ function Timeline({
   onReply?: (msg: Message) => void
   onReact?: (msg: Message, emoji: string) => void
   onForward?: (msg: Message) => void
+  onStar?: (msg: Message, starred: boolean) => void
   onOpenImage?: (msg: Message) => void
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
@@ -1035,6 +1056,7 @@ function Timeline({
                 onReply={onReply}
                 onReact={onReact}
                 onForward={onForward}
+                onStar={onStar}
                 onOpenImage={onOpenImage}
                 firstInGroup={firstInGroup}
               />

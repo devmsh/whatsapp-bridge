@@ -83,6 +83,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/messages/mark-read", s.handleMarkRead)
 	s.mux.HandleFunc("/api/v2/messages/", s.handleMessageByID)
 	s.mux.HandleFunc("/api/v2/unread", s.handleUnread)
+	s.mux.HandleFunc("/api/v2/starred", s.handleStarredList)
 
 	// Chats
 	s.mux.HandleFunc("/api/v2/chats", s.handleChats)

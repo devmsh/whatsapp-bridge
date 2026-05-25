@@ -20,6 +20,7 @@ export function MessageBubble({
   onReply,
   onReact,
   onForward,
+  onStar,
   onOpenImage,
   firstInGroup = true,
 }: {
@@ -37,6 +38,8 @@ export function MessageBubble({
   /** Called when the user clicks the Forward action — lifts to the thread
    *  which opens the multi-target share-sheet picker. */
   onForward?: (msg: Message) => void
+  /** Toggle the local star bookmark on this message. */
+  onStar?: (msg: Message, starred: boolean) => void
   /** Called when an image bubble is clicked — lifts to the thread which
    *  opens the in-app lightbox at this message's position. */
   onOpenImage?: (msg: Message) => void
@@ -57,11 +60,13 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {(onReply || onReact || onForward) && mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar) && mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
           onForward={onForward ? () => onForward(msg) : undefined}
+          onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
+          isStarred={!!msg.is_starred}
           side="left"
         />
       )}
@@ -123,15 +128,24 @@ export function MessageBubble({
             />
           )}
           {msg.is_edit && <span className="italic">edited</span>}
+          {msg.is_starred && (
+            <span title="Starred" aria-label="Starred" className="text-amber-300">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+            </span>
+          )}
           <span>{clockTime(msg.timestamp)}</span>
           {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
-      {(onReply || onReact || onForward) && !mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar) && !mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
           onForward={onForward ? () => onForward(msg) : undefined}
+          onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
+          isStarred={!!msg.is_starred}
           side="right"
         />
       )}
@@ -148,11 +162,15 @@ function BubbleActions({
   onReply,
   onReact,
   onForward,
+  onStar,
+  isStarred,
   side,
 }: {
   onReply?: () => void
   onReact?: (emoji: string) => void
   onForward?: () => void
+  onStar?: () => void
+  isStarred?: boolean
   side: 'left' | 'right'
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -200,6 +218,23 @@ function BubbleActions({
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 17 20 12 15 7" />
             <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+          </svg>
+        </button>
+      )}
+      {onStar && (
+        <button
+          onClick={onStar}
+          title={isStarred ? 'Unstar' : 'Star'}
+          aria-label={isStarred ? 'Unstar' : 'Star'}
+          className={
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ' +
+            (isStarred
+              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+              : 'bg-neutral-800/80 text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100')
+          }
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
           </svg>
         </button>
       )}

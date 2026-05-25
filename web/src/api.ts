@@ -135,6 +135,12 @@ export interface Message {
   //   read      — recipient (or a group participant) opened the chat (blue ✓✓)
   //   played    — voice / video media playback receipt observed (blue ✓✓)
   status?: 'sent' | 'delivered' | 'read' | 'played'
+
+  // True when the user has bookmarked this message via the Star action.
+  // Returned by /messages (per-chat) and /starred (global).
+  is_starred?: boolean
+  // Unix seconds — only populated on the /starred global list.
+  starred_at?: number
 }
 
 export interface Contact {
@@ -668,6 +674,22 @@ export const api = {
   presenceGet: async (jid: string): Promise<PresenceEntry | null> => {
     const res = await fetch('/api/v2/presence/' + encodeURIComponent(jid))
     if (!res.ok) return null
+    return res.json()
+  },
+  // star / unstar a message — local bookmark only, like WhatsApp's
+  // "Starred messages" list. listStarred returns the full message bodies
+  // with their chat name attached.
+  star: (jid: string, messageID: string) =>
+    postBody<{ success: boolean }>(`/api/v2/messages/${encodeURIComponent(messageID)}/star`, {
+      chat_jid: jid,
+    }),
+  unstar: (jid: string, messageID: string) =>
+    postBody<{ success: boolean }>(`/api/v2/messages/${encodeURIComponent(messageID)}/unstar`, {
+      chat_jid: jid,
+    }),
+  listStarred: async (): Promise<Message[]> => {
+    const res = await fetch('/api/v2/starred')
+    if (!res.ok) return []
     return res.json()
   },
   // forward reposts the message at (fromChat, messageID) into a different

@@ -210,6 +210,17 @@ CREATE TABLE IF NOT EXISTS events_log (
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_jid ON events_log(jid);
 
+-- Starred (bookmarked) messages. Local state only — WhatsApp's own star sync
+-- isn't reliable across devices, so we maintain our own list. starred_at lets
+-- the Starred panel show the most-recently-flagged messages first.
+CREATE TABLE IF NOT EXISTS starred_messages (
+    chat_jid   TEXT    NOT NULL,
+    message_id TEXT    NOT NULL,
+    starred_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_jid, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_starred_at ON starred_messages(starred_at);
+
 CREATE TABLE IF NOT EXISTS presence_cache (
     jid        TEXT    PRIMARY KEY,
     status     TEXT    NOT NULL DEFAULT '',

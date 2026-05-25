@@ -61,6 +61,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		Reactions []db.Reaction    `json:"reactions,omitempty"`
 		ChatName  string           `json:"chat_name,omitempty"`
 		Status    db.MessageStatus `json:"status,omitempty"`
+		IsStarred bool             `json:"is_starred,omitempty"`
 	}
 
 	chatName := ""
@@ -78,6 +79,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	statuses, _ := s.store.GetMessageStatuses(chatJIDs, myIDs)
+	// Fetch the starred set for these chats once so we can stamp is_starred
+	// on each message without an N+1 query.
+	starred, _ := s.store.GetStarredIDs(chatJIDs)
 
 	var results []enriched
 	for _, m := range msgs {
@@ -92,6 +96,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 			} else {
 				e.Status = db.StatusSent
 			}
+		}
+		if starred[m.ID] {
+			e.IsStarred = true
 		}
 		results = append(results, e)
 	}
@@ -120,6 +127,10 @@ func (s *Server) handleMessageByID(w http.ResponseWriter, r *http.Request) {
 		s.handleEdit(w, r, msgID, chatJID)
 	case "receipts":
 		s.handleMessageReceipts(w, r, msgID, chatJID)
+	case "star":
+		s.handleStarMessage(w, r, msgID, chatJID, true)
+	case "unstar":
+		s.handleStarMessage(w, r, msgID, chatJID, false)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
