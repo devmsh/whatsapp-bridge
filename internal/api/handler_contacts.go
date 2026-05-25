@@ -29,17 +29,12 @@ func (s *Server) handleContacts(w http.ResponseWriter, r *http.Request) {
 	if contacts == nil {
 		contacts = []db.Contact{}
 	}
-	// Private mode (see handler_chats.go): unlocked shows ONLY hidden, locked
-	// excludes hidden.
-	hidden := s.store.HiddenChatJIDs()
-	unlocked := s.isUnlocked(r)
-	out := contacts[:0]
-	for _, c := range contacts {
-		if hidden[c.JID] == unlocked {
-			out = append(out, c)
-		}
-	}
-	contacts = out
+	// NOTE: contacts are a name directory — they always return the full set,
+	// regardless of hidden-chats / private-mode state. Otherwise sender names
+	// and "@<digits>" mentions of hidden contacts would not resolve inside
+	// non-hidden group chats (you'd see "+<digits>" instead of the real name).
+	// Hidden-state filtering is enforced on chats, messages, and the SSE
+	// stream — not on the contact directory.
 	jsonOK(w, contacts)
 }
 
