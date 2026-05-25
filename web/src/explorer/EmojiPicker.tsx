@@ -1,26 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-// EmojiPicker is the smiley-button popover the Composer hangs above the
-// textarea. Lightweight on purpose — no external library, no full Unicode
-// table, no skin-tones (yet). Eight tabs of the most-used emoji match what
-// the overwhelming majority of WA users actually pick. Recents persists to
+// EmojiPicker is the smiley panel both the Composer (popover above the
+// textarea) and the bubble reaction "+" button (centered modal) use.
+// Lightweight on purpose — no external library, no full Unicode table,
+// no skin-tones (yet). Eight tabs of the most-used emoji match what the
+// overwhelming majority of WA users actually pick. Recents persists to
 // localStorage so the next session opens with your last 24 right there.
 //
 // Behavior:
 //   - Click tab to switch category; the grid swaps in place.
-//   - Click emoji to insert at the textarea's caret (handled by the parent
-//     via the onPick callback — we don't reach into the textarea).
-//   - Click outside the popover closes it.
+//   - Click emoji to insert / react (handled by the parent via onPick).
+//     In modal mode the picker also closes itself after a pick — matches
+//     WA's "pick one full emoji, react, done" flow for the + button.
+//   - Click outside the panel closes it.
 //   - Esc closes it.
 //
-// The popover anchors to the parent's positioned wrapper (the Composer
-// renders us inside a `relative` slot), so we never escape the chat column.
+// mode = 'popover' (default): hangs from its positioned parent via
+//   absolute bottom-full left-0; that's how the Composer uses it.
+// mode = 'modal': renders a fullscreen backdrop and centers the panel —
+//   the right shape for bubble reactions where there's no anchor near
+//   the cursor.
 export function EmojiPicker({
   onPick,
   onClose,
+  mode = 'popover',
 }: {
   onPick: (emoji: string) => void
   onClose: () => void
+  mode?: 'popover' | 'modal'
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<string>(() => (loadRecents().length > 0 ? 'recent' : 'smileys'))
@@ -52,12 +59,50 @@ export function EmojiPicker({
       } catch {}
       return next
     })
+    // Modal usage (the bubble's reaction "+") is one-shot: pick → react →
+    // dismiss. Popover usage stays open so the user can rattle off
+    // several into the textarea.
+    if (mode === 'modal') onClose()
   }
 
   const visible = useMemo<string[]>(() => {
     if (tab === 'recent') return recents
     return CATEGORIES.find((c) => c.id === tab)?.emoji ?? []
   }, [tab, recents])
+
+  // In modal mode, render a fixed full-screen backdrop and center the
+  // panel; the wrapRef goes on the panel itself so the click-outside
+  // handler still works (clicks on the dimmed backdrop close). In popover
+  // mode we keep the historical positioning so the Composer's anchor
+  // doesn't shift.
+  if (mode === 'modal') {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Emoji picker"
+        onMouseDown={(e) => {
+          // Backdrop click closes. The panel itself stops propagation below.
+          if (e.target === e.currentTarget) onClose()
+        }}
+        className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      >
+        <div
+          ref={wrapRef}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="flex h-80 w-80 flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60"
+        >
+          <PickerBody
+            tab={tab}
+            setTab={setTab}
+            recents={recents}
+            visible={visible}
+            onPick={pick}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -66,6 +111,34 @@ export function EmojiPicker({
       aria-label="Emoji picker"
       className="absolute bottom-full left-0 z-30 mb-2 flex h-72 w-80 flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60"
     >
+      <PickerBody
+        tab={tab}
+        setTab={setTab}
+        recents={recents}
+        visible={visible}
+        onPick={pick}
+      />
+    </div>
+  )
+}
+
+// PickerBody is the shared grid + tab bar — same UI for popover and modal
+// modes. Kept inline because it has no useful life outside of EmojiPicker.
+function PickerBody({
+  tab,
+  setTab,
+  recents,
+  visible,
+  onPick,
+}: {
+  tab: string
+  setTab: (id: string) => void
+  recents: string[]
+  visible: string[]
+  onPick: (emoji: string) => void
+}) {
+  return (
+    <>
       {/* Grid takes the full height minus the tab bar; native scroll for
           overflow so a tall category (Smileys) doesn't blow up the popover. */}
       <div className="grid flex-1 grid-cols-8 gap-0.5 overflow-y-auto p-2">
@@ -77,9 +150,9 @@ export function EmojiPicker({
           visible.map((e, i) => (
             <button
               key={e + i}
-              onClick={() => pick(e)}
+              onClick={() => onPick(e)}
               className="flex h-8 w-8 items-center justify-center rounded text-xl leading-none transition hover:bg-neutral-800"
-              aria-label={`Insert ${e}`}
+              aria-label={`Pick ${e}`}
             >
               {e}
             </button>
@@ -96,7 +169,7 @@ export function EmojiPicker({
           </TabButton>
         ))}
       </div>
-    </div>
+    </>
   )
 }
 

@@ -5,6 +5,7 @@ import { senderColor } from './colors'
 import { ChatAvatar } from './ChatAvatar'
 import { MessageTaskButton } from './MessageTaskButton'
 import { RichText } from './RichText'
+import { EmojiPicker } from './EmojiPicker'
 
 // MessageBubble renders one message: alignment, sender (in groups), reply
 // preview, media, text, reactions, and edited/deleted/forwarded markers.
@@ -457,7 +458,9 @@ function ReactionChips({ reactions }: { reactions: NonNullable<Message['reaction
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
 
 // ReactionPicker pops above the smile button and lays the 6 quick reactions
-// in a single row, exactly like WhatsApp's quick-react bar.
+// in a single row, exactly like WhatsApp's quick-react bar. The trailing
+// "+" button promotes the popover to the full categorized picker — also
+// WA: tap the + → any emoji as a reaction, not just the six quick ones.
 function ReactionPicker({
   side,
   onPick,
@@ -465,24 +468,45 @@ function ReactionPicker({
   side: 'left' | 'right'
   onPick: (emoji: string) => void
 }) {
+  const [showFull, setShowFull] = useState(false)
   return (
-    <div
-      className={
-        'absolute bottom-full mb-1 flex gap-0.5 rounded-full bg-neutral-900 px-1.5 py-1 shadow-lg ring-1 ring-neutral-700 ' +
-        (side === 'left' ? 'right-0' : 'left-0')
-      }
-    >
-      {QUICK_REACTIONS.map((e) => (
+    <>
+      <div
+        className={
+          'absolute bottom-full mb-1 flex gap-0.5 rounded-full bg-neutral-900 px-1.5 py-1 shadow-lg ring-1 ring-neutral-700 ' +
+          (side === 'left' ? 'right-0' : 'left-0')
+        }
+      >
+        {QUICK_REACTIONS.map((e) => (
+          <button
+            key={e}
+            onClick={() => onPick(e)}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-base leading-none transition hover:scale-125 hover:bg-neutral-800"
+            title={e}
+          >
+            {e}
+          </button>
+        ))}
         <button
-          key={e}
-          onClick={() => onPick(e)}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-base leading-none transition hover:scale-125 hover:bg-neutral-800"
-          title={e}
+          onClick={(e) => { e.stopPropagation(); setShowFull(true) }}
+          title="More emoji…"
+          aria-label="Open full emoji picker"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-sm text-neutral-400 leading-none transition hover:scale-125 hover:bg-neutral-800 hover:text-neutral-100"
         >
-          {e}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
         </button>
-      ))}
-    </div>
+      </div>
+      {showFull && (
+        <EmojiPicker
+          mode="modal"
+          onPick={(emoji) => { onPick(emoji) /* parent closes quick popover */ }}
+          onClose={() => setShowFull(false)}
+        />
+      )}
+    </>
   )
 }
 
