@@ -895,6 +895,27 @@ function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialText])
 
+  // Per-chat draft persistence. Typed-but-not-sent text is saved on every
+  // keystroke (see the textarea's onChange below) and restored when the
+  // user comes back to the same chat — mirrors WA's own behavior where
+  // switching threads never loses what you were typing. Keyed on jid so
+  // each chat has its own buffer; cleared on send (see send() and
+  // sendVoice()) so a sent message doesn't keep popping back.
+  //
+  // We deliberately save in onChange instead of a useEffect: it would
+  // otherwise fire on every jid change, writing the OLD chat's text
+  // under the NEW chat's key before the load completes.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(draftKey(jid))
+      setText(saved || '')
+      requestAnimationFrame(resize)
+    } catch {
+      setText('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jid])
+
   // --- voice recording ---
 
   // Ask the browser for the mic, start a MediaRecorder, and tick a 1s timer
@@ -1129,6 +1150,10 @@ function Composer({
       onClearReply?.()
       setText('')
       setAttachment(null)
+      // The text-change effect already removes empty drafts, but be explicit
+      // here so the key disappears synchronously with the successful send —
+      // no chance of a stale draft surviving a fast chat-switch.
+      try { localStorage.removeItem(draftKey(jid)) } catch {}
       requestAnimationFrame(resize)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to send')
@@ -1375,6 +1400,14 @@ function Composer({
                   setText(v)
                   resize()
                   updateMentionContext(v, e.target.selectionStart)
+                  // Persist per-chat draft on every keystroke (skipped while
+                  // editing — see the draft persistence note above).
+                  if (!editingMsg) {
+                    try {
+                      if (v.trim()) localStorage.setItem(draftKey(jid), v)
+                      else localStorage.removeItem(draftKey(jid))
+                    } catch {}
+                  }
                 }}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
@@ -1586,6 +1619,14 @@ function formatLastSeen(ts: number): string {
     year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric',
   })
   return `${datePart} at ${time}`
+}
+
+// draftKey is the localStorage namespace for the Composer's per-chat draft
+// persistence. Kept as a tiny helper so the prefix lives in one place and
+// future cleanup (a "clear all drafts" action, a version bump, etc.) only
+// has to touch this line.
+function draftKey(jid: string): string {
+  return `wa.draft.${jid}`
 }
 
 // guessMediaKind maps a browser File's MIME type to the same media_type the
