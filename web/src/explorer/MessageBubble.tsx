@@ -301,7 +301,7 @@ function MediaContent({ msg }: { msg: Message }) {
       return <video src={url} controls className="mb-1 max-h-80 rounded-lg" />
     case 'voice_note':
     case 'audio':
-      return <audio src={url} controls className="mb-1 w-56 max-w-full" />
+      return <VoiceBubble msg={msg} url={url} />
     case 'document':
       return (
         <a
@@ -318,6 +318,140 @@ function MediaContent({ msg }: { msg: Message }) {
     default:
       return null
   }
+}
+
+// VoiceBubble plays a voice note / audio file in a row that matches the
+// official WA voice-message UX: a round play/pause button, a thin
+// scrubbable progress bar with a draggable thumb, a 1× / 1.5× / 2× speed
+// toggle, and a tabular-nums duration counter. The native <audio> element
+// is hidden — we drive it through refs and reflect its state into the
+// custom UI, so seek / pause / resume work without showing the browser's
+// chrome.
+function VoiceBubble({ msg, url }: { msg: Message; url: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [duration, setDuration] = useState(0)
+  const [current, setCurrent] = useState(0)
+  const [speed, setSpeed] = useState(1)
+  const mine = msg.is_from_me
+
+  // Wire the hidden audio element to local state. We can't trust the parent
+  // re-rendering to keep playing/current in sync — the user can pause /
+  // resume / scrub between renders, so we always read the live element.
+  useEffect(() => {
+    const a = audioRef.current
+    if (!a) return
+    const onPlay = () => setPlaying(true)
+    const onPause = () => setPlaying(false)
+    const onEnded = () => {
+      setPlaying(false)
+      setCurrent(0)
+    }
+    const onTime = () => setCurrent(a.currentTime)
+    const onMeta = () => setDuration(a.duration)
+    a.addEventListener('play', onPlay)
+    a.addEventListener('pause', onPause)
+    a.addEventListener('ended', onEnded)
+    a.addEventListener('timeupdate', onTime)
+    a.addEventListener('loadedmetadata', onMeta)
+    return () => {
+      a.removeEventListener('play', onPlay)
+      a.removeEventListener('pause', onPause)
+      a.removeEventListener('ended', onEnded)
+      a.removeEventListener('timeupdate', onTime)
+      a.removeEventListener('loadedmetadata', onMeta)
+    }
+  }, [])
+
+  function toggle() {
+    const a = audioRef.current
+    if (!a) return
+    if (a.paused) void a.play()
+    else a.pause()
+  }
+
+  // Cycle 1× → 1.5× → 2× → 1× — matches WA's speed toggle behavior.
+  function cycleSpeed() {
+    const next = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1
+    setSpeed(next)
+    if (audioRef.current) audioRef.current.playbackRate = next
+  }
+
+  function seek(e: React.MouseEvent<HTMLDivElement>) {
+    const a = audioRef.current
+    if (!a || !duration || !isFinite(duration)) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    a.currentTime = ratio * duration
+  }
+
+  // WA shows the total duration before playing / after ending, and the
+  // elapsed time while mid-play.
+  const showElapsed = playing || (current > 0 && current < duration)
+  const displaySec = showElapsed ? current : duration
+  const pct = duration > 0 ? (current / duration) * 100 : 0
+
+  // Color scheme adapts to bubble side so the play button + progress fill
+  // stay readable inside both the emerald (mine) and neutral (theirs) bubble.
+  const playBg = mine ? 'bg-emerald-500 text-neutral-950' : 'bg-neutral-700 text-neutral-100'
+  const trackBg = mine ? 'bg-emerald-200/30' : 'bg-neutral-600/60'
+  const fillBg = mine ? 'bg-emerald-200' : 'bg-neutral-300'
+  const speedColor = mine ? 'text-emerald-100' : 'text-neutral-300'
+
+  return (
+    <div className="mb-1 flex w-64 max-w-full items-center gap-3">
+      <button
+        onClick={toggle}
+        title={playing ? 'Pause' : 'Play'}
+        aria-label={playing ? 'Pause' : 'Play'}
+        className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition ' + playBg}
+      >
+        {playing ? (
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <rect x="6" y="5" width="4" height="14" rx="1" />
+            <rect x="14" y="5" width="4" height="14" rx="1" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+        )}
+      </button>
+      <div className="min-w-0 flex-1">
+        <div
+          onClick={seek}
+          className={'relative h-1 cursor-pointer rounded-full ' + trackBg}
+        >
+          <div
+            className={'absolute inset-y-0 left-0 rounded-full ' + fillBg}
+            style={{ width: pct + '%' }}
+          />
+          <div
+            className={'absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full shadow ' + fillBg}
+            style={{ left: `calc(${pct}% - 6px)` }}
+          />
+        </div>
+        <div className="mt-1 flex items-center justify-between text-[10px] tabular-nums text-neutral-400">
+          <span>{fmtVoiceTime(displaySec)}</span>
+          <button
+            onClick={cycleSpeed}
+            title="Playback speed"
+            className={`rounded-full px-1.5 py-px text-[10px] font-semibold leading-none transition hover:bg-black/20 ${speedColor}`}
+          >
+            {speed === 1 ? '1×' : speed + '×'}
+          </button>
+        </div>
+      </div>
+      <audio ref={audioRef} src={url} preload="metadata" className="hidden" />
+    </div>
+  )
+}
+
+function fmtVoiceTime(sec: number): string {
+  if (!isFinite(sec) || sec < 0) sec = 0
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return `${m}:${s < 10 ? '0' + s : s}`
 }
 
 // MediaUnderstanding renders the AI-derived transcript (for voice notes) or
