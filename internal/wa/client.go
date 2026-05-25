@@ -23,6 +23,10 @@ type Client struct {
 	Broadcaster *Broadcaster
 	Auth        *AuthManager
 	Sync        *SyncTracker
+	// Typing is the in-memory cache of "who's composing in which chat" —
+	// populated from events.ChatPresence in handleChatPresence, read by
+	// the API for the group-typing header.
+	Typing      *typingState
 	startTime   time.Time
 	mu          sync.RWMutex
 
@@ -56,6 +60,7 @@ func NewClient(waDBPath string, store *db.Store, mediaDir string, logLevel strin
 		Log:         logger,
 		Broadcaster: NewBroadcaster(),
 		Sync:        NewSyncTracker(),
+		Typing:      newTypingState(),
 		mediaPolicy: DefaultMediaPolicy(),
 	}
 	c.Auth = newAuthManager(c)

@@ -676,6 +676,15 @@ export const api = {
     if (!res.ok) return null
     return res.json()
   },
+  // chatTyping returns the sender JIDs currently typing in this chat (group
+  // header polls it for "X is typing…"). The bridge keeps an ephemeral
+  // in-memory cache fed by events.ChatPresence — entries auto-expire after
+  // ~10s without a refresh.
+  chatTyping: async (jid: string): Promise<string[]> => {
+    const res = await fetch('/api/v2/chats/' + encodeURIComponent(jid) + '/typing')
+    if (!res.ok) return []
+    return res.json()
+  },
   // star / unstar a message — local bookmark only, like WhatsApp's
   // "Starred messages" list. listStarred returns the full message bodies
   // with their chat name attached.

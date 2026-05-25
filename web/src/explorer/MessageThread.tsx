@@ -123,6 +123,11 @@ export function MessageThread({
   // nothing fresh to show (privacy-hidden, stale, or not yet learned).
   const presence = useDmPresence(isContact ? jid : null)
   const presenceLine = presence ? formatPresence(presence) : ''
+  // For groups, poll the typing cache so we can render WA's
+  // "X is typing…" / "X and Y are typing…" / "Several people are typing…"
+  // header line. Resolved to display names via nameMap.
+  const groupTyping = useGroupTyping(group ? jid : null)
+  const groupTypingLine = group ? formatGroupTyping(groupTyping, nameMap) : ''
 
   // Load when the chat or page size changes.
   useEffect(() => {
@@ -259,11 +264,13 @@ export function MessageThread({
               'truncate text-xs ' +
               // Highlight typing in emerald (same accent as own bubbles) so
               // 'typing…' actually pops the way it does in official WA.
-              (presenceLine === 'typing…' ? 'text-emerald-400' : 'text-neutral-500')
+              ((group ? groupTypingLine : presenceLine === 'typing…')
+                ? 'text-emerald-400'
+                : 'text-neutral-500')
             }
           >
             {group
-              ? 'Group'
+              ? groupTypingLine || 'Group'
               : presenceLine || jid.replace('@s.whatsapp.net', '')}
           </div>
           {isContact && (contactTags[jid]?.length ?? 0) > 0 && (
@@ -894,6 +901,55 @@ function formatPresence(p: PresenceEntry): string {
     return 'last seen ' + formatLastSeen(p.last_seen)
   }
   return ''
+}
+
+// useGroupTyping polls /chats/{jid}/typing every 3 s for groups, returning
+// the set of sender JIDs currently composing. The bridge's in-memory cache
+// auto-expires entries after ~10s, so a stale list never lingers.
+//
+// Pass `null` to disable (used for DMs / status / newsletters).
+function useGroupTyping(jid: string | null): string[] {
+  const [typers, setTypers] = useState<string[]>([])
+  useEffect(() => {
+    if (!jid) {
+      setTypers([])
+      return
+    }
+    let cancelled = false
+    async function tick() {
+      const list = await api.chatTyping(jid as string).catch(() => [] as string[])
+      if (!cancelled) setTypers(list)
+    }
+    void tick()
+    const h = setInterval(tick, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(h)
+    }
+  }, [jid])
+  return typers
+}
+
+// formatGroupTyping turns the typer set into the WA-style header string,
+// resolved through nameMap so we show display names rather than raw JIDs:
+//
+//   1 typer  → "Sarah is typing…"
+//   2 typers → "Sarah and Aymen are typing…"
+//   3+       → "Several people are typing…"  (matches official WA cap)
+//
+// Returns '' when nobody is typing, so the caller can fall back to "Group".
+function formatGroupTyping(jids: string[], nameMap: Map<string, string>): string {
+  if (jids.length === 0) return ''
+  // Resolve to first names (split on whitespace so "Mohammed Shurrab" → "Mohammed")
+  const names = jids.map((j) => {
+    const full = nameMap.get(j) || ''
+    if (full) return full.split(/\s+/)[0]
+    // Fall back to the bare phone digits, prefixed, so the header isn't blank.
+    return '+' + (j.split('@')[0] || '').split(':')[0]
+  })
+  if (names.length === 1) return `${names[0]} is typing…`
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`
+  return 'Several people are typing…'
 }
 
 // formatLastSeen mirrors the WA format: 'today at 14:32', 'yesterday at

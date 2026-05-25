@@ -76,6 +76,8 @@ func (s *Server) handleChatByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleChatHidePreview(w, r, jid)
 	case "unhide":
 		s.handleChatUnhide(w, r, jid)
+	case "typing":
+		s.handleChatTyping(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
@@ -153,6 +155,27 @@ func (s *Server) handleChatAction(w http.ResponseWriter, r *http.Request, jid st
 	}
 
 	jsonOK(w, map[string]bool{"success": true})
+}
+
+// handleChatTyping returns the JIDs currently typing in this chat (any
+// participant whose 'composing' beacon arrived within the last few seconds —
+// see typingFreshSec in wa/typing.go). The chat header polls this every
+// few seconds for groups so it can render the WA-style "X is typing…" line.
+// Empty array (not 404) when nobody is typing — keeps the client logic
+// uniform.
+func (s *Server) handleChatTyping(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.guardChatAccess(w, r, jid) {
+		return
+	}
+	typers := s.client.Typing.Typers(jid)
+	if typers == nil {
+		typers = []string{}
+	}
+	jsonOK(w, typers)
 }
 
 func (s *Server) handleChatDisappearing(w http.ResponseWriter, r *http.Request, jid string) {
