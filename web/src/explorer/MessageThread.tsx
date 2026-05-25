@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, type Chat, type Circle, type Message, type Tag } from '../api'
 import {
-  chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser,
+  chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, senderTitle,
   type MentionEntry,
 } from './format'
+import { senderColor } from './colors'
 import { MessageBubble } from './MessageBubble'
 import { ChatCircles } from './ChatCircles'
 import { TagChips, TagEditor } from './Tags'
@@ -69,6 +70,7 @@ export function MessageThread({
   const [composerDraft, setComposerDraft] = useState('')
   const [showDashboard, setShowDashboard] = useState(false)
   const [showHideDialog, setShowHideDialog] = useState(false)
+  const [replyTo, setReplyTo] = useState<Message | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -95,10 +97,11 @@ export function MessageThread({
     }
   }, [jid, limit])
 
-  // Reset page size when switching chats.
+  // Reset page size + clear any reply context when switching chats.
   useEffect(() => {
     setLimit(PAGE)
     stickToBottom.current = true
+    setReplyTo(null)
   }, [jid])
 
   // Append a live message that belongs to this chat.
@@ -265,6 +268,7 @@ export function MessageThread({
               onOpenTask={onOpenTask}
               onTasksChanged={onTasksChanged}
               onOpenChat={onOpenChat}
+              onReply={canSend ? setReplyTo : undefined}
             />
           </>
         )}
@@ -275,6 +279,9 @@ export function MessageThread({
           jid={jid}
           group={group}
           initialText={composerDraft || initialDraft}
+          replyTo={replyTo}
+          nameMap={nameMap}
+          onClearReply={() => setReplyTo(null)}
           onDraftConsumed={() => {
             if (composerDraft) setComposerDraft('')
             else onDraftConsumed?.()
@@ -355,16 +362,25 @@ export function MessageThread({
 
 // Composer is the message input at the bottom of a thread. Enter sends,
 // Shift+Enter inserts a newline. dir="auto" keeps Arabic/English typing aligned.
+// When a `replyTo` is set, the composer shows a quoted-message chip above the
+// textarea and routes the send through api.reply instead of api.send — exactly
+// like the official WA reply UX.
 function Composer({
   jid,
   group,
   initialText = '',
+  replyTo,
+  nameMap,
+  onClearReply,
   onDraftConsumed,
   onSent,
 }: {
   jid: string
   group: boolean
   initialText?: string
+  replyTo?: Message | null
+  nameMap?: Map<string, string>
+  onClearReply?: () => void
   onDraftConsumed?: () => void
   onSent: (m: Message) => void
 }) {
@@ -372,6 +388,28 @@ function Composer({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
+
+  // Focus + jump-to-end whenever a fresh reply target appears.
+  useEffect(() => {
+    if (!replyTo) return
+    const el = taRef.current
+    if (!el) return
+    el.focus()
+    const len = el.value.length
+    el.setSelectionRange(len, len)
+  }, [replyTo?.id])
+
+  // Cancel reply with Escape, matching official WA.
+  useEffect(() => {
+    if (!replyTo) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        onClearReply?.()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [replyTo?.id, onClearReply])
 
   function resize() {
     const el = taRef.current
@@ -404,8 +442,14 @@ function Composer({
     setSending(true)
     setError('')
     try {
-      const res = await api.send(jid, body)
-      onSent({
+      // Route through reply when a quote target is set, otherwise the regular
+      // send endpoint. Both return {message_id, timestamp}.
+      const res = replyTo
+        ? await api.reply(jid, replyTo.id, body)
+        : await api.send(jid, body)
+      // Echo locally with reply_to_* populated so the new bubble shows its
+      // quote bar immediately, without waiting for an SSE round-trip.
+      const echoed: Message = {
         id: res.message_id,
         chat_jid: jid,
         sender: '',
@@ -416,7 +460,15 @@ function Composer({
         is_from_me: true,
         is_group: group,
         message_type: 'text',
-      })
+      }
+      if (replyTo) {
+        echoed.reply_to_id = replyTo.id
+        echoed.reply_to_sender = replyTo.sender
+        echoed.reply_to_content =
+          replyTo.content || replyTo.media_caption || mediaWord(replyTo.media_type)
+      }
+      onSent(echoed)
+      onClearReply?.()
       setText('')
       requestAnimationFrame(resize)
     } catch (e) {
@@ -436,6 +488,13 @@ function Composer({
   return (
     <div className="border-t border-neutral-800 px-4 py-3">
       {error && <div className="mb-1 text-xs text-red-400">{error}</div>}
+      {replyTo && (
+        <ReplyQuote
+          msg={replyTo}
+          nameMap={nameMap || new Map()}
+          onClear={() => onClearReply?.()}
+        />
+      )}
       <div className="flex items-end gap-2">
         <textarea
           ref={taRef}
@@ -463,6 +522,66 @@ function Composer({
   )
 }
 
+// ReplyQuote is the small chip the Composer renders above its textarea while a
+// reply target is staged — mirrors the official WA "you're replying to X"
+// preview: colored vertical stripe, sender name in their per-sender color, a
+// single-line snippet of the quoted body, and an × to cancel.
+function ReplyQuote({
+  msg,
+  nameMap,
+  onClear,
+}: {
+  msg: Message
+  nameMap: Map<string, string>
+  onClear: () => void
+}) {
+  const youSent = msg.is_from_me
+  const senderLabel = youSent
+    ? 'You'
+    : senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap)
+  const color = youSent ? '#06cf9c' : senderColor(msg.sender)
+  const snippet =
+    msg.content || msg.media_caption || mediaWord(msg.media_type) || 'Message'
+  return (
+    <div
+      className="mb-2 flex items-start gap-2 rounded-lg bg-neutral-900 py-1.5 pr-2 text-xs"
+      style={{ borderInlineStart: `3px solid ${color}`, paddingInlineStart: '10px' }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-semibold" style={{ color }}>
+          {senderLabel}
+        </div>
+        <div dir="auto" className="line-clamp-1 text-neutral-300">
+          {snippet}
+        </div>
+      </div>
+      <button
+        onClick={onClear}
+        title="Cancel reply (Esc)"
+        aria-label="Cancel reply"
+        className="-mr-1 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
+// mediaWord turns a media type into a one-word stand-in for the chip / echo
+// when the original message has no text body — same shorthand the chat-list
+// preview already uses.
+function mediaWord(t?: string): string {
+  switch (t) {
+    case 'image': return '📷 Photo'
+    case 'video': return '🎥 Video'
+    case 'voice_note': return '🎤 Voice message'
+    case 'audio': return '🎵 Audio'
+    case 'document': return '📄 Document'
+    case 'sticker': return '🌟 Sticker'
+    default: return ''
+  }
+}
+
 // Timeline renders bubbles with day separators between different dates.
 function Timeline({
   messages,
@@ -472,6 +591,7 @@ function Timeline({
   onOpenTask,
   onTasksChanged,
   onOpenChat,
+  onReply,
 }: {
   messages: Message[]
   group: boolean
@@ -480,6 +600,7 @@ function Timeline({
   onOpenTask: (id: number) => void
   onTasksChanged: () => void
   onOpenChat?: (jid: string) => void
+  onReply?: (msg: Message) => void
 }) {
   let lastDay = ''
   return (
@@ -505,6 +626,7 @@ function Timeline({
               onOpenTask={onOpenTask}
               onTasksChanged={onTasksChanged}
               onOpenChat={onOpenChat}
+              onReply={onReply}
             />
           </div>
         )

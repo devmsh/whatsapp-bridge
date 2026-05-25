@@ -617,6 +617,15 @@ export const api = {
       jid,
       message,
     }),
+  // reply quotes the message at `quotedID` and posts the new text into the same
+  // chat. The bridge resolves the quoted body server-side, so callers only need
+  // to send the ID — same shape as official WA's "reply" composer.
+  reply: (jid: string, quotedID: string, message: string) =>
+    postBody<{ success: boolean; message_id: string; timestamp: number }>('/api/v2/reply', {
+      chat_jid: jid,
+      message_id: quotedID,
+      message,
+    }),
   contacts: async (q = ''): Promise<Contact[]> => {
     const res = await fetch('/api/v2/contacts' + (q ? `?q=${encodeURIComponent(q)}` : ''))
     return res.json()

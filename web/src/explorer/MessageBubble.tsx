@@ -16,6 +16,7 @@ export function MessageBubble({
   onOpenTask,
   onTasksChanged,
   onOpenChat,
+  onReply,
 }: {
   msg: Message
   group: boolean
@@ -24,12 +25,20 @@ export function MessageBubble({
   onOpenTask?: (id: number) => void
   onTasksChanged?: () => void
   onOpenChat?: (jid: string) => void
+  onReply?: (msg: Message) => void
 }) {
   const mine = msg.is_from_me
   const sender = group && !mine ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap) : ''
 
   return (
-    <div className={'flex ' + (mine ? 'justify-end' : 'justify-start')}>
+    <div className={'group/row flex items-center gap-1 ' + (mine ? 'justify-end' : 'justify-start')}>
+      {/* Reply action hovers on the left of outgoing bubbles / right of incoming
+          (so it sits between the bubble and the chat edge, exactly where the
+          official WA chevron lives). Only rendered when the chat can be replied
+          to (onReply provided) and the message isn't already deleted. */}
+      {onReply && mine && !msg.is_deleted && (
+        <ReplyButton onClick={() => onReply(msg)} />
+      )}
       <div
         className={
           'group max-w-[78%] rounded-2xl px-3 py-2 text-sm ' +
@@ -98,7 +107,29 @@ export function MessageBubble({
           {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
+      {onReply && !mine && !msg.is_deleted && (
+        <ReplyButton onClick={() => onReply(msg)} />
+      )}
     </div>
+  )
+}
+
+// ReplyButton: small circular hover-only action that mirrors WhatsApp's reply
+// chevron. Hidden until you hover the row; clicking sets the row's message as
+// the composer's reply target.
+function ReplyButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Reply"
+      aria-label="Reply"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-800/80 text-neutral-400 opacity-0 transition hover:bg-neutral-700 hover:text-neutral-100 group-hover/row:opacity-100"
+    >
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 17 4 12 9 7" />
+        <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+      </svg>
+    </button>
   )
 }
 
