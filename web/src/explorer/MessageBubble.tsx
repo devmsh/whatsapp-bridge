@@ -139,7 +139,7 @@ export function MessageBubble({
     <div className={'group/row flex items-end gap-2 ' + (mine ? 'justify-end' : 'justify-start')}>
       {showAvatarSlot && (
         firstInGroup ? (
-          <ChatAvatar jid={msg.sender} title={senderFull} size={28} />
+          <ChatAvatar jid={msg.sender} title={senderFull} size={28} clickable />
         ) : (
           <div className="w-7 shrink-0" aria-hidden="true" />
         )
