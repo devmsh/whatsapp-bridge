@@ -103,6 +103,23 @@ export function MessageBubble({
     !!msg.content &&
     Math.floor(Date.now() / 1000) - msg.timestamp < EDIT_WINDOW_S
 
+  // The "promote to task" action is bridge-specific (not a WA feature) but
+  // we render it inside the same gutter cluster as the other actions so the
+  // bubble has one visual language. The bubble decides whether to offer it
+  // based on whether the parent passed an onOpenTask handler (the dashboard
+  // view does; some read-only contexts don't).
+  const taskButton =
+    onOpenTask && !msg.is_deleted ? (
+      <MessageTaskButton
+        chatJID={msg.chat_jid}
+        messageID={msg.id}
+        defaultTitle={msg.content || msg.media_caption || ''}
+        onOpenTask={onOpenTask}
+        onChanged={onTasksChanged || (() => {})}
+        side={mine ? 'left' : 'right'}
+      />
+    ) : null
+
   return (
     <div className={'group/row flex items-end gap-2 ' + (mine ? 'justify-end' : 'justify-start')}>
       {showAvatarSlot && (
@@ -116,13 +133,14 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {(onReply || onReact || onForward || onStar || (onEdit && canEdit)) && mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || (onEdit && canEdit) || taskButton) && mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
           onForward={onForward ? () => onForward(msg) : undefined}
           onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
           onEdit={onEdit && canEdit ? () => onEdit(msg) : undefined}
+          taskButton={taskButton}
           isStarred={!!msg.is_starred}
           side="left"
         />
@@ -182,15 +200,6 @@ export function MessageBubble({
         )}
 
         <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-neutral-400">
-          {onOpenTask && (
-            <MessageTaskButton
-              chatJID={msg.chat_jid}
-              messageID={msg.id}
-              defaultTitle={msg.content || msg.media_caption || ''}
-              onOpenTask={onOpenTask}
-              onChanged={onTasksChanged || (() => {})}
-            />
-          )}
           {msg.is_edit && <span className="italic">edited</span>}
           {msg.is_starred && (
             <span title="Starred" aria-label="Starred" className="text-amber-300">
@@ -203,12 +212,13 @@ export function MessageBubble({
           {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
-      {(onReply || onReact || onForward || onStar) && !mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || taskButton) && !mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
           onForward={onForward ? () => onForward(msg) : undefined}
           onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
+          taskButton={taskButton}
           isStarred={!!msg.is_starred}
           side="right"
         />
@@ -228,6 +238,7 @@ function BubbleActions({
   onForward,
   onStar,
   onEdit,
+  taskButton,
   isStarred,
   side,
 }: {
@@ -238,6 +249,10 @@ function BubbleActions({
   /** Show the Edit pencil. Only passed in for own text messages within
    *  WA's 15-minute window — gating happens in MessageBubble. */
   onEdit?: () => void
+  /** Pre-rendered "promote to task" button (MessageTaskButton). Lives in the
+   *  same gutter cluster so it reads as a sibling action, not a stray icon
+   *  in the footer. The bubble builds it with full context (chatJID, etc.). */
+  taskButton?: React.ReactNode
   isStarred?: boolean
   side: 'left' | 'right'
 }) {
@@ -319,6 +334,7 @@ function BubbleActions({
           </svg>
         </button>
       )}
+      {taskButton}
       {pickerOpen && onReact && (
         <ReactionPicker
           side={side}

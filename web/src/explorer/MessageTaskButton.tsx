@@ -3,21 +3,29 @@ import { api, type Task } from '../api'
 
 const LINK_ROLES = ['comment', 'completion', 'attachment', 'related']
 
-// MessageTaskButton is the ✓ action on a message: create a task from it (origin)
-// or link it to an existing task (as comment/completion/attachment) — which is
-// how a task spans multiple chats.
+// MessageTaskButton is the "promote this message into a task" action on a
+// bubble: create a fresh task (origin = this message) or link it to an
+// existing one as a comment/completion/attachment/related event — which is
+// how a task can span multiple chats.
+//
+// Visually it matches the rest of the gutter actions (Reply, React, Forward,
+// Star, Edit): a circular 28×28 icon button that fades in on row hover. The
+// `side` prop mirrors BubbleActions and aligns the popover toward the chat
+// edge so it never gets clipped by the bubble.
 export function MessageTaskButton({
   chatJID,
   messageID,
   defaultTitle,
   onOpenTask,
   onChanged,
+  side = 'right',
 }: {
   chatJID: string
   messageID: string
   defaultTitle: string
   onOpenTask: (id: number) => void
   onChanged: () => void
+  side?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<'menu' | 'add'>('menu')
@@ -69,6 +77,11 @@ export function MessageTaskButton({
     .filter((t) => !q.trim() || t.title.toLowerCase().includes(q.trim().toLowerCase()))
     .slice(0, 20)
 
+  // Anchor the popover to whichever gutter side this button sits on so it
+  // never floats off-screen against the bubble. left-gutter button → popover
+  // hangs from its left edge (toward the chat edge); right-gutter → right.
+  const popoverAnchor = side === 'left' ? 'left-0' : 'right-0'
+
   return (
     <span className="relative">
       <button
@@ -76,16 +89,25 @@ export function MessageTaskButton({
           e.stopPropagation()
           setOpen((o) => !o)
         }}
-        title="Task"
-        className="rounded px-1 text-xs text-neutral-500 opacity-0 transition hover:text-emerald-300 group-hover:opacity-100"
+        title="Promote to task"
+        aria-label="Promote to task"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-800/80 text-neutral-300 transition hover:bg-neutral-700 hover:text-emerald-300"
       >
-        ✓
+        {/* clipboard-with-check — reads as "task" without needing a label */}
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="6" y="3" width="12" height="4" rx="1" />
+          <path d="M6 5H4a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2" />
+          <path d="m8 13 3 3 5-6" />
+        </svg>
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={close} />
           <div
-            className="absolute right-0 z-40 mt-1 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-2 text-sm shadow-xl"
+            className={
+              'absolute z-40 mt-1 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-2 text-sm shadow-xl ' +
+              popoverAnchor
+            }
             onClick={(e) => e.stopPropagation()}
           >
             {mode === 'menu' ? (
