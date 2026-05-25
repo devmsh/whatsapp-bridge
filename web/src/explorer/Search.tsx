@@ -72,11 +72,26 @@ export function SearchBar({
             setPinForUnlock(q.trim())
             setQ('')
             setOpen(false)
+          } else if (e.key === 'Escape') {
+            setQ('')
+            setOpen(false)
           }
         }}
         placeholder="🔎  Search people, groups, tasks, messages…"
-        className="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none"
+        className="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 pr-8 text-xs text-neutral-200 placeholder:text-neutral-600 focus:border-neutral-600 focus:outline-none"
       />
+      {q && (
+        <button
+          onClick={() => {
+            setQ('')
+            setOpen(false)
+          }}
+          title="Clear (Esc)"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+        >
+          ✕
+        </button>
+      )}
       {open && q && (
         <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-[60vh] overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950 shadow-xl">
           {busy && hits.length === 0 && (

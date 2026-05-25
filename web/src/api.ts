@@ -162,6 +162,7 @@ export interface Circle {
   member_count: number
   keywords?: string[]
   child_circles?: number[]
+  parent_ids?: number[] // direct parent-circle ids; empty for top-level
 }
 
 export interface MemberSuggestion {

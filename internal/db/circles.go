@@ -27,7 +27,8 @@ type Circle struct {
 	Keywords    []string `json:"keywords"` // saved terms that keep suggesting matching members
 	CreatedAt   int64    `json:"created_at"`
 	UpdatedAt   int64    `json:"updated_at"`
-	MemberCount int      `json:"member_count"` // computed
+	MemberCount int      `json:"member_count"`        // computed
+	ParentIDs   []int64  `json:"parent_ids,omitempty"` // computed: direct parents (nested-in)
 }
 
 // MemberSuggestion is a group/contact the keywords matched but isn't a member.
@@ -65,7 +66,8 @@ type CircleMember struct {
 	AddedAt    int64  `json:"added_at"`
 }
 
-// ListCircles returns all circles with their direct member counts, by name.
+// ListCircles returns all circles with their direct member counts and the
+// list of direct parent circle ids (so the UI can render a tree).
 func (s *Store) ListCircles() ([]Circle, error) {
 	rows, err := s.DB.Query(`SELECT c.id, c.name, c.color, c.notes, c.keywords, c.created_at, c.updated_at,
 		(SELECT COUNT(*) FROM circle_members m WHERE m.circle_id = c.id) AS cnt
@@ -84,7 +86,29 @@ func (s *Store) ListCircles() ([]Circle, error) {
 		c.Keywords = parseKeywords(kw)
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	// Populate parent_ids per circle in one extra query so the UI can build
+	// the tree without an additional round-trip per circle.
+	if pRows, err := s.DB.Query(`SELECT circle_id, member_ref FROM circle_members
+		WHERE member_type = 'circle'`); err == nil {
+		parents := map[int64][]int64{}
+		for pRows.Next() {
+			var parentID int64
+			var ref string
+			if pRows.Scan(&parentID, &ref) == nil {
+				if childID, err := strconv.ParseInt(ref, 10, 64); err == nil {
+					parents[childID] = append(parents[childID], parentID)
+				}
+			}
+		}
+		pRows.Close()
+		for i := range out {
+			out[i].ParentIDs = parents[out[i].ID]
+		}
+	}
+	return out, nil
 }
 
 // GetCircle returns one circle by id.

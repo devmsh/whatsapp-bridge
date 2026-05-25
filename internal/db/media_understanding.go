@@ -24,6 +24,7 @@ type MediaUnderstanding struct {
 	Content     string `json:"content"`
 	Status      string `json:"status"`
 	Error       string `json:"error,omitempty"`
+	Refined     int    `json:"refined,omitempty"` // 1 = transcript went through LLM refine pass
 	GeneratedAt int64  `json:"generated_at"`
 }
 
@@ -46,14 +47,59 @@ func (s *Store) UpsertMU(mu *MediaUnderstanding) error {
 		mu.GeneratedAt = time.Now().Unix()
 	}
 	_, err := s.DB.Exec(`INSERT INTO media_understanding
-		(chat_jid, message_id, kind, content, status, error, generated_at)
-		VALUES (?,?,?,?,?,?,?)
+		(chat_jid, message_id, kind, content, status, error, refined, generated_at)
+		VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(chat_jid, message_id, kind) DO UPDATE SET
 			content = excluded.content,
 			status = excluded.status,
 			error = excluded.error,
+			refined = excluded.refined,
 			generated_at = excluded.generated_at`,
-		mu.ChatJID, mu.MessageID, mu.Kind, mu.Content, mu.Status, mu.Error, mu.GeneratedAt)
+		mu.ChatJID, mu.MessageID, mu.Kind, mu.Content, mu.Status, mu.Error, mu.Refined, mu.GeneratedAt)
+	return err
+}
+
+// PendingTranscriptsToRefine returns transcript rows that have a usable raw
+// transcript but were never sent through the LLM refinement pass. Used by the
+// audio worker to backfill the refinement on existing rows without re-running
+// whisper.
+type RefineTarget struct {
+	ChatJID   string
+	MessageID string
+	Raw       string
+}
+
+func (s *Store) PendingTranscriptsToRefine(limit int) []RefineTarget {
+	if limit <= 0 {
+		limit = 25
+	}
+	rows, err := s.DB.Query(`SELECT chat_jid, message_id, content
+		FROM media_understanding
+		WHERE kind = ? AND status = ? AND refined = 0 AND content != ''
+		ORDER BY generated_at DESC LIMIT ?`, MUTranscript, MUOK, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []RefineTarget
+	for rows.Next() {
+		var t RefineTarget
+		if rows.Scan(&t.ChatJID, &t.MessageID, &t.Raw) == nil {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// SetTranscriptRefined updates a transcript row with the refined text and
+// flips its `refined` flag. Used by the worker after the LLM refinement.
+func (s *Store) SetTranscriptRefined(chatJID, messageID, refined string) error {
+	_, err := s.DB.Exec(
+		`UPDATE media_understanding
+		 SET content = ?, refined = 1, generated_at = ?
+		 WHERE chat_jid = ? AND message_id = ? AND kind = ?`,
+		refined, time.Now().Unix(), chatJID, messageID, MUTranscript,
+	)
 	return err
 }
 

@@ -38,6 +38,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	ch := s.client.Broadcaster.Subscribe(filterJID)
 	defer s.client.Broadcaster.Unsubscribe(ch)
 
+	// Symmetric to the chat-list filter: when the subscriber is locked, drop
+	// live messages from hidden chats; when unlocked (private mode) drop live
+	// messages from non-hidden chats. This keeps the chat list ordering in
+	// sync with the "private mode" view-swap.
+	unlocked := s.isUnlocked(r)
+	isHidden := func(jid string) bool { return s.store.IsChatHidden(jid) }
+
 	ctx := r.Context()
 	for {
 		select {
@@ -46,6 +53,9 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case msg, ok := <-ch:
 			if !ok {
 				return
+			}
+			if isHidden(msg.ChatJID) != unlocked {
+				continue // hidden+locked OR non-hidden+unlocked → suppress
 			}
 			data, err := json.Marshal(msg)
 			if err != nil {

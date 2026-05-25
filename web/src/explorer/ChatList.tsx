@@ -1,13 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, type Chat, type Circle } from '../api'
 import { chatListTime, chatTitle, isGroup, previewText } from './format'
 import { ChatAvatar } from './ChatAvatar'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 
-// ChatList shows the searchable, time-ordered list of chats.
+// ChatList shows the time-ordered list of chats. Search is handled by the
+// global SearchBar in the top bar — there's no per-list filter anymore.
 // Right-click on any row opens a context menu with quick actions (Open, Hide,
-// Unhide, Archive, Pin, Mark read/unread) so the user can act without first
-// opening the chat.
+// Unhide, Archive, Pin, Mark read/unread, Add/Remove from circle) so the user
+// can act without first opening the chat.
 export function ChatList({
   chats,
   nameMap,
@@ -25,32 +26,17 @@ export function ChatList({
   onRequestHide: (jid: string, title: string) => void
   onChanged: () => void
 }) {
-  const [q, setQ] = useState('')
   const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
-  // When set, shows the "Add to circle" picker for this chat.
+  // When set, shows the circle-membership picker for this chat.
   const [picking, setPicking] = useState<{ jid: string; title: string } | null>(null)
 
-  const rows = useMemo(() => {
-    const withTitle = chats.map((c) => ({ chat: c, title: chatTitle(c, nameMap) }))
-    const needle = q.trim().toLowerCase()
-    const filtered = needle
-      ? withTitle.filter(
-          (r) => r.title.toLowerCase().includes(needle) || r.chat.jid.toLowerCase().includes(needle),
-        )
-      : withTitle
-    return filtered
-  }, [chats, nameMap, q])
+  const rows = useMemo(
+    () => chats.map((c) => ({ chat: c, title: chatTitle(c, nameMap) })),
+    [chats, nameMap],
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="p-2">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search chats"
-          className="w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600"
-        />
-      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {rows.length === 0 && <div className="p-4 text-center text-xs text-neutral-600">No chats</div>}
         {rows.map(({ chat, title }) => (
@@ -125,8 +111,10 @@ export function ChatList({
   )
 }
 
-// CirclePickerModal: small list of circles to add the chat to. The chat (which
-// may be a group or a DM contact) is added via the regular circle-members API.
+// CirclePickerModal shows a tree of circles + sub-circles with a checkbox
+// per row indicating whether the chat is a member. Clicking toggles
+// membership (add or remove). The chat (group or DM contact) goes through the
+// regular circle-members API.
 function CirclePickerModal({
   jid,
   chatTitle,
@@ -140,19 +128,52 @@ function CirclePickerModal({
   onClose: () => void
   onAdded: () => void
 }) {
-  const [busy, setBusy] = useState<number | null>(null)
+  const [busy, setBusy] = useState<Set<number>>(new Set())
   const [error, setError] = useState<string | null>(null)
+  // Locally-tracked member set so checkboxes flip instantly without a refetch.
+  const [memberIDs, setMemberIDs] = useState<Set<number> | null>(null)
   const memberType: 'group' | 'contact' = jid.endsWith('@g.us') ? 'group' : 'contact'
 
-  async function add(c: Circle) {
-    setBusy(c.id)
+  // Fetch which circles this chat is already in.
+  useEffect(() => {
+    api
+      .circlesForMember(memberType, jid)
+      .then((cs) => setMemberIDs(new Set((cs || []).map((c) => c.id))))
+      .catch(() => setMemberIDs(new Set()))
+  }, [jid, memberType])
+
+  // Build the tree from parent_ids. A circle with no parent (or whose only
+  // parents are not in this circles set) is a root. Each circle appears under
+  // its FIRST listed parent so the user sees a clean tree even if a circle
+  // happens to be a member of multiple parents.
+  const tree = useMemo(() => buildCircleTree(circles), [circles])
+
+  async function toggle(c: Circle) {
+    if (busy.has(c.id) || !memberIDs) return
+    setBusy((b) => new Set(b).add(c.id))
     setError(null)
+    const isMember = memberIDs.has(c.id)
     try {
-      await api.addCircleMember(c.id, memberType, jid)
+      if (isMember) {
+        await api.removeCircleMember(c.id, memberType, jid)
+        setMemberIDs((s) => {
+          const n = new Set(s)
+          n.delete(c.id)
+          return n
+        })
+      } else {
+        await api.addCircleMember(c.id, memberType, jid)
+        setMemberIDs((s) => new Set(s).add(c.id))
+      }
       onAdded()
     } catch (e) {
       setError((e as Error).message)
-      setBusy(null)
+    } finally {
+      setBusy((b) => {
+        const n = new Set(b)
+        n.delete(c.id)
+        return n
+      })
     }
   }
 
@@ -162,11 +183,11 @@ function CirclePickerModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-950 p-4"
+        className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-950 p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3">
-          <div className="text-sm font-semibold">Add to circle</div>
+          <div className="text-sm font-semibold">Circles</div>
           <div dir="auto" className="truncate text-xs text-neutral-500">
             {chatTitle}
           </div>
@@ -176,23 +197,16 @@ function CirclePickerModal({
             You don’t have any circles yet. Create one from the Circles tab.
           </p>
         ) : (
-          <div className="flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
-            {circles.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => add(c)}
-                disabled={busy === c.id}
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition hover:bg-neutral-900 disabled:opacity-50"
-              >
-                <span
-                  className="h-3 w-3 shrink-0 rounded-full"
-                  style={{ backgroundColor: c.color || '#737373' }}
-                />
-                <span dir="auto" className="min-w-0 flex-1 truncate text-neutral-200">
-                  {c.name}
-                </span>
-                {busy === c.id && <span className="text-xs text-neutral-500">…</span>}
-              </button>
+          <div className="flex max-h-[60vh] flex-col overflow-y-auto">
+            {tree.map((node) => (
+              <CircleTreeRow
+                key={node.circle.id}
+                node={node}
+                depth={0}
+                memberIDs={memberIDs || new Set()}
+                busy={busy}
+                onToggle={toggle}
+              />
             ))}
           </div>
         )}
@@ -207,6 +221,93 @@ function CirclePickerModal({
         </div>
       </div>
     </div>
+  )
+}
+
+type CircleTreeNode = { circle: Circle; children: CircleTreeNode[] }
+
+function buildCircleTree(circles: Circle[]): CircleTreeNode[] {
+  const byID = new Map<number, Circle>()
+  circles.forEach((c) => byID.set(c.id, c))
+  const childrenOf = new Map<number, CircleTreeNode[]>()
+  const roots: CircleTreeNode[] = []
+  // Two-pass for stable ordering: first create empty nodes, then attach.
+  const nodes = new Map<number, CircleTreeNode>()
+  circles.forEach((c) => nodes.set(c.id, { circle: c, children: [] }))
+  for (const c of circles) {
+    const node = nodes.get(c.id)!
+    const parents = (c.parent_ids || []).filter((id) => byID.has(id))
+    if (parents.length === 0) {
+      roots.push(node)
+    } else {
+      // First parent only — keeps the display a clean tree.
+      const parentID = parents[0]
+      const arr = childrenOf.get(parentID) || []
+      arr.push(node)
+      childrenOf.set(parentID, arr)
+    }
+  }
+  for (const [parentID, kids] of childrenOf) {
+    const parent = nodes.get(parentID)
+    if (parent) parent.children = kids
+  }
+  return roots
+}
+
+function CircleTreeRow({
+  node,
+  depth,
+  memberIDs,
+  busy,
+  onToggle,
+}: {
+  node: CircleTreeNode
+  depth: number
+  memberIDs: Set<number>
+  busy: Set<number>
+  onToggle: (c: Circle) => void
+}) {
+  const c = node.circle
+  const isMember = memberIDs.has(c.id)
+  const isBusy = busy.has(c.id)
+  return (
+    <>
+      <button
+        onClick={() => onToggle(c)}
+        disabled={isBusy}
+        style={{ paddingLeft: 8 + depth * 16 }}
+        className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition hover:bg-neutral-900 disabled:opacity-50"
+      >
+        <span
+          className={
+            'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ' +
+            (isMember
+              ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
+              : 'border-neutral-600')
+          }
+        >
+          {isMember ? '✓' : ''}
+        </span>
+        <span
+          className="h-3 w-3 shrink-0 rounded-full"
+          style={{ backgroundColor: c.color || '#737373' }}
+        />
+        <span dir="auto" className="min-w-0 flex-1 truncate text-neutral-200">
+          {c.name}
+        </span>
+        {isBusy && <span className="text-xs text-neutral-500">…</span>}
+      </button>
+      {node.children.map((child) => (
+        <CircleTreeRow
+          key={child.circle.id}
+          node={child}
+          depth={depth + 1}
+          memberIDs={memberIDs}
+          busy={busy}
+          onToggle={onToggle}
+        />
+      ))}
+    </>
   )
 }
 
@@ -257,7 +358,7 @@ function buildChatMenu(
     },
     { divider: true },
     {
-      label: 'Add to circle…',
+      label: 'Circles…',
       icon: '⭕',
       onClick: () => cb.onRequestAddToCircle(jid, title),
     },

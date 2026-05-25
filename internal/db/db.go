@@ -39,9 +39,14 @@ func NewStore(path string) (*Store, error) {
 		`ALTER TABLE circles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN review_status TEXT NOT NULL DEFAULT 'accepted'`,
 		`ALTER TABLE tasks ADD COLUMN parent_id INTEGER DEFAULT NULL REFERENCES tasks(id) ON DELETE SET NULL`,
+		// "refined" tracks whether a transcript row went through the LLM
+		// refinement pass. 0 = raw whisper output, 1 = refined (or N/A for
+		// image descriptions which don't need refinement).
+		`ALTER TABLE media_understanding ADD COLUMN refined INTEGER NOT NULL DEFAULT 0`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_mu_refined ON media_understanding(kind, refined, status)`,
 	} {
 		sqlDB.Exec(stmt)
 	}

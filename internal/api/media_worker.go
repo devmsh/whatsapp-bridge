@@ -54,6 +54,36 @@ func (m *MediaUnderstandingManager) Start() {
 	m.audioBin = detectWhisperBinary()
 	go m.workerLoop("audio", 2)  // 2 parallel transcribes
 	go m.workerLoop("image", 3)  // 3 parallel image descriptions
+	go m.refineBackfillLoop()    // re-refine old raw transcripts in the background
+}
+
+// refineBackfillLoop continuously walks transcript rows whose `refined` flag
+// is still 0 and runs them through the refiner — without re-running whisper.
+// This is how we backfill the refinement onto historical voice notes that
+// were transcribed before the refinement layer existed.
+//
+// Sequential (one at a time) by design: refinement uses the user's Claude
+// subscription quota, and a flood of parallel calls would hit rate limits.
+func (m *MediaUnderstandingManager) refineBackfillLoop() {
+	time.Sleep(60 * time.Second) // let initial transcription work settle
+	t := time.NewTicker(15 * time.Second)
+	defer t.Stop()
+	for {
+		if m.enabledFor("audio") {
+			batch := m.s.store.PendingTranscriptsToRefine(10)
+			for _, target := range batch {
+				if !m.enabledFor("audio") {
+					break
+				}
+				refined := m.refineTranscript(target.ChatJID, target.MessageID, target.Raw)
+				if strings.TrimSpace(refined) == "" || strings.TrimSpace(refined) == strings.TrimSpace(target.Raw) {
+					continue // refiner couldn't improve; try again next tick
+				}
+				m.s.store.SetTranscriptRefined(target.ChatJID, target.MessageID, refined)
+			}
+		}
+		<-t.C
+	}
 }
 
 func (m *MediaUnderstandingManager) enabledFor(kind string) bool {
@@ -164,6 +194,12 @@ func (m *MediaUnderstandingManager) processOne(p db.PendingMediaMessage) {
 			refined := m.refineTranscript(p.ChatJID, p.MessageID, text)
 			muRow.Status = db.MUOK
 			muRow.Content = strings.TrimSpace(refined)
+			// Mark refined=1 only if the refiner actually changed the text.
+			// (If it returned the raw text unchanged because of an API blip,
+			// the backfill pass will retry it later.)
+			if strings.TrimSpace(refined) != strings.TrimSpace(text) {
+				muRow.Refined = 1
+			}
 		}
 		m.s.store.UpsertMU(muRow)
 
