@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api, type Chat, type Circle, type Message, type Tag } from '../api'
+import { api, type Chat, type Circle, type Message, type PresenceEntry, type Tag } from '../api'
 import {
   chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, mediaURL, senderTitle,
   type MentionEntry,
@@ -119,6 +119,10 @@ export function MessageThread({
   const title = chat ? chatTitle(chat, nameMap) : '+' + jidUser(jid)
   const group = isGroup(jid)
   const isContact = !group && !isStatus(jid) && !isNewsletter(jid)
+  // Subscribe + poll presence for DMs. presenceLine is '' when there's
+  // nothing fresh to show (privacy-hidden, stale, or not yet learned).
+  const presence = useDmPresence(isContact ? jid : null)
+  const presenceLine = presence ? formatPresence(presence) : ''
 
   // Load when the chat or page size changes.
   useEffect(() => {
@@ -232,8 +236,17 @@ export function MessageThread({
           <div dir="auto" className="truncate text-sm font-semibold">
             {title}
           </div>
-          <div className="truncate text-xs text-neutral-500">
-            {group ? 'Group' : jid.replace('@s.whatsapp.net', '')}
+          <div
+            className={
+              'truncate text-xs ' +
+              // Highlight typing in emerald (same accent as own bubbles) so
+              // 'typing…' actually pops the way it does in official WA.
+              (presenceLine === 'typing…' ? 'text-emerald-400' : 'text-neutral-500')
+            }
+          >
+            {group
+              ? 'Group'
+              : presenceLine || jid.replace('@s.whatsapp.net', '')}
           </div>
           {isContact && (contactTags[jid]?.length ?? 0) > 0 && (
             <div className="mt-1">
@@ -808,6 +821,82 @@ function AttachmentPreview({
       </button>
     </div>
   )
+}
+
+// useDmPresence subscribes the bridge to presence updates for `jid` once,
+// then polls the cached entry every few seconds while the chat is open.
+// whatsmeow only pushes presence beacons after a subscribe call, so the
+// first poll usually returns nothing — that's fine; the header just stays
+// on the fallback (phone number) until the first update lands.
+//
+// Pass `null` to disable (groups, status, newsletters).
+function useDmPresence(jid: string | null): PresenceEntry | null {
+  const [entry, setEntry] = useState<PresenceEntry | null>(null)
+  useEffect(() => {
+    if (!jid) {
+      setEntry(null)
+      return
+    }
+    let cancelled = false
+    // Subscribe is fire-and-forget — failures (e.g. peer blocks presence)
+    // are normal and shouldn't pollute the UI with errors.
+    api.presenceSubscribe(jid).catch(() => {})
+    async function tick() {
+      const p = await api.presenceGet(jid as string).catch(() => null)
+      if (!cancelled) setEntry(p)
+    }
+    void tick()
+    const h = setInterval(tick, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(h)
+    }
+  }, [jid])
+  return entry
+}
+
+// formatPresence turns a PresenceEntry into the short string WA shows under
+// the chat name: 'typing…', 'online', 'last seen today at 14:32', etc.
+// Returns '' when there is nothing meaningful to show, so the caller can
+// fall back to the phone number.
+function formatPresence(p: PresenceEntry): string {
+  const now = Math.floor(Date.now() / 1000)
+  const age = now - (p.updated_at || 0)
+  // Active typing — but only while the beacon is recent. The peer stops
+  // sending 'composing' once they pause, so an old composing entry isn't
+  // really 'still typing'. WA itself ages these out in ~10s.
+  if (p.status === 'composing' && age < 10) return 'typing…'
+  // 'available' (online) is also a beacon — peers send periodic refreshes;
+  // assume offline after ~90s of silence.
+  if (p.status === 'available' && age < 90) return 'online'
+  // Otherwise show last-seen if we have it. last_seen=0 means the peer hid
+  // it via WA privacy — render nothing rather than a misleading 'never'.
+  if (p.status === 'unavailable' && p.last_seen && p.last_seen > 0) {
+    return 'last seen ' + formatLastSeen(p.last_seen)
+  }
+  return ''
+}
+
+// formatLastSeen mirrors the WA format: 'today at 14:32', 'yesterday at
+// 18:05', otherwise 'May 19 at 11:40' / 'Mar 3, 2025 at 09:15' for older.
+function formatLastSeen(ts: number): string {
+  const d = new Date(ts * 1000)
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  const time = `${hh}:${mm}`
+  if (sameDay(d, today)) return `today at ${time}`
+  if (sameDay(d, yesterday)) return `yesterday at ${time}`
+  const datePart = d.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+  })
+  return `${datePart} at ${time}`
 }
 
 // guessMediaKind maps a browser File's MIME type to the same media_type the

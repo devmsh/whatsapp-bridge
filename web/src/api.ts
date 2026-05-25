@@ -156,6 +156,23 @@ export interface Group {
   name: string
 }
 
+// PresenceEntry mirrors the presence_cache row the bridge stores from
+// whatsmeow's events.Presence / events.ChatPresence streams.
+//   status = 'available' | 'unavailable' | 'composing' | 'paused'
+//   last_seen — Unix seconds when the contact was last seen online.
+//     0 when the contact has hidden last-seen via WhatsApp's privacy
+//     settings (the UI should render nothing rather than 'last seen never').
+//   updated_at — Unix seconds the bridge last refreshed this entry.
+//     Used to age out stale 'composing' / 'available' (presence beacons
+//     stop arriving when the contact closes WhatsApp; without freshness
+//     we'd keep showing 'online' forever).
+export interface PresenceEntry {
+  jid: string
+  status: 'available' | 'unavailable' | 'composing' | 'paused' | string
+  last_seen?: number
+  updated_at: number
+}
+
 export interface ChatStat {
   chat_jid: string
   count: number
@@ -642,6 +659,17 @@ export const api = {
       message,
       media_path: opts?.mediaPath,
     }),
+  // Presence: subscribe asks the bridge to push presence updates for this
+  // contact (whatsmeow only delivers them after the first subscribe). get
+  // reads the cached entry; we poll it while the chat is open so the header
+  // can show 'online' / 'typing…' / 'last seen X', the way official WA does.
+  presenceSubscribe: (jid: string) =>
+    postBody<{ success: boolean }>('/api/v2/presence/subscribe', { jid }),
+  presenceGet: async (jid: string): Promise<PresenceEntry | null> => {
+    const res = await fetch('/api/v2/presence/' + encodeURIComponent(jid))
+    if (!res.ok) return null
+    return res.json()
+  },
   // forward reposts the message at (fromChat, messageID) into a different
   // chat. Backend currently re-sends the text body with the WA "Forwarded"
   // badge (ContextInfo.IsForwarded=true). Call once per target chat for
