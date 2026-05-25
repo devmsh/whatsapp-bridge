@@ -62,28 +62,53 @@ func (m *MediaUnderstandingManager) Start() {
 // This is how we backfill the refinement onto historical voice notes that
 // were transcribed before the refinement layer existed.
 //
-// Sequential (one at a time) by design: refinement uses the user's Claude
-// subscription quota, and a flood of parallel calls would hit rate limits.
+// Up to refineBackfillParallel refinements run at once. Each refinement is a
+// single Claude call (~5-15s). At 3 in parallel a 120-voice-note backlog
+// finishes in under 10 minutes.
+const refineBackfillParallel = 3
+
 func (m *MediaUnderstandingManager) refineBackfillLoop() {
 	time.Sleep(60 * time.Second) // let initial transcription work settle
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	for {
 		if m.enabledFor("audio") {
-			batch := m.s.store.PendingTranscriptsToRefine(10)
-			for _, target := range batch {
-				if !m.enabledFor("audio") {
-					break
-				}
-				refined := m.refineTranscript(target.ChatJID, target.MessageID, target.Raw)
-				if strings.TrimSpace(refined) == "" || strings.TrimSpace(refined) == strings.TrimSpace(target.Raw) {
-					continue // refiner couldn't improve; try again next tick
-				}
-				m.s.store.SetTranscriptRefined(target.ChatJID, target.MessageID, refined)
+			batch := m.s.store.PendingTranscriptsToRefine(30)
+			if len(batch) > 0 {
+				m.processRefineBatch(batch)
 			}
 		}
 		<-t.C
 	}
+}
+
+// processRefineBatch fans out the batch to N parallel workers — each pulls a
+// target off the channel until the batch drains. Keeps memory bounded and
+// gives clean shutdown if the audio toggle flips off mid-batch.
+func (m *MediaUnderstandingManager) processRefineBatch(batch []db.RefineTarget) {
+	ch := make(chan db.RefineTarget)
+	var wg sync.WaitGroup
+	for i := 0; i < refineBackfillParallel; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for target := range ch {
+				if !m.enabledFor("audio") {
+					return
+				}
+				refined := m.refineTranscript(target.ChatJID, target.MessageID, target.Raw)
+				if strings.TrimSpace(refined) == "" || strings.TrimSpace(refined) == strings.TrimSpace(target.Raw) {
+					continue
+				}
+				m.s.store.SetTranscriptRefined(target.ChatJID, target.MessageID, refined)
+			}
+		}()
+	}
+	for _, t := range batch {
+		ch <- t
+	}
+	close(ch)
+	wg.Wait()
 }
 
 func (m *MediaUnderstandingManager) enabledFor(kind string) bool {
