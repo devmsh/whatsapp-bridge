@@ -75,13 +75,33 @@ func (s *Server) handleStarredList(w http.ResponseWriter, r *http.Request) {
 		if name, ok := chatNames[jid]; ok {
 			return name
 		}
+		// First try the chats table — most up-to-date custom name. For
+		// groups whose chats row never got a name resolved, fall back to
+		// the groups table where whatsmeow stored the subject. For DMs
+		// with an empty name, fall back to the contacts table. This is
+		// the same precedence the chat list uses, so the Starred panel
+		// shows the same labels the user sees there.
+		var name string
 		c, _ := s.store.GetChat(jid)
-		if c == nil {
-			chatNames[jid] = ""
-			return ""
+		if c != nil && c.Name != "" && c.Name != jid {
+			name = c.Name
 		}
-		chatNames[jid] = c.Name
-		return c.Name
+		if name == "" {
+			if g, _ := s.store.GetGroup(jid); g != nil && g.Name != "" {
+				name = g.Name
+			}
+		}
+		if name == "" {
+			if k, _ := s.store.GetContact(jid); k != nil {
+				if k.Name != "" {
+					name = k.Name
+				} else if k.PushName != "" {
+					name = k.PushName
+				}
+			}
+		}
+		chatNames[jid] = name
+		return name
 	}
 
 	out := make([]starredOut, 0, len(refs))

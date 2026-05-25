@@ -30,6 +30,7 @@ import { HideChatDialog } from './HideChatDialog'
 import { setUnlockToken as setHiddenUnlockToken } from '../hidden'
 import { HiddenBadge } from './HiddenBadge'
 import { ChatUnlockModal } from './ChatUnlockModal'
+import { StarredPanel } from './StarredPanel'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks'
 
@@ -58,6 +59,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showSettings, setShowSettings] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
+  const [showStarred, setShowStarred] = useState(false)
   const [showUnlock, setShowUnlock] = useState(false)
   // For the right-click "Hide chat…" flow we open the dialog at the Explorer
   // level (so it works without first opening the chat). Hiding needs no auth.
@@ -337,6 +339,12 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           onClose={() => setShowBriefing(false)}
         />
       )}
+      {showStarred && (
+        <StarredPanel
+          onOpenChat={(jid) => openChat(jid)}
+          onClose={() => setShowStarred(false)}
+        />
+      )}
 
       <aside className="flex w-80 shrink-0 flex-col border-r border-neutral-800">
         <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
@@ -353,6 +361,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           </div>
           <div className="flex items-center gap-1">
             <HiddenBadge onClick={() => setShowUnlock(true)} />
+            <IconButton title="Starred messages" onClick={() => setShowStarred(true)}>
+              ⭐
+            </IconButton>
             <IconButton title="Today’s briefing" onClick={() => setShowBriefing(true)}>
               📊
             </IconButton>
