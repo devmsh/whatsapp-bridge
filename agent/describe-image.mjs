@@ -1,6 +1,6 @@
 // Claude Agent SDK sidecar: describe one image with vision.
 //
-// Reads the image file path as argv[2]. Runs a single-shot LLM call that
+// Reads the image file path as argv[2]. Runs a single-shot vision call that
 // returns a concise description: what's in it, any text visible (OCR), and
 // any cue useful for task extraction (e.g. "screenshot of a CRM page", "photo
 // of an invoice for…").
@@ -35,24 +35,43 @@ const mime = (() => {
   return 'image/jpeg'
 })()
 
-const dataURL = `data:${mime};base64,${bytes.toString('base64')}`
-
 const systemPrompt = `You describe a WhatsApp image in 1-3 short sentences. Cover:
 - What kind of image it is (screenshot, photo, document, meme, etc.)
 - The main subject or any visible text (OCR the readable text)
 - Any detail that would help a task-tracking agent understand it (e.g. a receipt for $X, a chart of Y, a UI screenshot of Z)
-Be concrete; do not say "this image shows". No greetings, no markdown. If the image is uninformative (blank, decorative), say "Uninformative." in plain text.`
+Be concrete; do not say "this image shows". No greetings, no markdown. If the image is uninformative (blank, decorative), say "Uninformative." in plain text.
 
-const prompt = [
-  { type: 'image', source: { type: 'base64', media_type: mime, data: bytes.toString('base64') } },
-  { type: 'text', text: 'Describe this image as instructed.' },
-]
+If the image contains Arabic text, transcribe it in Arabic. If it has English, keep English. Mixed AR/EN is fine.`
+
+// The SDK's `query` accepts a string prompt OR an AsyncIterable<SDKUserMessage>.
+// To send a multimodal message (image + text), we have to use the async
+// iterable form with proper content blocks inside message.content.
+async function* messages() {
+  yield {
+    type: 'user',
+    parent_tool_use_id: null,
+    message: {
+      role: 'user',
+      content: [
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: mime,
+            data: bytes.toString('base64'),
+          },
+        },
+        { type: 'text', text: 'Describe this image as instructed.' },
+      ],
+    },
+  }
+}
 
 let body = ''
 let isError = false
 try {
   const response = query({
-    prompt,
+    prompt: messages(),
     options: { systemPrompt, maxTurns: 1, allowedTools: [] },
   })
   for await (const msg of response) {
@@ -69,9 +88,6 @@ try {
   isError = true
   body = String(e?.message || e)
 }
-
-// Silence unused-vars (dataURL kept for reference / future use).
-void dataURL
 
 process.stdout.write(JSON.stringify({ ok: !isError, description: body.trim() }) + '\n')
 process.exit(isError ? 1 : 0)
