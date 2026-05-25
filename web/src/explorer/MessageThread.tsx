@@ -149,6 +149,12 @@ export function MessageThread({
   // doesn't get permanently overridden by a one-shot jump.
   const [flashId, setFlashId] = useState<string | null>(null)
   const flashTimer = useRef<number | null>(null)
+  // Snapshot of unread_count taken when we first open this chat — drives
+  // the "X unread messages" divider that splits the timeline between read
+  // and unread. We freeze it here so the divider stays put even as the
+  // bridge re-fetches the chat list and unread_count starts climbing again
+  // (or drops to 0 because we marked-read). Cleared on every chat switch.
+  const initialUnreadRef = useRef<number>(0)
 
   const chat = chats.find((c) => c.jid === jid)
   const title = chat ? chatTitle(chat, nameMap) : '+' + jidUser(jid)
@@ -200,7 +206,33 @@ export function MessageThread({
       window.clearTimeout(flashTimer.current)
       flashTimer.current = null
     }
+    // Snapshot the chat's unread count for the divider. `chats` may still
+    // be loading (chat undefined → 0), in which case no divider — same as
+    // WA when there's nothing unread.
+    initialUnreadRef.current = chats.find((c) => c.jid === jid)?.unread_count ?? 0
   }, [jid])
+
+  // Find the boundary where the "X unread messages" divider goes. We walk
+  // messages newest → oldest, counting incoming (not is_from_me) messages
+  // until we've reached the snapshotted unread_count; the divider lands
+  // right before that message — i.e. between read history and the first
+  // unread reply. Capped at 50 so a chat that's been ignored for weeks
+  // doesn't render an absurd "327 unread messages" line.
+  //
+  // When the snapshot is 0 (chat was already caught up when opened, or
+  // chats hadn't loaded yet) we render nothing — same as WA.
+  const unreadDivider = useMemo<{ beforeId: string; count: number } | null>(() => {
+    const target = Math.min(initialUnreadRef.current, 50)
+    if (target <= 0 || messages.length === 0) return null
+    let count = 0
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.is_from_me) continue
+      count++
+      if (count === target) return { beforeId: m.id, count: target }
+    }
+    return null
+  }, [messages])
 
   // Build the ordered list of message IDs that match the search query.
   // Search runs only on the currently-loaded window (no backend round-trip
@@ -613,6 +645,7 @@ export function MessageThread({
                 onJumpToMessage={jumpToMessage}
                 selfDigits={selfDigits}
                 highlightId={flashId || activeMatchId}
+                unreadDivider={unreadDivider}
               />
             </>
           )}
@@ -2130,6 +2163,7 @@ function Timeline({
   onJumpToMessage,
   selfDigits,
   highlightId,
+  unreadDivider,
 }: {
   messages: Message[]
   group: boolean
@@ -2151,6 +2185,9 @@ function Timeline({
   /** Message ID of the current search match — gets an emerald ring around
    *  its bubble + is the scrollIntoView target driven from MessageThread. */
   highlightId?: string
+  /** When set, render a "N unread messages" divider just before the row
+   *  with id = beforeId. Snapshotted at chat-open so the line stays put. */
+  unreadDivider?: { beforeId: string; count: number } | null
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -2178,6 +2215,18 @@ function Timeline({
                 <span className="rounded-full bg-neutral-800 px-3 py-1 text-[11px] text-neutral-400">
                   {day}
                 </span>
+              </div>
+            )}
+            {unreadDivider && unreadDivider.beforeId === m.id && (
+              // Horizontal "N unread messages" line, drawn just before the
+              // first unread incoming message. Emerald so it pops against
+              // the neutral thread without competing with day separators.
+              <div className="my-3 flex items-center gap-3 text-[11px] font-medium text-emerald-300/80">
+                <div className="h-px flex-1 bg-emerald-500/30" />
+                <span className="uppercase tracking-wider">
+                  {unreadDivider.count} unread {unreadDivider.count === 1 ? 'message' : 'messages'}
+                </span>
+                <div className="h-px flex-1 bg-emerald-500/30" />
               </div>
             )}
             <div className={sep ? '' : firstInGroup ? 'mt-2' : 'mt-0.5'}>
