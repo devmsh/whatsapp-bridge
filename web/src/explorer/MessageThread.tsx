@@ -681,6 +681,25 @@ function Composer({
   // upload it, then either api.send or api.reply with the returned path.
   const [attachment, setAttachment] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  // Voice-recording state. Tapping the mic button asks for mic permission,
+  // opens a MediaRecorder, and swaps the composer for a thin recording bar
+  // (mic dot + mm:ss timer + ✕ cancel + ➤ send). On send we wrap the chunks
+  // into a File and route through the same upload+send pipeline as any
+  // staged attachment, so the bubble appears as an audio bubble locally and
+  // the bridge ships it through whatsmeow's media path. WA's real PTT (the
+  // "voice note" message_type with waveform metadata) needs a backend hop;
+  // this v1 ships a standard audio attachment, which the recipient still
+  // plays inline.
+  const [isRecording, setIsRecording] = useState(false)
+  const [recSeconds, setRecSeconds] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recChunksRef = useRef<Blob[]>([])
+  const recTimerRef = useRef<number | null>(null)
+  const recStreamRef = useRef<MediaStream | null>(null)
+  // Discard-on-stop flag: cancel sets it true so the recorder's onstop
+  // handler knows not to ship anything. Avoids a "send anyway" race when
+  // stop() fires before we can wire a separate cancel path.
+  const recDiscardRef = useRef(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   // Open mention-picker state: when the user is typing '@<query>' in the
@@ -802,6 +821,148 @@ function Composer({
     onDraftConsumed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialText])
+
+  // --- voice recording ---
+
+  // Ask the browser for the mic, start a MediaRecorder, and tick a 1s timer
+  // so the UI can render mm:ss. We prefer webm/opus (Chrome) but fall back
+  // to the browser default — on Safari that's mp4/aac, which the bridge
+  // still treats as audio. Any error (permission denied, no device) is
+  // surfaced through the same error banner the send() flow uses.
+  async function startRecording() {
+    if (isRecording) return
+    setError('')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      recStreamRef.current = stream
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : ''
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream)
+      recChunksRef.current = []
+      recDiscardRef.current = false
+      rec.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recChunksRef.current.push(e.data)
+      }
+      rec.onstop = () => {
+        // Always stop the mic track so the browser drops the recording dot.
+        recStreamRef.current?.getTracks().forEach((t) => t.stop())
+        recStreamRef.current = null
+        const shouldDiscard = recDiscardRef.current
+        const chunks = recChunksRef.current
+        recChunksRef.current = []
+        if (!shouldDiscard && chunks.length > 0) {
+          const type = rec.mimeType || 'audio/webm'
+          const blob = new Blob(chunks, { type })
+          sendVoice(blob, type).catch((e) => {
+            setError(e instanceof Error ? e.message : 'Failed to send voice')
+          })
+        }
+      }
+      mediaRecorderRef.current = rec
+      rec.start()
+      setRecSeconds(0)
+      setIsRecording(true)
+      // 1-second ticker. Capped so a runaway recording can't blow up the
+      // counter; 5 minutes is well past any reasonable voice note.
+      recTimerRef.current = window.setInterval(() => {
+        setRecSeconds((s) => (s >= 300 ? s : s + 1))
+      }, 1000)
+    } catch (e) {
+      setError(
+        e instanceof Error && e.name === 'NotAllowedError'
+          ? 'Microphone permission denied'
+          : e instanceof Error ? e.message : 'Could not start recording',
+      )
+    }
+  }
+
+  // Stop the recorder. `discard=true` throws the chunks away (cancel button);
+  // false ships them through onstop → sendVoice. Either way we clean up the
+  // timer + recording-mode UI immediately so the user gets snappy feedback,
+  // even if the upload takes a moment.
+  function stopRecording(discard: boolean) {
+    const rec = mediaRecorderRef.current
+    if (!rec) return
+    recDiscardRef.current = discard
+    if (recTimerRef.current) {
+      window.clearInterval(recTimerRef.current)
+      recTimerRef.current = null
+    }
+    setIsRecording(false)
+    setRecSeconds(0)
+    if (rec.state !== 'inactive') rec.stop()
+    mediaRecorderRef.current = null
+  }
+
+  // Upload the recorded blob and ship it as a regular media send. Mirrors
+  // the upload+send branch of send() but skipping the staged-attachment
+  // state (which is async and would race with stopRecording). The local
+  // echo uses media_type='audio' so the bubble renders with our existing
+  // audio bubble (play/pause/progress), even before the SSE round-trip.
+  async function sendVoice(blob: Blob, mime: string) {
+    if (sending) return
+    setSending(true)
+    setError('')
+    try {
+      const ext = mime.includes('webm') ? 'webm' : mime.includes('mp4') ? 'm4a' : 'ogg'
+      const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: mime })
+      setUploading(true)
+      let mediaPath: string
+      try {
+        const up = await api.upload(file)
+        mediaPath = up.path
+      } finally {
+        setUploading(false)
+      }
+      const res = replyTo
+        ? await api.reply(jid, replyTo.id, '', { mediaPath })
+        : await api.send(jid, '', { mediaPath })
+      const echoed: Message = {
+        id: res.message_id,
+        chat_jid: jid,
+        sender: '',
+        sender_name: '',
+        push_name: '',
+        content: '',
+        timestamp: res.timestamp,
+        is_from_me: true,
+        is_group: group,
+        message_type: 'media',
+        media_type: 'audio',
+        media_filename: file.name,
+        media_size: file.size,
+        media_mime: mime,
+      }
+      if (replyTo) {
+        echoed.reply_to_id = replyTo.id
+        echoed.reply_to_sender = replyTo.sender
+        echoed.reply_to_content =
+          replyTo.content || replyTo.media_caption || mediaWord(replyTo.media_type)
+      }
+      onSent(echoed)
+      onClearReply?.()
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // Clean up any in-flight recording when the composer unmounts (e.g. user
+  // switches chats mid-record). Otherwise the mic stays open in the
+  // browser's tab bar.
+  useEffect(() => {
+    return () => {
+      if (recTimerRef.current) window.clearInterval(recTimerRef.current)
+      recStreamRef.current?.getTracks().forEach((t) => t.stop())
+      const rec = mediaRecorderRef.current
+      if (rec && rec.state !== 'inactive') {
+        recDiscardRef.current = true
+        try { rec.stop() } catch {}
+      }
+    }
+  }, [])
 
   async function send() {
     const body = text.trim()
@@ -1065,87 +1226,118 @@ function Composer({
     ? text.trim().length > 0 && !sending
     : (text.trim().length > 0 || attachment !== null) && !sending
 
+  // Show the mic button instead of send when the user has nothing typed and
+  // no attachment staged — matches WA, where the right-side icon morphs
+  // between paper-plane and microphone depending on intent.
+  const showMicInsteadOfSend = !editingMsg && text.trim().length === 0 && !attachment
+
   return (
     <div className="border-t border-neutral-800 px-4 py-3">
       {error && <div className="mb-1 text-xs text-red-400">{error}</div>}
-      {editingMsg ? (
-        <EditingChip onClear={() => { setText(''); onClearEdit?.() }} />
-      ) : replyTo ? (
-        <ReplyQuote
-          msg={replyTo}
-          nameMap={nameMap || new Map()}
-          onClear={() => onClearReply?.()}
+      {isRecording ? (
+        <RecordingBar
+          seconds={recSeconds}
+          uploading={uploading || sending}
+          onCancel={() => stopRecording(true)}
+          onSend={() => stopRecording(false)}
         />
-      ) : null}
-      {attachment && !editingMsg && (
-        <AttachmentPreview
-          file={attachment}
-          previewURL={previewURL}
-          onClear={() => setAttachment(null)}
-        />
-      )}
-      <input
-        ref={fileRef}
-        type="file"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0]
-          if (f) setAttachment(f)
-          // Reset so picking the same file again still fires onChange.
-          e.target.value = ''
-        }}
-      />
-      <div className="flex items-end gap-2">
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={!!editingMsg}
-          title={editingMsg ? 'Attachments are disabled while editing' : 'Attach a file'}
-          aria-label="Attach a file"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-        >
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49" />
-          </svg>
-        </button>
-        <div className="relative flex-1">
-          {mention && filteredParticipants.length > 0 && (
-            <MentionPicker
-              participants={filteredParticipants}
-              nameMap={nameMap}
-              highlighted={mentionIdx}
-              onPick={pickMention}
-              onHover={setMentionIdx}
+      ) : (
+        <>
+          {editingMsg ? (
+            <EditingChip onClear={() => { setText(''); onClearEdit?.() }} />
+          ) : replyTo ? (
+            <ReplyQuote
+              msg={replyTo}
+              nameMap={nameMap || new Map()}
+              onClear={() => onClearReply?.()}
+            />
+          ) : null}
+          {attachment && !editingMsg && (
+            <AttachmentPreview
+              file={attachment}
+              previewURL={previewURL}
+              onClear={() => setAttachment(null)}
             />
           )}
-          <textarea
-            ref={taRef}
-            dir="auto"
-            rows={1}
-            value={text}
+          <input
+            ref={fileRef}
+            type="file"
+            className="hidden"
             onChange={(e) => {
-              const v = e.target.value
-              setText(v)
-              resize()
-              updateMentionContext(v, e.target.selectionStart)
+              const f = e.target.files?.[0]
+              if (f) setAttachment(f)
+              // Reset so picking the same file again still fires onChange.
+              e.target.value = ''
             }}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            onSelect={(e) => updateMentionContext(text, (e.target as HTMLTextAreaElement).selectionStart)}
-            placeholder={
-              editingMsg ? 'Edit message…' : attachment ? 'Add a caption…' : 'Type a message'
-            }
-            className="max-h-40 min-h-[2.5rem] w-full resize-none rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600"
           />
-        </div>
-        <button
-          onClick={send}
-          disabled={!canSendNow}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          title={editingMsg ? 'Save edit' : uploading ? 'Uploading…' : 'Send'}
-        >
-          {sending ? '…' : editingMsg ? '✓' : '➤'}
-        </button>
-      </div>
+          <div className="flex items-end gap-2">
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={!!editingMsg}
+              title={editingMsg ? 'Attachments are disabled while editing' : 'Attach a file'}
+              aria-label="Attach a file"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49" />
+              </svg>
+            </button>
+            <div className="relative flex-1">
+              {mention && filteredParticipants.length > 0 && (
+                <MentionPicker
+                  participants={filteredParticipants}
+                  nameMap={nameMap}
+                  highlighted={mentionIdx}
+                  onPick={pickMention}
+                  onHover={setMentionIdx}
+                />
+              )}
+              <textarea
+                ref={taRef}
+                dir="auto"
+                rows={1}
+                value={text}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setText(v)
+                  resize()
+                  updateMentionContext(v, e.target.selectionStart)
+                }}
+                onKeyDown={onKeyDown}
+                onPaste={onPaste}
+                onSelect={(e) => updateMentionContext(text, (e.target as HTMLTextAreaElement).selectionStart)}
+                placeholder={
+                  editingMsg ? 'Edit message…' : attachment ? 'Add a caption…' : 'Type a message'
+                }
+                className="max-h-40 min-h-[2.5rem] w-full resize-none rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600"
+              />
+            </div>
+            {showMicInsteadOfSend ? (
+              <button
+                onClick={startRecording}
+                title="Record voice message"
+                aria-label="Record voice message"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="3" width="6" height="12" rx="3" />
+                  <path d="M5 11a7 7 0 0 0 14 0" />
+                  <path d="M12 18v3" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={send}
+                disabled={!canSendNow}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                title={editingMsg ? 'Save edit' : uploading ? 'Uploading…' : 'Send'}
+              >
+                {sending ? '…' : editingMsg ? '✓' : '➤'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1398,6 +1590,72 @@ function MentionPicker({
           </button>
         )
       })}
+    </div>
+  )
+}
+
+// RecordingBar takes over the composer footer while a voice note is being
+// recorded. Mirrors WhatsApp's recording UX in a desktop-friendly form: a
+// pulsing red dot, a mm:ss timer that ticks every second, a ✕ to discard
+// and a green ➤ to stop + send. Press Esc anywhere to discard, matching
+// the rest of the composer's cancel-with-escape muscle memory.
+function RecordingBar({
+  seconds,
+  uploading,
+  onCancel,
+  onSend,
+}: {
+  seconds: number
+  uploading: boolean
+  onCancel: () => void
+  onSend: () => void
+}) {
+  // Esc to discard — installed only while the bar is mounted, so it doesn't
+  // collide with the other Esc handlers (reply, edit) when they're inactive.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  const mm = Math.floor(seconds / 60).toString().padStart(1, '0')
+  const ss = (seconds % 60).toString().padStart(2, '0')
+  return (
+    <div className="flex items-center gap-3 rounded-2xl bg-neutral-900 px-3 py-2">
+      <button
+        onClick={onCancel}
+        title="Discard (Esc)"
+        aria-label="Discard recording"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-red-300"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        </svg>
+      </button>
+      <div className="flex flex-1 items-center gap-2 text-sm text-neutral-200">
+        {/* Pulsing red dot — same affordance WA uses to say "live mic". */}
+        <span className="relative inline-flex h-3 w-3">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60" />
+          <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+        </span>
+        <span className="font-mono tabular-nums">
+          {mm}:{ss}
+        </span>
+        <span className="text-xs text-neutral-500">
+          {uploading ? 'Sending…' : 'Recording'}
+        </span>
+      </div>
+      <button
+        onClick={onSend}
+        disabled={uploading}
+        title="Send voice message"
+        aria-label="Send voice message"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {uploading ? '…' : '➤'}
+      </button>
     </div>
   )
 }
