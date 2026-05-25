@@ -19,6 +19,7 @@ export function MessageBubble({
   onOpenChat,
   onReply,
   onReact,
+  onOpenImage,
   firstInGroup = true,
 }: {
   msg: Message
@@ -32,6 +33,9 @@ export function MessageBubble({
   /** Called when the user picks an emoji from the quick-react popover.
    *  Empty string removes any existing reaction (WA's toggle semantics). */
   onReact?: (msg: Message, emoji: string) => void
+  /** Called when an image bubble is clicked — lifts to the thread which
+   *  opens the in-app lightbox at this message's position. */
+  onOpenImage?: (msg: Message) => void
   /** When false, this message is a continuation of the previous sender's burst
    *  — the sender label is suppressed, matching the official WA "clustering"
    *  rule where the name only shows on the first bubble of a streak. */
@@ -88,7 +92,7 @@ export function MessageBubble({
           <div className="italic text-neutral-500">🚫 This message was deleted</div>
         ) : (
           <>
-            <MediaContent msg={msg} />
+            <MediaContent msg={msg} onOpenImage={onOpenImage} />
             <TextContent msg={msg} mentionIndex={mentionIndex} onOpenChat={onOpenChat} />
             <MediaUnderstanding
               msg={msg}
@@ -269,7 +273,13 @@ function TextContent({
   return <RichText text={msg.content} mentions={mentionIndex} onOpenChat={onOpenChat} />
 }
 
-function MediaContent({ msg }: { msg: Message }) {
+function MediaContent({
+  msg,
+  onOpenImage,
+}: {
+  msg: Message
+  onOpenImage?: (msg: Message) => void
+}) {
   if (!msg.media_type) return null
   // Pass chat_jid so mediaURL can append ?unlock=… when the chat is open via
   // a per-chat fingerprint unlock (audio/img tags can't carry headers).
@@ -290,7 +300,18 @@ function MediaContent({ msg }: { msg: Message }) {
 
   switch (msg.media_type) {
     case 'image':
-      return (
+      // Click opens the in-app lightbox when onOpenImage is wired (the chat
+      // thread), otherwise falls back to a new tab so contexts that render
+      // bubbles without a thread (briefings, search snippets) still work.
+      return onOpenImage ? (
+        <button
+          type="button"
+          onClick={() => onOpenImage(msg)}
+          className="mb-1 block max-w-full cursor-zoom-in p-0"
+        >
+          <img src={url} alt="" className="max-h-80 rounded-lg object-contain" />
+        </button>
+      ) : (
         <a href={url} target="_blank" rel="noreferrer">
           <img src={url} alt="" className="mb-1 max-h-80 rounded-lg object-contain" />
         </a>

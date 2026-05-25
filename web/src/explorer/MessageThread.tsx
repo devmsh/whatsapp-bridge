@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api, type Chat, type Circle, type Message, type Tag } from '../api'
 import {
-  chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, senderTitle,
+  chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, mediaURL, senderTitle,
   type MentionEntry,
 } from './format'
 import { senderColor } from './colors'
@@ -15,6 +15,7 @@ import { DraftRepliesPopover } from './DraftReplies'
 import { DashboardModal } from './Dashboard'
 import { HideChatDialog } from './HideChatDialog'
 import { setUnlockToken } from '../hidden'
+import { ImageLightbox, type LightboxImage } from './ImageLightbox'
 
 const PAGE = 100
 
@@ -71,6 +72,35 @@ export function MessageThread({
   const [showDashboard, setShowDashboard] = useState(false)
   const [showHideDialog, setShowHideDialog] = useState(false)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
+  // null = closed. Index into lightboxImages when the user clicks an image.
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
+
+  // Build the carousel from every downloaded image in the current message
+  // window. Sender labels match the rest of the thread (per-sender color is
+  // handled inside the lightbox via the sender string — color is bubble-only).
+  const lightboxImages: LightboxImage[] = useMemo(() => {
+    const out: LightboxImage[] = []
+    for (const m of messages) {
+      if (m.media_type !== 'image' || !m.media_path) continue
+      const url = mediaURL(m.media_path, m.chat_jid)
+      if (!url) continue
+      out.push({
+        id: m.id,
+        url,
+        caption: m.media_caption,
+        sender: m.is_from_me
+          ? 'You'
+          : senderTitle(m.sender, m.sender_name, m.push_name, nameMap),
+        timestamp: m.timestamp,
+      })
+    }
+    return out
+  }, [messages, nameMap])
+
+  function openLightboxFor(msg: Message) {
+    const i = lightboxImages.findIndex((img) => img.id === msg.id)
+    if (i >= 0) setLightboxIdx(i)
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
 
@@ -305,6 +335,7 @@ export function MessageThread({
               onOpenChat={onOpenChat}
               onReply={canSend ? setReplyTo : undefined}
               onReact={canSend ? handleReact : undefined}
+              onOpenImage={openLightboxFor}
             />
           </>
         )}
@@ -390,6 +421,15 @@ export function MessageThread({
             }
             setLiveRunId(null)
           }}
+        />
+      )}
+
+      {lightboxIdx !== null && (
+        <ImageLightbox
+          images={lightboxImages}
+          index={lightboxIdx}
+          onIndex={setLightboxIdx}
+          onClose={() => setLightboxIdx(null)}
         />
       )}
     </div>
@@ -772,6 +812,7 @@ function Timeline({
   onOpenChat,
   onReply,
   onReact,
+  onOpenImage,
 }: {
   messages: Message[]
   group: boolean
@@ -782,6 +823,7 @@ function Timeline({
   onOpenChat?: (jid: string) => void
   onReply?: (msg: Message) => void
   onReact?: (msg: Message, emoji: string) => void
+  onOpenImage?: (msg: Message) => void
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -822,6 +864,7 @@ function Timeline({
                 onOpenChat={onOpenChat}
                 onReply={onReply}
                 onReact={onReact}
+                onOpenImage={onOpenImage}
                 firstInGroup={firstInGroup}
               />
             </div>
