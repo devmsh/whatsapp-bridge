@@ -38,8 +38,10 @@ func NewStore(path string) (*Store, error) {
 	for _, stmt := range []string{
 		`ALTER TABLE circles ADD COLUMN keywords TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN review_status TEXT NOT NULL DEFAULT 'accepted'`,
+		`ALTER TABLE tasks ADD COLUMN parent_id INTEGER DEFAULT NULL REFERENCES tasks(id) ON DELETE SET NULL`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
+		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,
 	} {
 		sqlDB.Exec(stmt)
 	}

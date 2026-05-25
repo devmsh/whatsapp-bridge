@@ -195,10 +195,20 @@ export interface Task {
   origin_chat_jid: string
   origin_message_id: string
   review_status: TaskReviewStatus
+  parent_id?: number | null
   created_at: number
   updated_at: number
   message_count: number
   circle_ids?: number[]
+}
+
+// Result of POST /api/v2/tasks/cluster — how the cluster pass changed the tree.
+export interface ClusterResult {
+  new_parents: number
+  reused_parents: number
+  children_linked: number
+  skipped: number
+  rationales?: string[]
 }
 
 export interface TaskMessageLink {
@@ -647,6 +657,8 @@ export const api = {
   },
   reviewTask: (id: number, review: TaskReviewStatus) =>
     postBody<Task>(`/api/v2/tasks/${id}/review`, { review_status: review }),
+  clusterCircleTasks: (circleId: number) =>
+    postBody<ClusterResult>(`/api/v2/tasks/cluster?circle=${circleId}`, {}),
   createTask: (body: {
     title: string
     assignee_jid?: string

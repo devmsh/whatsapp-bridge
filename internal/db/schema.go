@@ -277,6 +277,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     origin_chat_jid   TEXT    NOT NULL DEFAULT '',
     origin_message_id TEXT    NOT NULL DEFAULT '',
     review_status     TEXT    NOT NULL DEFAULT 'accepted', -- pending_review | accepted | rejected
+    parent_id         INTEGER DEFAULT NULL REFERENCES tasks(id) ON DELETE SET NULL,
     created_at        INTEGER NOT NULL DEFAULT 0,
     updated_at        INTEGER NOT NULL DEFAULT 0
 );

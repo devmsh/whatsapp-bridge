@@ -39,6 +39,7 @@ type Task struct {
 	OriginChatJID   string  `json:"origin_chat_jid"`
 	OriginMessageID string  `json:"origin_message_id"`
 	ReviewStatus    string  `json:"review_status"` // pending_review | accepted | rejected
+	ParentID        *int64  `json:"parent_id,omitempty"` // 2-level hierarchy; nil = top-level
 	CreatedAt       int64   `json:"created_at"`
 	UpdatedAt       int64   `json:"updated_at"`
 	MessageCount    int     `json:"message_count"`         // computed
@@ -65,13 +66,22 @@ type TaskMessageLink struct {
 
 func taskColumns() string {
 	return `id, title, description, status, priority, assignee_jid, creator_jid,
-		due_at, completed_at, origin_chat_jid, origin_message_id, review_status, created_at, updated_at`
+		due_at, completed_at, origin_chat_jid, origin_message_id, review_status,
+		parent_id, created_at, updated_at`
 }
 
 func scanTask(sc scanner, t *Task) error {
-	return sc.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.AssigneeJID,
+	var parent sql.NullInt64
+	if err := sc.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.AssigneeJID,
 		&t.CreatorJID, &t.DueAt, &t.CompletedAt, &t.OriginChatJID, &t.OriginMessageID,
-		&t.ReviewStatus, &t.CreatedAt, &t.UpdatedAt)
+		&t.ReviewStatus, &parent, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return err
+	}
+	if parent.Valid {
+		v := parent.Int64
+		t.ParentID = &v
+	}
+	return nil
 }
 
 // CreateTask inserts a task and an origin link if an origin message is given.
@@ -141,6 +151,37 @@ func (s *Store) scanTaskList(rows *sql.Rows) ([]Task, error) {
 		out[i].CircleIDs = s.taskCircleIDs(out[i].ID)
 	}
 	return out, nil
+}
+
+// SetTaskParent sets (or clears, when parent is nil) a task's parent. Used by
+// the clustering pass and any manual hierarchy edits. Self-reference and
+// 2-level depth limits are enforced (a parent can't itself be someone's child).
+func (s *Store) SetTaskParent(id int64, parent *int64) error {
+	if parent != nil {
+		if *parent == id {
+			return fmt.Errorf("a task cannot be its own parent")
+		}
+		// Refuse if the proposed parent is already a child of some other task —
+		// keeps the tree exactly 2 levels deep.
+		var pp sql.NullInt64
+		if err := s.DB.QueryRow(`SELECT parent_id FROM tasks WHERE id = ?`, *parent).Scan(&pp); err == nil && pp.Valid {
+			return fmt.Errorf("parent #%d is itself a child of #%d", *parent, pp.Int64)
+		}
+		// Refuse if THIS task already has children — it can't become a child.
+		var hasKids int
+		s.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM tasks WHERE parent_id = ?)`, id).Scan(&hasKids)
+		if hasKids == 1 {
+			return fmt.Errorf("task #%d is a parent of other tasks; it can't become a child", id)
+		}
+	}
+	if parent == nil {
+		_, err := s.DB.Exec(`UPDATE tasks SET parent_id = NULL, updated_at = ? WHERE id = ?`,
+			time.Now().Unix(), id)
+		return err
+	}
+	_, err := s.DB.Exec(`UPDATE tasks SET parent_id = ?, updated_at = ? WHERE id = ?`,
+		*parent, time.Now().Unix(), id)
+	return err
 }
 
 // SetTaskReview moves a task to accepted or rejected. Used by the triage UI.

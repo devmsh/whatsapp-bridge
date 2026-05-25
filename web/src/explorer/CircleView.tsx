@@ -287,6 +287,22 @@ export function CircleView({
           🕘
         </button>
         <button
+          onClick={async () => {
+            const r = await api.clusterCircleTasks(circleId)
+            onOpenTasks(circleId)
+            alert(
+              `Clustered: ${r.new_parents} new parents, ${r.reused_parents} existing reused, ` +
+                `${r.children_linked} children linked` +
+                (r.skipped ? `, ${r.skipped} skipped` : '') +
+                '.',
+            )
+          }}
+          className="shrink-0 rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+          title="Group related tasks under parent tasks (AI)"
+        >
+          🌳 Cluster
+        </button>
+        <button
           onClick={() => onOpenTasks(circleId)}
           className="shrink-0 rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
           title="Tasks in this circle"

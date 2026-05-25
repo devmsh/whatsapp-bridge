@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"strings"
 	"time"
@@ -243,13 +244,21 @@ func taskColumnsRaw(alias ...string) string {
 	return a + "id, " + a + "title, " + a + "description, " + a + "status, " + a + "priority, " +
 		a + "assignee_jid, " + a + "creator_jid, " + a + "due_at, " + a + "completed_at, " +
 		a + "origin_chat_jid, " + a + "origin_message_id, " + a + "review_status, " +
-		a + "created_at, " + a + "updated_at"
+		a + "parent_id, " + a + "created_at, " + a + "updated_at"
 }
 
 func scanDashTask(rows interface{ Scan(...any) error }, t *db.Task) error {
-	return rows.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.AssigneeJID,
+	var parent sql.NullInt64
+	if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.AssigneeJID,
 		&t.CreatorJID, &t.DueAt, &t.CompletedAt, &t.OriginChatJID, &t.OriginMessageID,
-		&t.ReviewStatus, &t.CreatedAt, &t.UpdatedAt)
+		&t.ReviewStatus, &parent, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		return err
+	}
+	if parent.Valid {
+		v := parent.Int64
+		t.ParentID = &v
+	}
+	return nil
 }
 
 func jidUser(jid string) string {

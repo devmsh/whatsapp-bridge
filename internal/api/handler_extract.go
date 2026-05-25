@@ -171,6 +171,20 @@ func (s *Server) executeExtraction(ctx context.Context, run *Run, timeout time.D
 		run.Finish(RunFailed, result.SessionID, msg, result.Created, msg)
 		return
 	}
+
+	// Right after a successful extraction, cluster the circle's tasks. Pulled
+	// out into a goroutine so we don't block the run from being marked done.
+	if run.Kind == "circle" && result.Created > 0 {
+		if cid, parseErr := strconv.ParseInt(run.Subject, 10, 64); parseErr == nil {
+			go func() {
+				if cr, err := s.clusterCircleTasks(cid); err == nil && cr != nil {
+					fmt.Printf("Clustering circle %d done: %d new parents, %d reused, %d children linked\n",
+						cid, cr.NewParents, cr.ReusedParents, cr.ChildrenLinked)
+				}
+			}()
+		}
+	}
+
 	run.Finish(RunDone, result.SessionID, result.Summary, result.Created, "")
 }
 

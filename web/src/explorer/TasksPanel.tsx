@@ -75,6 +75,39 @@ export function TasksPanel({
     [tasks, localReview],
   )
 
+  // Build the 2-level hierarchy for rendering: parent rows followed by their
+  // children, then standalone rows. Children inherit their parent's visibility.
+  const grouped = useMemo(() => {
+    const byId = new Map<number, Task>()
+    visible.forEach((t) => byId.set(t.id, t))
+    const childrenOf = new Map<number, Task[]>()
+    const standalone: Task[] = []
+    for (const t of visible) {
+      if (t.parent_id && byId.has(t.parent_id)) {
+        const arr = childrenOf.get(t.parent_id) || []
+        arr.push(t)
+        childrenOf.set(t.parent_id, arr)
+      }
+    }
+    // Order: parents first (those that have ≥1 child in the visible set),
+    // then orphan tasks. Stable within each group by visible order.
+    const parents: Task[] = []
+    for (const t of visible) {
+      if (t.parent_id) continue // child — rendered under its parent
+      if (childrenOf.has(t.id)) parents.push(t)
+      else standalone.push(t)
+    }
+    type Row = { task: Task; depth: 0 | 1; childCount?: number }
+    const rows: Row[] = []
+    for (const p of parents) {
+      const kids = childrenOf.get(p.id) || []
+      rows.push({ task: p, depth: 0, childCount: kids.length })
+      for (const k of kids) rows.push({ task: k, depth: 1 })
+    }
+    for (const o of standalone) rows.push({ task: o, depth: 0 })
+    return rows
+  }, [visible])
+
   useEffect(() => {
     api
       .tasks({
@@ -235,18 +268,21 @@ export function TasksPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {visible.length === 0 && (
+        {grouped.length === 0 && (
           <div className="p-4 text-center text-xs text-neutral-600">
             {reviewMode ? 'No tasks waiting for review.' : 'No tasks'}
           </div>
         )}
-        {visible.map((t) => {
+        {grouped.map(({ task: t, depth, childCount }) => {
           const isPending = t.review_status === 'pending_review'
+          const isParent = depth === 0 && (childCount ?? 0) > 0
           return (
             <div
               key={t.id}
               className={
                 'group relative flex items-start gap-3 border-b border-neutral-900 px-3 py-2.5 transition ' +
+                (depth === 1 ? 'pl-8 bg-neutral-950 ' : '') +
+                (isParent ? 'bg-neutral-900/50 ' : '') +
                 (selected === t.id ? 'bg-neutral-800' : 'hover:bg-neutral-900')
               }
             >
@@ -265,10 +301,19 @@ export function TasksPanel({
                         ✨ AI
                       </span>
                     )}
+                    {isParent && (
+                      <span
+                        title={`${childCount} grouped subtasks`}
+                        className="rounded bg-sky-500/20 px-1 py-0.5 text-[10px] font-semibold text-sky-300"
+                      >
+                        {childCount}
+                      </span>
+                    )}
                     <span
                       dir="auto"
                       className={
                         'block min-w-0 flex-1 truncate text-sm ' +
+                        (depth === 0 && isParent ? 'font-semibold text-neutral-100 ' : '') +
                         (t.status === 'done' || t.status === 'cancelled'
                           ? 'text-neutral-500 line-through'
                           : '')

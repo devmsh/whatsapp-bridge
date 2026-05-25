@@ -151,6 +151,7 @@ func (s *Server) registerRoutes() {
 	// Tasks (work items on top of WhatsApp content)
 	s.mux.HandleFunc("/api/v2/tasks", s.handleTasks)
 	s.mux.HandleFunc("/api/v2/tasks/extract", s.handleTaskExtract)
+	s.mux.HandleFunc("/api/v2/tasks/cluster", s.handleClusterTasks)
 	s.mux.HandleFunc("/api/v2/tasks/", s.handleTaskByID)
 
 	// Extraction history (read straight from the Agent SDK session store, no DB)
