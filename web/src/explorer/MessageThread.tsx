@@ -18,6 +18,7 @@ import { setUnlockToken } from '../hidden'
 import { ImageLightbox, type LightboxImage } from './ImageLightbox'
 import { ForwardPicker } from './ForwardPicker'
 import { EmojiPicker } from './EmojiPicker'
+import { MessageInfo } from './MessageInfo'
 
 const PAGE = 100
 
@@ -89,6 +90,9 @@ export function MessageThread({
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   // null = closed. The message staged for forwarding to N other chats.
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null)
+  // null = closed. The own-message whose delivery receipts the user wants
+  // to inspect via the "Info" action. Opens MessageInfo modal.
+  const [infoMsg, setInfoMsg] = useState<Message | null>(null)
   // Whether a file is currently being dragged over the thread area — drives
   // the "Drop to send" overlay. Drag enter/leave events fire on every child
   // so we count them to avoid flicker.
@@ -198,6 +202,7 @@ export function MessageThread({
     setEditingMsg(null)
     setLightboxIdx(null)
     setForwardMsg(null)
+    setInfoMsg(null)
     setSearchOpen(false)
     setSearchQuery('')
     setSearchIdx(0)
@@ -641,6 +646,7 @@ export function MessageThread({
                 onForward={setForwardMsg}
                 onStar={handleStar}
                 onEdit={canSend ? startEdit : undefined}
+                onInfo={setInfoMsg}
                 onOpenImage={openLightboxFor}
                 onJumpToMessage={jumpToMessage}
                 selfDigits={selfDigits}
@@ -768,6 +774,14 @@ export function MessageThread({
           chats={chats}
           nameMap={nameMap}
           onClose={() => setForwardMsg(null)}
+        />
+      )}
+
+      {infoMsg && (
+        <MessageInfo
+          msg={infoMsg}
+          nameMap={nameMap}
+          onClose={() => setInfoMsg(null)}
         />
       )}
     </div>
@@ -2160,6 +2174,7 @@ function Timeline({
   onForward,
   onStar,
   onEdit,
+  onInfo,
   onOpenImage,
   onJumpToMessage,
   selfDigits,
@@ -2179,6 +2194,9 @@ function Timeline({
   onForward?: (msg: Message) => void
   onStar?: (msg: Message, starred: boolean) => void
   onEdit?: (msg: Message) => void
+  /** Open the Message Info overlay for one of your own messages — shows
+   *  per-recipient delivered / read timestamps. Only wired for mine. */
+  onInfo?: (msg: Message) => void
   onOpenImage?: (msg: Message) => void
   /** Click handler for the quoted-reply preview chip — jumps to + flashes
    *  the original message. No-ops silently if the target isn't loaded. */
@@ -2249,6 +2267,7 @@ function Timeline({
                 onForward={onForward}
                 onStar={onStar}
                 onEdit={onEdit}
+                onInfo={onInfo}
                 onOpenImage={onOpenImage}
                 onJumpToMessage={onJumpToMessage}
                 selfDigits={selfDigits}

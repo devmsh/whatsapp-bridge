@@ -23,6 +23,7 @@ export function MessageBubble({
   onForward,
   onStar,
   onEdit,
+  onInfo,
   onOpenImage,
   onJumpToMessage,
   selfDigits,
@@ -55,6 +56,10 @@ export function MessageBubble({
    *  message. Only wired through for text messages within WA's 15-minute
    *  edit window; otherwise the bubble suppresses the action itself. */
   onEdit?: (msg: Message) => void
+  /** Called when the Info action is clicked on one of your own bubbles —
+   *  lifts to the thread which opens the Message Info overlay with
+   *  per-recipient delivered + read timestamps. */
+  onInfo?: (msg: Message) => void
   /** Called when an image bubble is clicked — lifts to the thread which
    *  opens the in-app lightbox at this message's position. */
   onOpenImage?: (msg: Message) => void
@@ -148,13 +153,14 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {(onReply || onReact || onForward || onStar || (onEdit && canEdit) || taskButton) && mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || (onEdit && canEdit) || onInfo || taskButton) && mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
           onForward={onForward ? () => onForward(msg) : undefined}
           onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
           onEdit={onEdit && canEdit ? () => onEdit(msg) : undefined}
+          onInfo={onInfo ? () => onInfo(msg) : undefined}
           taskButton={taskButton}
           isStarred={!!msg.is_starred}
           side="left"
@@ -277,6 +283,7 @@ function BubbleActions({
   onForward,
   onStar,
   onEdit,
+  onInfo,
   taskButton,
   isStarred,
   side,
@@ -288,6 +295,9 @@ function BubbleActions({
   /** Show the Edit pencil. Only passed in for own text messages within
    *  WA's 15-minute window — gating happens in MessageBubble. */
   onEdit?: () => void
+  /** Show the Info (ℹ) button. Only passed in for own messages —
+   *  opens the per-recipient delivered/read receipts overlay. */
+  onInfo?: () => void
   /** Pre-rendered "promote to task" button (MessageTaskButton). Lives in the
    *  same gutter cluster so it reads as a sibling action, not a stray icon
    *  in the footer. The bubble builds it with full context (chatJID, etc.). */
@@ -370,6 +380,20 @@ function BubbleActions({
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 20h9" />
             <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+          </svg>
+        </button>
+      )}
+      {onInfo && (
+        <button
+          onClick={onInfo}
+          title="Message info — delivered + read receipts"
+          aria-label="Message info"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-800/80 text-neutral-300 transition hover:bg-neutral-700 hover:text-neutral-100"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
           </svg>
         </button>
       )}

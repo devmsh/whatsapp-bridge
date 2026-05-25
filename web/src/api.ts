@@ -148,6 +148,17 @@ export interface Message {
   starred_at?: number
 }
 
+// One row per (message, recipient, receipt-type) — what GET
+// /api/v2/messages/{id}/receipts returns. receipt_type maps to WA's
+// receipt state: "" (delivered), "read", "played" (audio/video).
+export interface MessageReceipt {
+  message_id: string
+  chat_jid: string
+  sender_jid: string
+  receipt_type: '' | 'read' | 'played' | string
+  timestamp: number
+}
+
 export interface Contact {
   jid: string
   lid?: string
@@ -716,6 +727,17 @@ export const api = {
   // ~10s without a refresh.
   chatTyping: async (jid: string): Promise<string[]> => {
     const res = await fetch('/api/v2/chats/' + encodeURIComponent(jid) + '/typing')
+    if (!res.ok) return []
+    return res.json()
+  },
+  // messageReceipts returns one row per recipient × receipt-type for an
+  // outgoing message. Empty receipt_type = delivered; "read" + "played"
+  // are the upgraded states. Drives the Message Info screen — caller
+  // typically buckets into Read vs Delivered for display.
+  messageReceipts: async (jid: string, messageID: string): Promise<MessageReceipt[]> => {
+    const res = await fetch(
+      `/api/v2/messages/${encodeURIComponent(messageID)}/receipts?chat_jid=${encodeURIComponent(jid)}`,
+    )
     if (!res.ok) return []
     return res.json()
   },
