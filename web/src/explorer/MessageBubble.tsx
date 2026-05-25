@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Message } from '../api'
 import { clockTime, humanSize, mediaURL, senderTitle, type MentionEntry } from './format'
 import { senderColor } from './colors'
+import { ChatAvatar } from './ChatAvatar'
 import { MessageTaskButton } from './MessageTaskButton'
 import { RichText } from './RichText'
 
@@ -58,6 +59,12 @@ export function MessageBubble({
     group && !mine && firstInGroup
       ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap)
       : ''
+  // Resolved sender title used for the avatar's letter fallback. Outside the
+  // firstInGroup gate above because continuation bubbles (no sender label)
+  // still want a stable fallback, even though they render only a spacer.
+  const senderFull = group && !mine
+    ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap)
+    : ''
 
   // True when an incoming message mentions the current user — used to put a
   // soft emerald ring around the bubble so a ping in a busy thread stands
@@ -70,8 +77,22 @@ export function MessageBubble({
     !!(msg.content || msg.media_caption) &&
     hasSelfMention(msg.content || msg.media_caption || '', selfDigits)
 
+  // Group bubble avatar slot: real circular avatar on the first bubble of a
+  // sender's cluster, invisible spacer on continuations so the bubbles stay
+  // left-aligned with the avatar. Only for incoming group messages — DMs
+  // never need it (the chat header already shows who you're talking to)
+  // and outgoing bubbles never get a sender avatar.
+  const showAvatarSlot = group && !mine
+
   return (
-    <div className={'group/row flex items-center gap-1 ' + (mine ? 'justify-end' : 'justify-start')}>
+    <div className={'group/row flex items-end gap-2 ' + (mine ? 'justify-end' : 'justify-start')}>
+      {showAvatarSlot && (
+        firstInGroup ? (
+          <ChatAvatar jid={msg.sender} title={senderFull} size={28} />
+        ) : (
+          <div className="w-7 shrink-0" aria-hidden="true" />
+        )
+      )}
       {/* Reply action hovers on the left of outgoing bubbles / right of incoming
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
