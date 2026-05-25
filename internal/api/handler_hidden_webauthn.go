@@ -312,3 +312,144 @@ func (s *Server) handleHiddenWAAuthVerify(w http.ResponseWriter, r *http.Request
 	jsonOK(w, map[string]any{"unlock_token": tok, "ttl_seconds": int(hiddenUnlockTTL.Seconds())})
 }
 
+// --- Per-chat WebAuthn flow (no PIN step) ------------------------------------
+//
+// Opens ONE hidden chat after a single fingerprint touch — the chats list and
+// SSE filter stay in normal mode. Mirrors WhatsApp's "Locked Chats" UX.
+
+// handleHiddenWAChatOptions starts a WebAuthn assertion scoped to chat_jid.
+// POST /api/v2/hidden/webauthn/chat/options   body: {chat_jid}
+// PIN step is NOT required for per-chat unlock.
+func (s *Server) handleHiddenWAChatOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		ChatJID string `json:"chat_jid"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.ChatJID == "" {
+		jsonError(w, 400, "chat_jid required")
+		return
+	}
+	// Only mint a challenge for a chat that's actually hidden — otherwise
+	// there's nothing to unlock.
+	if !s.store.IsChatHidden(req.ChatJID) {
+		jsonError(w, 400, "chat is not hidden")
+		return
+	}
+	cred := s.storedCredential()
+	if cred == nil {
+		jsonError(w, 400, "no webauthn credential registered")
+		return
+	}
+	wa, err := rpForRequest(r)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	user := &hiddenWAUser{creds: []webauthn.Credential{*cred}}
+	opts, sd, err := wa.BeginLogin(user)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	sid := newID()
+	putWASession(sid, sd)
+	// Pin the requested chat to the session so the verify step can't be
+	// swapped to a different JID after the user approves the touch.
+	pinChatToSession(sid, req.ChatJID)
+	jsonOK(w, map[string]any{"publicKey": opts.Response, "session_id": sid})
+}
+
+// handleHiddenWAChatVerify completes the assertion and mints a CHAT-SCOPED
+// unlock token tied to the chat_jid pinned during options.
+// POST /api/v2/hidden/webauthn/chat/verify   body: {session_id, credential}
+//   -> { unlock_token, chat_jid, ttl_seconds }
+func (s *Server) handleHiddenWAChatVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		SessionID  string          `json:"session_id"`
+		Credential json.RawMessage `json:"credential"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.SessionID == "" {
+		jsonError(w, 400, "session_id and credential required")
+		return
+	}
+	chatJID, ok := popChatFromSession(req.SessionID)
+	if !ok || chatJID == "" {
+		jsonError(w, 400, "session expired or not chat-scoped")
+		return
+	}
+	sd, ok := popWASession(req.SessionID)
+	if !ok {
+		jsonError(w, 400, "session expired")
+		return
+	}
+	cred := s.storedCredential()
+	if cred == nil {
+		jsonError(w, 400, "no webauthn credential registered")
+		return
+	}
+	wa, err := rpForRequest(r)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	parsed, err := protocol.ParseCredentialRequestResponseBody(strings.NewReader(string(req.Credential)))
+	if err != nil {
+		jsonError(w, 400, "parse: "+err.Error())
+		return
+	}
+	// Same Touch ID flag-sync as the global verify path.
+	authFlags := parsed.Response.AuthenticatorData.Flags
+	cred.Flags.BackupEligible = authFlags.HasBackupEligible()
+	cred.Flags.BackupState = authFlags.HasBackupState()
+	user := &hiddenWAUser{creds: []webauthn.Credential{*cred}}
+	got, err := wa.ValidateLogin(user, *sd, parsed)
+	if err != nil {
+		jsonError(w, 401, "verify: "+err.Error())
+		return
+	}
+	s.store.PutSyncState(waKeySignCount, fmt.Sprintf("%d", got.Authenticator.SignCount))
+
+	tok := s.hiddenUnlocker.MintForChat(chatJID)
+	jsonOK(w, map[string]any{
+		"unlock_token": tok,
+		"chat_jid":     chatJID,
+		"ttl_seconds":  int(hiddenUnlockTTL.Seconds()),
+	})
+}
+
+// Chat-pin storage for the per-chat unlock sessions. Same TTL story as the
+// WebAuthn session map.
+var chatPinSessions = struct {
+	mu   sync.Mutex
+	data map[string]chatPinEntry
+}{data: map[string]chatPinEntry{}}
+
+type chatPinEntry struct {
+	Chat    string
+	Expires int64
+}
+
+func pinChatToSession(sid, chatJID string) {
+	chatPinSessions.mu.Lock()
+	chatPinSessions.data[sid] = chatPinEntry{Chat: chatJID, Expires: time.Now().Add(5 * time.Minute).Unix()}
+	chatPinSessions.mu.Unlock()
+}
+
+func popChatFromSession(sid string) (string, bool) {
+	chatPinSessions.mu.Lock()
+	defer chatPinSessions.mu.Unlock()
+	e, ok := chatPinSessions.data[sid]
+	if !ok || e.Expires < time.Now().Unix() {
+		delete(chatPinSessions.data, sid)
+		return "", false
+	}
+	delete(chatPinSessions.data, sid)
+	return e.Chat, true
+}

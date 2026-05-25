@@ -29,6 +29,7 @@ import { HiddenLockModal } from './HiddenLock'
 import { HideChatDialog } from './HideChatDialog'
 import { setUnlockToken as setHiddenUnlockToken } from '../hidden'
 import { HiddenBadge } from './HiddenBadge'
+import { ChatUnlockModal } from './ChatUnlockModal'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks'
 
@@ -64,6 +65,15 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // pending composer drafts per chat — set by "Nudge" / "Reply" buttons in
   // TaskView, consumed once by MessageThread when it opens that chat.
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({})
+  // Hidden chats that have been temporarily unlocked via the per-chat
+  // fingerprint flow. Indexed by JID — the value is the Chat row fetched
+  // from /api/v2/chats/{jid} so MessageThread + the chat header have data
+  // to render even though `chats` (the sidebar) doesn't include it.
+  const [extraChats, setExtraChats] = useState<Record<string, Chat>>({})
+  // Active per-chat unlock prompt. When set, the ChatUnlockModal pops up.
+  const [unlockPrompt, setUnlockPrompt] = useState<{ jid: string; name: string } | null>(null)
+  // After successful per-chat unlock, openChat is replayed for this JID.
+  const pendingOpenRef = useRef<string | null>(null)
 
   const selectedRef = useRef<string | null>(null)
   selectedRef.current = selected
@@ -152,20 +162,64 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const bumpTasks = useCallback(() => setTaskVersion((v) => v + 1), [])
 
   const openChat = useCallback((jid: string, draft?: string) => {
-    // Refuse to open a JID that isn't in the visible chats list. In locked
-    // private mode, hidden chats are filtered out by the API, so a mention
-    // chip pointing at a hidden contact would otherwise route to an empty
-    // thread and the messages endpoint would 403. Tell the user instead.
-    if (!chatsRef.current.some((c) => c.jid === jid)) {
-      alert('This chat is locked.\nUnlock private mode to open it.')
+    if (draft) setChatDrafts((d) => ({ ...d, [jid]: draft }))
+
+    // Case 1 — chat is in the visible sidebar list (normal path).
+    if (chatsRef.current.some((c) => c.jid === jid)) {
+      setRecoOpen(false)
+      setSelectedTask(null)
+      setTab('chats')
+      setSelected(jid)
+      setChats((prev) => prev.map((c) => (c.jid === jid ? { ...c, unread_count: 0 } : c)))
       return
     }
-    setRecoOpen(false)
-    setSelectedTask(null)
-    setTab('chats')
-    setSelected(jid)
-    setChats((prev) => prev.map((c) => (c.jid === jid ? { ...c, unread_count: 0 } : c)))
-    if (draft) setChatDrafts((d) => ({ ...d, [jid]: draft }))
+
+    // Case 2 — already temporarily unlocked via the per-chat flow.
+    if (extraChats[jid]) {
+      setRecoOpen(false)
+      setSelectedTask(null)
+      setTab('chats')
+      setSelected(jid)
+      return
+    }
+
+    // Case 3 — hidden contact's DM. Open the Touch ID modal; the actual
+    // open happens in handleChatUnlocked after the user approves.
+    const contact = contacts.find(
+      (c) =>
+        c.jid === jid ||
+        (c.phone && c.phone + '@s.whatsapp.net' === jid) ||
+        (c.lid && c.lid + '@lid' === jid),
+    )
+    if (contact?.is_hidden) {
+      const name = contact.name || contact.push_name || contact.business_name || jid
+      pendingOpenRef.current = jid
+      setUnlockPrompt({ jid, name })
+      return
+    }
+
+    // Fallthrough: unknown JID we can't route to.
+    alert('This chat is locked or not available.')
+  }, [contacts, extraChats])
+
+  // Called by ChatUnlockModal once Touch ID succeeded and a per-chat token
+  // was stored. We fetch the chat row (now authorised by the new token via
+  // the global fetch interceptor) and place it into extraChats so the rest
+  // of the UI has data to render. Then we replay the original openChat.
+  const handleChatUnlocked = useCallback(async (jid: string) => {
+    setUnlockPrompt(null)
+    try {
+      const chat = await api.chat(jid)
+      setExtraChats((prev) => ({ ...prev, [jid]: chat }))
+      // Replay openChat for the same JID — extraChats now contains it.
+      setRecoOpen(false)
+      setSelectedTask(null)
+      setTab('chats')
+      setSelected(jid)
+      pendingOpenRef.current = null
+    } catch (e) {
+      alert('Could not load chat: ' + (e as Error).message)
+    }
   }, [])
 
   // Called by MessageThread once it has loaded a draft into its composer,
@@ -240,6 +294,17 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         <HiddenLockModal
           onUnlocked={() => setShowUnlock(false)}
           onClose={() => setShowUnlock(false)}
+        />
+      )}
+      {unlockPrompt && (
+        <ChatUnlockModal
+          chatJID={unlockPrompt.jid}
+          contactName={unlockPrompt.name}
+          onUnlocked={handleChatUnlocked}
+          onClose={() => {
+            setUnlockPrompt(null)
+            pendingOpenRef.current = null
+          }}
         />
       )}
       {/* Right-click "Hide chat…" flow rendered here so it works from the list. */}
@@ -425,7 +490,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         ) : selected ? (
           <MessageThread
             jid={selected}
-            chats={chats}
+            chats={extraChats[selected] ? [...chats, extraChats[selected]] : chats}
             nameMap={nameMap}
             mentionIndex={mentionIndex}
             liveMsg={liveMsg}

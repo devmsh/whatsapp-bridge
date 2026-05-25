@@ -1,4 +1,5 @@
 import type { Chat, ChatPreview, Contact, Group } from '../api'
+import { pickTokenFor } from '../hidden'
 
 // isGroup / isStatus / isNewsletter detect chat kind from the JID suffix,
 // because the chat_type column is not populated.
@@ -10,10 +11,21 @@ export const isNewsletter = (jid: string) => jid.endsWith('@newsletter')
 export const jidUser = (jid: string) => jid.split('@')[0]
 
 // mediaURL converts a stored media_path ("store/images/x.jpg") into a URL the
-// bridge serves ("/api/v2/media/images/x.jpg"). The default media dir is "store".
-export function mediaURL(path?: string): string | null {
+// bridge serves ("/api/v2/media/images/x.jpg"). The default media dir is
+// "store".
+//
+// When chatJID is supplied and we hold an unlock token for it (either global
+// or per-chat), the token is appended as ?unlock=… — <audio>/<img> tags
+// can't send a custom header, so the media endpoint accepts the token via
+// query string as a fallback. Without this a hidden chat's voice notes
+// would silently fail to play after a per-chat fingerprint unlock.
+export function mediaURL(path?: string, chatJID?: string): string | null {
   if (!path) return null
-  return '/api/v2/media/' + path.replace(/^store\//, '')
+  const base = '/api/v2/media/' + path.replace(/^store\//, '')
+  if (!chatJID) return base
+  const tok = pickTokenFor(chatJID)
+  if (!tok) return base
+  return base + (base.includes('?') ? '&' : '?') + 'unlock=' + encodeURIComponent(tok)
 }
 
 // looksLikeName returns false for masked numbers ("+966∙∙∙54"), raw JIDs, and

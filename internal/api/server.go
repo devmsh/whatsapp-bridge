@@ -183,6 +183,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/hidden/webauthn/register/verify", s.handleHiddenWARegisterVerify)
 	s.mux.HandleFunc("/api/v2/hidden/webauthn/auth/options", s.handleHiddenWAAuthOptions)
 	s.mux.HandleFunc("/api/v2/hidden/webauthn/auth/verify", s.handleHiddenWAAuthVerify)
+	s.mux.HandleFunc("/api/v2/hidden/webauthn/chat/options", s.handleHiddenWAChatOptions)
+	s.mux.HandleFunc("/api/v2/hidden/webauthn/chat/verify", s.handleHiddenWAChatVerify)
 	s.mux.HandleFunc("/api/v2/hidden/lock", s.handleHiddenLock)
 
 	// Entity profiles (AI-written purpose descriptions; background-refreshed)

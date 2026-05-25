@@ -35,7 +35,28 @@ func (s *Server) handleContacts(w http.ResponseWriter, r *http.Request) {
 	// non-hidden group chats (you'd see "+<digits>" instead of the real name).
 	// Hidden-state filtering is enforced on chats, messages, and the SSE
 	// stream — not on the contact directory.
-	jsonOK(w, contacts)
+	//
+	// We DO mark each contact with is_hidden so the UI can prompt for a
+	// fingerprint when the user clicks a mention chip for a hidden contact —
+	// without flipping the whole UI into private mode.
+	hidden := s.store.HiddenChatJIDs()
+	type contactOut struct {
+		db.Contact
+		IsHidden bool `json:"is_hidden,omitempty"`
+	}
+	out := make([]contactOut, 0, len(contacts))
+	for _, c := range contacts {
+		isHidden := hidden[c.JID]
+		// A contact may also be tracked under its LID-form JID, so check that
+		// when phone-form isn't in hidden.
+		if !isHidden && c.LID != "" {
+			if hidden[c.LID+"@lid"] || hidden[c.LID] {
+				isHidden = true
+			}
+		}
+		out = append(out, contactOut{Contact: c, IsHidden: isHidden})
+	}
+	jsonOK(w, out)
 }
 
 func (s *Server) handleContactsCheck(w http.ResponseWriter, r *http.Request) {

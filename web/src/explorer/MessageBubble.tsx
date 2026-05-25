@@ -117,7 +117,9 @@ function TextContent({
 
 function MediaContent({ msg }: { msg: Message }) {
   if (!msg.media_type) return null
-  const url = mediaURL(msg.media_path)
+  // Pass chat_jid so mediaURL can append ?unlock=… when the chat is open via
+  // a per-chat fingerprint unlock (audio/img tags can't carry headers).
+  const url = mediaURL(msg.media_path, msg.chat_jid)
 
   // Media exists but was not downloaded (policy/size/expired link).
   if (!url) {

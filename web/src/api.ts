@@ -137,6 +137,10 @@ export interface Contact {
   push_name?: string
   business_name?: string
   is_business?: boolean
+  // True when this contact's DM is in hidden_chats. The UI uses this to
+  // trigger a per-chat fingerprint unlock when the user clicks a mention chip
+  // for a hidden contact, without flipping the whole UI into private mode.
+  is_hidden?: boolean
 }
 
 export interface Group {
@@ -589,6 +593,11 @@ export const api = {
     const res = await fetch('/api/v2/chats')
     return res.json()
   },
+  chat: async (jid: string): Promise<Chat> => {
+    const res = await fetch('/api/v2/chats/' + encodeURIComponent(jid))
+    if (!res.ok) throw new Error('chat ' + res.status)
+    return res.json()
+  },
   messages: async (jid: string, limit = 100): Promise<Message[]> => {
     const res = await fetch(
       `/api/v2/messages?chat_jid=${encodeURIComponent(jid)}&limit=${limit}`,
@@ -810,6 +819,18 @@ export const api = {
     ),
   // Lock the session.
   hiddenLock: () => postBody<{ locked: boolean }>('/api/v2/hidden/lock', {}),
+  // Per-chat unlock: returns a WebAuthn challenge for ONE hidden chat (no
+  // PIN required). The follow-up verify mints a chat-scoped token.
+  hiddenChatOptions: (chatJID: string) =>
+    postBody<{ publicKey: any; session_id: string }>(
+      '/api/v2/hidden/webauthn/chat/options',
+      { chat_jid: chatJID },
+    ),
+  hiddenChatVerify: (sessionID: string, credential: any) =>
+    postBody<{ unlock_token: string; chat_jid: string; ttl_seconds: number }>(
+      '/api/v2/hidden/webauthn/chat/verify',
+      { session_id: sessionID, credential },
+    ),
   hideChatPreview: async (jid: string): Promise<HideChatPreview> => {
     const res = await fetch(`/api/v2/chats/${encodeURIComponent(jid)}/hide-preview`)
     return res.json()

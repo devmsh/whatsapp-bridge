@@ -1,8 +1,14 @@
 // Hidden-chats client state + WebAuthn helpers.
 //
-// The unlock token lives in sessionStorage (one tab only — closing the tab
-// relocks). All API calls auto-attach the X-Hidden-Unlock header via the
-// authedFetch wrapper.
+// Two unlock flavours, mirroring the backend:
+//   - GLOBAL token in sessionStorage — flips the whole UI into "private mode"
+//     (chats list shows only hidden chats, SSE filter swaps).
+//   - PER-CHAT tokens in an in-memory Map — opens ONE hidden chat without
+//     flipping the UI. Used when the user clicks a mention chip for a hidden
+//     contact and approves the fingerprint prompt.
+//
+// The fetch override in main.tsx picks the right token based on the URL +
+// request body, so per-call attaching is automatic.
 
 const TOKEN_KEY = 'wa.hiddenUnlock'
 
@@ -27,8 +33,45 @@ export function isUnlocked(): boolean {
   return !!getUnlockToken()
 }
 
+// ─── Per-chat unlock registry ─────────────────────────────────────────
+// In-memory only — opening a hidden chat shouldn't survive a refresh.
+
+type ChatTok = { token: string; expiry: number }
+const chatTokens = new Map<string, ChatTok>()
+
+export function setChatUnlock(chatJID: string, token: string, ttlSeconds: number) {
+  chatTokens.set(chatJID, { token, expiry: Date.now() + ttlSeconds * 1000 })
+  window.dispatchEvent(new CustomEvent('wa.chat-unlock-changed', { detail: { chatJID } }))
+}
+
+export function clearChatUnlock(chatJID: string) {
+  if (chatTokens.delete(chatJID)) {
+    window.dispatchEvent(new CustomEvent('wa.chat-unlock-changed', { detail: { chatJID } }))
+  }
+}
+
+export function getChatUnlockToken(chatJID: string): string | null {
+  const e = chatTokens.get(chatJID)
+  if (!e) return null
+  if (e.expiry < Date.now()) {
+    chatTokens.delete(chatJID)
+    return null
+  }
+  return e.token
+}
+
+// pickTokenFor returns the right token to use for an API call referencing
+// chatJID. Global token wins (if set); otherwise the per-chat token (if any).
+export function pickTokenFor(chatJID: string | null | undefined): string | null {
+  const g = getUnlockToken()
+  if (g) return g
+  if (!chatJID) return null
+  return getChatUnlockToken(chatJID)
+}
+
 // authedFetch is a thin fetch wrapper that adds the X-Hidden-Unlock header
-// when a token is present. Use it for every API call.
+// when a global token is present. Per-chat tokens are attached automatically
+// by the fetch override in main.tsx.
 export function authedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers || {})
   const tok = getUnlockToken()

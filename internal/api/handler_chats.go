@@ -81,6 +81,9 @@ func (s *Server) handleChatByJID(w http.ResponseWriter, r *http.Request) {
 			methodNotAllowed(w)
 			return
 		}
+		if !s.guardChatAccess(w, r, jid) {
+			return
+		}
 		chat, err := s.store.GetChat(jid)
 		if err != nil {
 			jsonError(w, 404, "chat not found")
