@@ -1,5 +1,6 @@
 import type { Message } from '../api'
 import { clockTime, humanSize, mediaURL, senderTitle, type MentionEntry } from './format'
+import { senderColor } from './colors'
 import { MessageTaskButton } from './MessageTaskButton'
 import { RichText } from './RichText'
 
@@ -36,7 +37,13 @@ export function MessageBubble({
         }
       >
         {sender && (
-          <div dir="auto" className="mb-1 text-xs font-semibold text-emerald-300">
+          // Per-sender color (stable hash of sender JID) — mirrors WhatsApp's
+          // "person color" so speakers stay visually distinct in busy groups.
+          <div
+            dir="auto"
+            className="mb-1 text-xs font-semibold"
+            style={{ color: senderColor(msg.sender) }}
+          >
             {sender}
           </div>
         )}
