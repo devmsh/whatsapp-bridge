@@ -88,6 +88,7 @@ export function MessageBubble({
           )}
           {msg.is_edit && <span className="italic">edited</span>}
           <span>{clockTime(msg.timestamp)}</span>
+          {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
     </div>
@@ -194,6 +195,53 @@ function MediaUnderstanding({
       <div className="mb-0.5 text-[10px] uppercase tracking-wider opacity-70">{label}</div>
       <RichText text={text} mentions={mentionIndex} onOpenChat={onOpenChat} />
     </div>
+  )
+}
+
+// StatusTicks renders the WhatsApp delivery ticks shown after the timestamp on
+// our own outgoing messages: single grey ✓ (sent), double grey ✓✓ (delivered),
+// double blue ✓✓ (read or played). Hidden when status is unknown.
+function StatusTicks({ status }: { status?: Message['status'] }) {
+  if (!status) return null
+  const isDouble = status !== 'sent'
+  const isBlue = status === 'read' || status === 'played'
+  // Blue mimics WA's #53bdeb; grey blends into the bubble footer.
+  const color = isBlue ? '#53bdeb' : 'currentColor'
+  const title =
+    status === 'sent'
+      ? 'Sent'
+      : status === 'delivered'
+        ? 'Delivered'
+        : status === 'played'
+          ? 'Played'
+          : 'Read'
+  return (
+    <span title={title} aria-label={title} className="inline-flex items-center" style={{ color }}>
+      <Tick />
+      {isDouble && <Tick offset />}
+    </span>
+  )
+}
+
+// Tick is one checkmark, sized to the bubble footer. The `offset` variant is
+// the trailing tick of a double-tick pair, nudged left so the two overlap the
+// way the official WA ticks do.
+function Tick({ offset = false }: { offset?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 16 11"
+      width="14"
+      height="11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={offset ? { marginLeft: '-7px' } : undefined}
+      aria-hidden="true"
+    >
+      <path d="M1 6.5 L5 10.5 L15 0.5" />
+    </svg>
   )
 }
 

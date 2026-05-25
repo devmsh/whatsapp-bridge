@@ -127,6 +127,14 @@ export interface Message {
   // AI-derived (only present when the media-understanding worker has run):
   transcript?: string         // voice-note transcript via whisper
   media_description?: string  // image caption via vision
+
+  // Delivery state for our own outgoing messages (is_from_me=true). Absent on
+  // received messages. Maps to WhatsApp's tick UX:
+  //   sent      — accepted by server, no receipt yet (single grey ✓)
+  //   delivered — receipt arrived from recipient device (double grey ✓✓)
+  //   read      — recipient (or a group participant) opened the chat (blue ✓✓)
+  //   played    — voice / video media playback receipt observed (blue ✓✓)
+  status?: 'sent' | 'delivered' | 'read' | 'played'
 }
 
 export interface Contact {

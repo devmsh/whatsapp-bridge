@@ -58,8 +58,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	type enriched struct {
 		db.Message
-		Reactions []db.Reaction `json:"reactions,omitempty"`
-		ChatName  string        `json:"chat_name,omitempty"`
+		Reactions []db.Reaction    `json:"reactions,omitempty"`
+		ChatName  string           `json:"chat_name,omitempty"`
+		Status    db.MessageStatus `json:"status,omitempty"`
 	}
 
 	chatName := ""
@@ -68,12 +69,29 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		chatName = chat.Name
 	}
 
+	// Collect IDs of our own messages so we can resolve their tick status
+	// (sent/delivered/read/played) from the receipts table in one query.
+	myIDs := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		if m.IsFromMe {
+			myIDs = append(myIDs, m.ID)
+		}
+	}
+	statuses, _ := s.store.GetMessageStatuses(chatJIDs, myIDs)
+
 	var results []enriched
 	for _, m := range msgs {
 		e := enriched{Message: m, ChatName: chatName}
 		reactions, _ := s.store.GetReactions(m.ID, m.ChatJID)
 		if len(reactions) > 0 {
 			e.Reactions = reactions
+		}
+		if m.IsFromMe {
+			if st, ok := statuses[m.ID]; ok {
+				e.Status = st
+			} else {
+				e.Status = db.StatusSent
+			}
 		}
 		results = append(results, e)
 	}
