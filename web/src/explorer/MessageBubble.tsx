@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import type { Message } from '../api'
 import { clockTime, humanSize, mediaURL, senderTitle, type MentionEntry } from './format'
 import { senderColor } from './colors'
@@ -17,6 +18,7 @@ export function MessageBubble({
   onTasksChanged,
   onOpenChat,
   onReply,
+  onReact,
   firstInGroup = true,
 }: {
   msg: Message
@@ -27,6 +29,9 @@ export function MessageBubble({
   onTasksChanged?: () => void
   onOpenChat?: (jid: string) => void
   onReply?: (msg: Message) => void
+  /** Called when the user picks an emoji from the quick-react popover.
+   *  Empty string removes any existing reaction (WA's toggle semantics). */
+  onReact?: (msg: Message, emoji: string) => void
   /** When false, this message is a continuation of the previous sender's burst
    *  — the sender label is suppressed, matching the official WA "clustering"
    *  rule where the name only shows on the first bubble of a streak. */
@@ -44,8 +49,12 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {onReply && mine && !msg.is_deleted && (
-        <ReplyButton onClick={() => onReply(msg)} />
+      {(onReply || onReact) && mine && !msg.is_deleted && (
+        <BubbleActions
+          onReply={onReply ? () => onReply(msg) : undefined}
+          onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
+          side="left"
+        />
       )}
       <div
         className={
@@ -115,9 +124,107 @@ export function MessageBubble({
           {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
-      {onReply && !mine && !msg.is_deleted && (
-        <ReplyButton onClick={() => onReply(msg)} />
+      {(onReply || onReact) && !mine && !msg.is_deleted && (
+        <BubbleActions
+          onReply={onReply ? () => onReply(msg) : undefined}
+          onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
+          side="right"
+        />
       )}
+    </div>
+  )
+}
+
+// BubbleActions is the hover-only cluster of small circular buttons that sit
+// outside the bubble on its gutter side, mirroring official WA's position for
+// reply / react / more. We render reply first, then a smile that toggles the
+// quick-react popover. The popover is anchored to the smile button and shows
+// WA's classic 6 quick reactions.
+function BubbleActions({
+  onReply,
+  onReact,
+  side,
+}: {
+  onReply?: () => void
+  onReact?: (emoji: string) => void
+  side: 'left' | 'right'
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  // Click outside the action cluster closes the picker.
+  useEffect(() => {
+    if (!pickerOpen) return
+    function onDown(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setPickerOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [pickerOpen])
+
+  // Always-visible cluster while the picker is open — otherwise it fades out
+  // the moment you move the cursor toward the popover.
+  const visibility = pickerOpen ? 'opacity-100' : 'opacity-0 group-hover/row:opacity-100'
+
+  return (
+    <div ref={wrapRef} className={`relative flex shrink-0 items-center gap-1 ${visibility} transition`}>
+      {onReply && <ReplyButton onClick={onReply} />}
+      {onReact && (
+        <button
+          onClick={() => setPickerOpen((v) => !v)}
+          title="React"
+          aria-label="React"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-800/80 text-neutral-300 transition hover:bg-neutral-700 hover:text-neutral-100"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+            <circle cx="9" cy="10" r="0.6" fill="currentColor" />
+            <circle cx="15" cy="10" r="0.6" fill="currentColor" />
+          </svg>
+        </button>
+      )}
+      {pickerOpen && onReact && (
+        <ReactionPicker
+          side={side}
+          onPick={(emoji) => {
+            setPickerOpen(false)
+            onReact(emoji)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+
+// ReactionPicker pops above the smile button and lays the 6 quick reactions
+// in a single row, exactly like WhatsApp's quick-react bar.
+function ReactionPicker({
+  side,
+  onPick,
+}: {
+  side: 'left' | 'right'
+  onPick: (emoji: string) => void
+}) {
+  return (
+    <div
+      className={
+        'absolute bottom-full mb-1 flex gap-0.5 rounded-full bg-neutral-900 px-1.5 py-1 shadow-lg ring-1 ring-neutral-700 ' +
+        (side === 'left' ? 'right-0' : 'left-0')
+      }
+    >
+      {QUICK_REACTIONS.map((e) => (
+        <button
+          key={e}
+          onClick={() => onPick(e)}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-base leading-none transition hover:scale-125 hover:bg-neutral-800"
+          title={e}
+        >
+          {e}
+        </button>
+      ))}
     </div>
   )
 }

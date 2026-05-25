@@ -626,6 +626,16 @@ export const api = {
       message_id: quotedID,
       message,
     }),
+  // react adds (or removes, when emoji is "") a reaction to a message — the
+  // same /react endpoint the agents already use. WhatsApp treats reactions as
+  // self-replacing: posting any emoji clears your previous one on that
+  // message, posting "" clears it entirely.
+  react: (jid: string, messageID: string, emoji: string) =>
+    postBody<{ success: boolean }>('/api/v2/react', {
+      chat_jid: jid,
+      message_id: messageID,
+      emoji,
+    }),
   contacts: async (q = ''): Promise<Contact[]> => {
     const res = await fetch('/api/v2/contacts' + (q ? `?q=${encodeURIComponent(q)}` : ''))
     return res.json()

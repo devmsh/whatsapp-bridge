@@ -130,6 +130,41 @@ export function MessageThread({
     setLimit((l) => l + PAGE)
   }
 
+  // Apply my own reaction optimistically: hit /api/v2/react and append a
+  // chip below the bubble immediately, replacing any previous reaction I had
+  // on that message. WhatsApp treats reactions as self-replacing per user.
+  async function handleReact(target: Message, emoji: string) {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== target.id) return m
+        const others = (m.reactions || []).filter((r) => r.sender !== '__me__')
+        const next = emoji
+          ? [
+              ...others,
+              {
+                message_id: m.id,
+                chat_jid: m.chat_jid,
+                sender: '__me__',
+                sender_name: 'You',
+                emoji,
+                timestamp: Math.floor(Date.now() / 1000),
+              },
+            ]
+          : others
+        return { ...m, reactions: next }
+      }),
+    )
+    try {
+      await api.react(jid, target.id, emoji)
+    } catch (e) {
+      // Roll the optimistic edit back if the bridge rejected it.
+      setMessages((prev) =>
+        prev.map((m) => (m.id === target.id ? { ...m, reactions: target.reactions } : m)),
+      )
+      console.warn('react failed:', e)
+    }
+  }
+
   // Append a just-sent message locally. Sent messages go straight through the
   // send API and are not echoed over the SSE stream, so we add them here.
   function handleSent(m: Message) {
@@ -269,6 +304,7 @@ export function MessageThread({
               onTasksChanged={onTasksChanged}
               onOpenChat={onOpenChat}
               onReply={canSend ? setReplyTo : undefined}
+              onReact={canSend ? handleReact : undefined}
             />
           </>
         )}
@@ -592,6 +628,7 @@ function Timeline({
   onTasksChanged,
   onOpenChat,
   onReply,
+  onReact,
 }: {
   messages: Message[]
   group: boolean
@@ -601,6 +638,7 @@ function Timeline({
   onTasksChanged: () => void
   onOpenChat?: (jid: string) => void
   onReply?: (msg: Message) => void
+  onReact?: (msg: Message, emoji: string) => void
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -640,6 +678,7 @@ function Timeline({
                 onTasksChanged={onTasksChanged}
                 onOpenChat={onOpenChat}
                 onReply={onReply}
+                onReact={onReact}
                 firstInGroup={firstInGroup}
               />
             </div>
