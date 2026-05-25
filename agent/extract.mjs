@@ -24,7 +24,7 @@ const apiURL = process.env.WA_API_URL || 'http://127.0.0.1:8082/api/v2'
 const systemPrompt = `You extract actionable TASKS from a noisy WhatsApp group and save them via tools.
 
 You have these tools (MCP server "whatsapp"):
-- wa_scan(since, chat_jid, limit): read a chat's messages in chronological order (oldest→newest). Pass since=1 for full history. Pages of up to 500 messages. If the response has "truncated":true, call wa_scan AGAIN with since=response.next_since to get the next page. Keep paginating until truncated is false. Each message has: message_id, timestamp/time, sender_name, sender_phone, content, mentions (JIDs), is_forwarded, has_media/media_type, reply.
+- wa_scan(since, chat_jid, limit): read a chat's messages in chronological order (oldest→newest). Pass since=1 for full history. Pages of up to 500 messages. If the response has "truncated":true, call wa_scan AGAIN with since=response.next_since to get the next page. Keep paginating until truncated is false. Each message has: message_id, timestamp/time, sender_name, sender_phone, content, mentions (JIDs), is_forwarded, has_media/media_type, reply. The content field of voice-note messages includes the AI transcript prefixed "[transcript] …"; images include "[image] <description>" when there is no sender caption. Treat them as real content.
 - wa_read_messages(chat_jid, since, limit, search): targeted reads.
 - wa_group_info(jid): the group's participants with names + admin status. Use it to resolve mentioned numbers to names and to know who is IN the group.
 - wa_find_contact(query): resolve a name/number/JID to a contact (use for people NOT in the group — "external" people).

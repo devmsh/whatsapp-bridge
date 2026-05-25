@@ -157,8 +157,13 @@ func (m *MediaUnderstandingManager) processOne(p db.PendingMediaMessage) {
 		} else if strings.TrimSpace(text) == "" {
 			muRow.Status = db.MUSkipped
 		} else {
+			// Whisper output is verbatim and unpunctuated. Run a small LLM
+			// refinement pass with chat context so the stored transcript
+			// reads as proper Arabic with punctuation, correct English
+			// spelling for tech terms, and (when natural) markdown bullets.
+			refined := m.refineTranscript(p.ChatJID, p.MessageID, text)
 			muRow.Status = db.MUOK
-			muRow.Content = strings.TrimSpace(text)
+			muRow.Content = strings.TrimSpace(refined)
 		}
 		m.s.store.UpsertMU(muRow)
 
@@ -313,6 +318,125 @@ func findWhisperModel() string {
 		}
 	}
 	return ""
+}
+
+// refineTranscript runs the refine-transcript sidecar on a raw whisper
+// transcript using the last 10 messages of the chat as context. Returns the
+// refined text — or the raw text if the refiner can't be reached or returns
+// nothing (so a refiner failure NEVER costs us the transcript).
+func (m *MediaUnderstandingManager) refineTranscript(chatJID, msgID, rawText string) string {
+	ctx := m.recentChatLinesBefore(chatJID, msgID, 10)
+	input := map[string]any{
+		"raw":             rawText,
+		"recent_messages": ctx,
+	}
+	in, err := json.Marshal(input)
+	if err != nil {
+		return rawText
+	}
+	out, runErr := m.s.runAgentInput(2*time.Minute, string(in), "refine-transcript.mjs")
+	if runErr != nil {
+		return rawText
+	}
+	line := lastJSONLine(out)
+	if line == nil {
+		return rawText
+	}
+	var res struct {
+		OK      bool   `json:"ok"`
+		Refined string `json:"refined"`
+	}
+	json.Unmarshal(line, &res)
+	if !res.OK || strings.TrimSpace(res.Refined) == "" {
+		return rawText
+	}
+	return res.Refined
+}
+
+// recentChatLinesBefore returns up to n recent messages in chatJID with
+// content before (but not including) the given message id. Voice notes use
+// their already-stored transcript when available (so context is genuinely
+// readable, not a string of media placeholders).
+func (m *MediaUnderstandingManager) recentChatLinesBefore(chatJID, msgID string, n int) []string {
+	var ts int64
+	m.s.store.DB.QueryRow(`SELECT timestamp FROM messages WHERE id = ? AND chat_jid = ?`,
+		msgID, chatJID).Scan(&ts)
+	if ts == 0 {
+		return nil
+	}
+	// Pull a small window of messages and pull each one's transcript/description
+	// in one extra query — cheaper than per-row joins for a single small batch.
+	rows, err := m.s.store.DB.Query(`SELECT
+		m.id,
+		COALESCE(NULLIF(m.sender_name,''), NULLIF(m.push_name,''), '') AS who,
+		m.is_from_me,
+		SUBSTR(COALESCE(m.content,''), 1, 280) AS body,
+		COALESCE(m.media_type,'') AS media
+		FROM messages m
+		WHERE m.chat_jid = ? AND m.timestamp < ?
+		ORDER BY m.timestamp DESC LIMIT ?`, chatJID, ts, n)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	type row struct {
+		id, body, media, who string
+		fromMe               bool
+	}
+	var rs []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.id, &r.who, &r.fromMe, &r.body, &r.media) == nil {
+			rs = append(rs, r)
+		}
+	}
+	if len(rs) == 0 {
+		return nil
+	}
+	// Lookup transcripts/descriptions for these messages in one shot.
+	ids := make([]any, 0, len(rs))
+	for _, r := range rs {
+		ids = append(ids, r.id)
+	}
+	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
+	ai := map[string]string{}
+	if muRows, err := m.s.store.DB.Query(
+		`SELECT message_id, content FROM media_understanding
+		 WHERE chat_jid = ? AND status='ok' AND message_id IN (`+placeholders+`)`,
+		append([]any{chatJID}, ids...)...); err == nil {
+		for muRows.Next() {
+			var id, content string
+			if muRows.Scan(&id, &content) == nil {
+				ai[id] = content
+			}
+		}
+		muRows.Close()
+	}
+	// Reverse to chronological + build the labeled lines.
+	lines := make([]string, 0, len(rs))
+	for i := len(rs) - 1; i >= 0; i-- {
+		r := rs[i]
+		text := strings.ReplaceAll(strings.TrimSpace(r.body), "\n", " ")
+		if text == "" {
+			if t, ok := ai[r.id]; ok {
+				text = strings.ReplaceAll(strings.TrimSpace(t), "\n", " ")
+			} else if r.media != "" {
+				text = "[" + r.media + "]"
+			}
+		}
+		if text == "" {
+			continue
+		}
+		who := r.who
+		if r.fromMe {
+			who = "Me"
+		}
+		if who == "" {
+			who = "Someone"
+		}
+		lines = append(lines, who+": "+text)
+	}
+	return lines
 }
 
 // describeImage runs the image sidecar (Claude vision) on a single file.

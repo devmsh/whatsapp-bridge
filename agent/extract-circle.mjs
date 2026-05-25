@@ -32,7 +32,7 @@ TOOLS (MCP server "whatsapp"):
 - wa_list_circles(): all OTHER circles with their purpose + keywords. Use to recognize when a DM message belongs to a DIFFERENT circle.
 - wa_get_profile(entity_type, ref): purpose description for a group/contact/circle.
 - wa_group_info(jid): a group's participants (names + admin). Resolve mentioned numbers to names; know who is IN the group.
-- wa_scan(since, chat_jid, limit): read a chat oldest→newest. Pages of up to 500 messages. If response has "truncated":true, call again with since=response.next_since until truncated is false.
+- wa_scan(since, chat_jid, limit): read a chat oldest→newest. Pages of up to 500 messages. If response has "truncated":true, call again with since=response.next_since until truncated is false. The content field of voice-note messages includes the AI transcript prefixed "[transcript] …", and images include "[image] <description>" when the sender did not type a caption. Treat them as real message content.
 - wa_chat_since(chat_jid): the timestamp from which to start scanning this chat for THIS run. First-time runs return 1 (full history); follow-up runs return the watermark from the previous successful extraction (incremental — much cheaper). ALWAYS call this BEFORE wa_scan to pick the right "since".
 - wa_mark_extracted(chat_jid): call this AFTER you've finished scanning a chat (all pages). It advances the watermark to the chat's current max timestamp so the next run only sees newer messages.
 - wa_read_messages(chat_jid, since, limit, search): targeted reads.

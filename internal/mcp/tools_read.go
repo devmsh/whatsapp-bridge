@@ -246,6 +246,23 @@ func (s *Server) handleReadMessages(ctx context.Context, req mcp.CallToolRequest
 		messages = []msg{}
 	}
 
+	// Inject voice-note transcripts + image descriptions into `content` so
+	// the extraction agent reads them naturally with the rest of the chat.
+	refs := make([]mediaRef, 0, len(messages))
+	for _, m := range messages {
+		if m.MediaType == "voice_note" || m.MediaType == "audio" || m.MediaType == "image" {
+			refs = append(refs, mediaRef{ChatJID: m.ChatJID, MessageID: m.ID})
+		}
+	}
+	if mu := s.loadMediaUnderstanding(refs); len(mu) > 0 {
+		for i := range messages {
+			key := messages[i].ChatJID + "|" + messages[i].ID
+			if em, ok := mu[key]; ok {
+				messages[i].Content = mergeAIText(messages[i].Content, messages[i].MediaType, em)
+			}
+		}
+	}
+
 	return marshalResult(map[string]any{
 		"chat_jid": chatJID,
 		"count":    len(messages),
@@ -599,6 +616,23 @@ func (s *Server) handleScan(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		messages = []scanMsg{}
 	}
 
+	// Enrich voice notes + images with AI-derived text so the extraction
+	// agent sees their content instead of an empty string.
+	refs := make([]mediaRef, 0, len(messages))
+	for _, m := range messages {
+		if m.MediaType == "voice_note" || m.MediaType == "audio" || m.MediaType == "image" {
+			refs = append(refs, mediaRef{ChatJID: m.ChatJID, MessageID: m.MessageID})
+		}
+	}
+	if mu := s.loadMediaUnderstanding(refs); len(mu) > 0 {
+		for i := range messages {
+			key := messages[i].ChatJID + "|" + messages[i].MessageID
+			if em, ok := mu[key]; ok {
+				messages[i].Content = mergeAIText(messages[i].Content, messages[i].MediaType, em)
+			}
+		}
+	}
+
 	// Groups scan
 	grpQuery := `SELECT g.jid, COALESCE(g.name, '') as name, g.group_created,
 		COALESCE(g.owner_jid, '') as owner_jid,
@@ -774,17 +808,24 @@ func (s *Server) handleSearchMessages(ctx context.Context, req mcp.CallToolReque
 
 	q := "%" + query + "%"
 
+	// Search both message text AND AI-derived transcripts/descriptions so
+	// voice notes and images are discoverable by the extraction agent.
 	searchSQL := `SELECT m.id, m.chat_jid,
 		COALESCE(NULLIF(g.name,''), NULLIF(c.name,''), m.chat_jid) as chat_name,
 		COALESCE(ct.name, ct.push_name, m.sender_name, m.sender, '') as sender_name,
 		m.content, m.timestamp, m.is_from_me, m.message_type,
+		COALESCE(m.media_type,'') as media_type,
 		COALESCE(m.reply_to_content,'') as reply_to_content
 		FROM messages m
 		LEFT JOIN chats c ON c.jid = m.chat_jid
 		LEFT JOIN groups g ON g.jid = m.chat_jid
 		LEFT JOIN contacts ct ON ct.jid = m.sender
-		WHERE m.content LIKE ? AND m.timestamp > ?`
-	sqlArgs := []any{q, since}
+		WHERE (m.content LIKE ?
+		       OR EXISTS (SELECT 1 FROM media_understanding mu
+		                  WHERE mu.chat_jid = m.chat_jid AND mu.message_id = m.id
+		                    AND mu.status = 'ok' AND mu.content LIKE ?))
+		  AND m.timestamp > ?`
+	sqlArgs := []any{q, q, since}
 
 	if chatJID != "" {
 		searchSQL += " AND m.chat_jid = ?"
@@ -815,6 +856,7 @@ func (s *Server) handleSearchMessages(ctx context.Context, req mcp.CallToolReque
 		Time           string `json:"time"`
 		IsFromMe       bool   `json:"is_from_me"`
 		MessageType    string `json:"message_type"`
+		MediaType      string `json:"media_type,omitempty"`
 		ReplyToContent string `json:"reply_to_content,omitempty"`
 	}
 
@@ -823,11 +865,26 @@ func (s *Server) handleSearchMessages(ctx context.Context, req mcp.CallToolReque
 		var r result
 		if err := rows.Scan(&r.ID, &r.ChatJID, &r.ChatName, &r.SenderName,
 			&r.Content, &r.Timestamp, &r.IsFromMe, &r.MessageType,
-			&r.ReplyToContent); err != nil {
+			&r.MediaType, &r.ReplyToContent); err != nil {
 			continue
 		}
 		r.Time = time.Unix(r.Timestamp, 0).Format("2006-01-02 15:04:05")
 		results = append(results, r)
+	}
+	// Enrich content with AI-derived transcript / description.
+	refs := make([]mediaRef, 0, len(results))
+	for _, r := range results {
+		if r.MediaType == "voice_note" || r.MediaType == "audio" || r.MediaType == "image" {
+			refs = append(refs, mediaRef{ChatJID: r.ChatJID, MessageID: r.ID})
+		}
+	}
+	if mu := s.loadMediaUnderstanding(refs); len(mu) > 0 {
+		for i := range results {
+			key := results[i].ChatJID + "|" + results[i].ID
+			if em, ok := mu[key]; ok {
+				results[i].Content = mergeAIText(results[i].Content, results[i].MediaType, em)
+			}
+		}
 	}
 
 	if results == nil {
