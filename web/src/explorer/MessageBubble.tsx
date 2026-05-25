@@ -50,6 +50,7 @@ export function MessageBubble({
           <>
             <MediaContent msg={msg} />
             <TextContent msg={msg} />
+            <MediaUnderstanding msg={msg} mine={mine} />
           </>
         )}
 
@@ -147,6 +148,29 @@ function MediaContent({ msg }: { msg: Message }) {
     default:
       return null
   }
+}
+
+// MediaUnderstanding renders the AI-derived transcript (for voice notes) or
+// description (for images) as a smaller, dimmer footnote under the media,
+// separated by a hairline divider. Hidden when no AI text exists.
+function MediaUnderstanding({ msg, mine }: { msg: Message; mine: boolean }) {
+  const isAudio = msg.media_type === 'voice_note' || msg.media_type === 'audio'
+  const text = isAudio ? msg.transcript : msg.media_description
+  if (!text) return null
+  const label = isAudio ? '🎙 Transcript' : '🖼 Description'
+  return (
+    <div
+      className={
+        'mt-1 border-t pt-1.5 text-[11px] leading-relaxed ' +
+        (mine ? 'border-emerald-900/40 text-emerald-100/70' : 'border-neutral-700 text-neutral-400')
+      }
+    >
+      <div className="mb-0.5 text-[10px] uppercase tracking-wider opacity-70">{label}</div>
+      <div dir="auto" className="whitespace-pre-wrap break-words text-start">
+        {text}
+      </div>
+    </div>
+  )
 }
 
 function label(type: string): string {

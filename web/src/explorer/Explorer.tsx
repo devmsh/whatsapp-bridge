@@ -319,10 +319,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           <ChatList
             chats={chats}
             nameMap={nameMap}
+            circles={circles}
             selected={selected}
             onOpen={openChat}
             onRequestHide={(jid, title) => setHideTarget({ jid, title })}
-            onChanged={() => window.dispatchEvent(new CustomEvent('wa.unlock-changed'))}
+            onChanged={() => {
+              window.dispatchEvent(new CustomEvent('wa.unlock-changed'))
+              reloadCircles()
+            }}
           />
         )}
         {tab === 'contacts' && (
@@ -366,6 +370,44 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       <main className="min-w-0 flex-1">
         {recoOpen ? (
           <RecommendationsView onChanged={reloadCircles} onOpenCircle={openCircle} />
+        ) : tab === 'tasks' ? (
+          // Tasks tab always shows the tasks main view — never the chat/circle
+          // that may still be "selected" from another tab. A selected task
+          // (clicked from the list) renders detail with a Back button.
+          selectedTask != null ? (
+            <div className="flex h-full flex-col">
+              <button
+                onClick={() => setSelectedTask(null)}
+                className="self-start px-5 py-2 text-xs text-neutral-400 hover:text-neutral-200"
+              >
+                ← Back to tasks
+              </button>
+              <div className="min-h-0 flex-1">
+                <TaskView
+                  taskId={selectedTask}
+                  contacts={contacts}
+                  circles={circles}
+                  nameMap={nameMap}
+                  version={taskVersion}
+                  onOpenChat={openChat}
+                  onChanged={bumpTasks}
+                  onDeleted={() => setSelectedTask(null)}
+                />
+              </div>
+            </div>
+          ) : (
+            <TasksView
+              tasks={allTasks}
+              circles={circles}
+              chats={chats}
+              nameMap={nameMap}
+              ownJID={device?.jid || ''}
+              selection={taskSelection}
+              onOpenTask={openTask}
+              onCreated={bumpTasks}
+              onChanged={bumpTasks}
+            />
+          )
         ) : selected ? (
           <MessageThread
             jid={selected}
@@ -384,39 +426,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onOpenChatTasks={openChatTasks}
             onOpenCircle={openCircle}
             onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
-          />
-        ) : selectedTask != null ? (
-          <div className="flex h-full flex-col">
-            <button
-              onClick={() => setSelectedTask(null)}
-              className="self-start px-5 py-2 text-xs text-neutral-400 hover:text-neutral-200"
-            >
-              ← Back to tasks
-            </button>
-            <div className="min-h-0 flex-1">
-              <TaskView
-                taskId={selectedTask}
-                contacts={contacts}
-                circles={circles}
-                nameMap={nameMap}
-                version={taskVersion}
-                onOpenChat={openChat}
-                onChanged={bumpTasks}
-                onDeleted={() => setSelectedTask(null)}
-              />
-            </div>
-          </div>
-        ) : tab === 'tasks' ? (
-          <TasksView
-            tasks={allTasks}
-            circles={circles}
-            chats={chats}
-            nameMap={nameMap}
-            ownJID={device?.jid || ''}
-            selection={taskSelection}
-            onOpenTask={openTask}
-            onCreated={bumpTasks}
-            onChanged={bumpTasks}
           />
         ) : selectedCircle != null ? (
           <CircleView

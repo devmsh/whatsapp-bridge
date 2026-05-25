@@ -49,6 +49,51 @@ type Message struct {
 	PollID          string  `json:"poll_id,omitempty"`
 	StickerPack     string  `json:"sticker_pack,omitempty"`
 	BroadcastListJID string `json:"broadcast_list_jid,omitempty"`
+
+	// AI-derived (media_understanding):
+	Transcript      string `json:"transcript,omitempty"`         // voice note text
+	MediaDescription string `json:"media_description,omitempty"`  // image caption
+}
+
+// AttachMediaUnderstanding fills Transcript and MediaDescription on the
+// provided messages from the media_understanding table in one query. Used to
+// enrich GetMessages results without re-shaping the main SELECT.
+func (s *Store) AttachMediaUnderstanding(chatJID string, msgs []Message) {
+	if len(msgs) == 0 {
+		return
+	}
+	rows, err := s.DB.Query(
+		`SELECT message_id, kind, content FROM media_understanding
+		 WHERE chat_jid = ? AND status = 'ok'`, chatJID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	type mu struct{ Transcript, Description string }
+	byID := map[string]*mu{}
+	for rows.Next() {
+		var id, kind, content string
+		if rows.Scan(&id, &kind, &content) != nil {
+			continue
+		}
+		row := byID[id]
+		if row == nil {
+			row = &mu{}
+			byID[id] = row
+		}
+		switch kind {
+		case MUTranscript:
+			row.Transcript = content
+		case MUDescription:
+			row.Description = content
+		}
+	}
+	for i := range msgs {
+		if row, ok := byID[msgs[i].ID]; ok {
+			msgs[i].Transcript = row.Transcript
+			msgs[i].MediaDescription = row.Description
+		}
+	}
 }
 
 // StoreMessage upserts a message into the database.
@@ -103,6 +148,7 @@ func (s *Store) GetMessages(chatJID string, since int64, limit int) ([]Message, 
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
+	s.AttachMediaUnderstanding(chatJID, msgs)
 	return msgs, nil
 }
 
@@ -148,6 +194,10 @@ func (s *Store) GetMessagesMerged(chatJIDs []string, since int64, limit int) ([]
 	// Reverse to return in ascending (chronological) order
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	// Enrich each contributing chat's media understanding in one pass per JID.
+	for _, jid := range chatJIDs {
+		s.AttachMediaUnderstanding(jid, msgs)
 	}
 	return msgs, nil
 }

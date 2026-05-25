@@ -199,19 +199,23 @@ func detectWhisperBinary() string {
 	return ""
 }
 
-// transcribeAudio runs whisper-cli on a file. The supported binaries differ in
-// flags; we try whisper.cpp's whisper-cli first ('-f' + '-otxt' + '-of /dev/stdout' isn't portable)
-// and fall back to text-only output by reading stdout. Whisper.cpp's whisper-cli
-// supports '-otxt' which writes <path>.txt, simplest path.
+// transcribeAudio runs whisper-cli on a file. Whisper requires a model file
+// via -m; without one it exits with code 3. We look in standard places (env
+// var WHISPER_MODEL, then a handful of brew/conventional locations) and emit
+// a clear error if nothing is found.
 func (m *MediaUnderstandingManager) transcribeAudio(path string) (string, error) {
 	if m.audioBin == "" {
 		return "", fmt.Errorf("no whisper binary detected; install whisper.cpp (brew install whisper-cpp)")
 	}
-	model := envOr("WHISPER_MODEL", "")
-	args := []string{"-f", path, "-otxt", "-np"} // -np = no progress to stderr
-	if model != "" {
-		args = append(args, "-m", model)
+	model := findWhisperModel()
+	if model == "" {
+		return "", fmt.Errorf("no whisper model found. Set WHISPER_MODEL=<path-to-ggml-*.bin> in .env, " +
+			"or place a model at ./models/ggml-base.en.bin. Download a small one: " +
+			"curl -L -o ./models/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin")
 	}
+	// whisper-cli flags: -m <model> -f <audio> -otxt (write <path>.txt) -np
+	// (no progress) -nt (no timestamps). Stay quiet on stdout.
+	args := []string{"-m", model, "-f", path, "-otxt", "-np", "-nt"}
 	ctx, cancel := newTimeoutCtx(5 * time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, m.audioBin, args...)
@@ -219,13 +223,47 @@ func (m *MediaUnderstandingManager) transcribeAudio(path string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("whisper failed: %v: %s", err, snippet(string(out), 240))
 	}
-	// whisper.cpp writes <path>.txt; if that exists, prefer it.
+	// Prefer the .txt sidecar whisper-cli writes; fall back to stdout.
 	txt := path + ".txt"
 	if b, e := readFileBytes(txt); e == nil {
-		return string(b), nil
+		os.Remove(txt) // we have the text; don't pollute the media dir
+		return strings.TrimSpace(string(b)), nil
 	}
-	// Fallback: parse stdout (the CLI also prints the transcript lines).
-	return string(out), nil
+	return strings.TrimSpace(string(out)), nil
+}
+
+// findWhisperModel returns the path to a usable whisper.cpp model, or "".
+// Checked in priority order:
+//   1. $WHISPER_MODEL
+//   2. ./models/ggml-*.bin under the bridge cwd
+//   3. /opt/homebrew/share/whisper-cpp/models/ggml-*.bin (brew default)
+//   4. ~/.cache/whisper/ggml-*.bin
+func findWhisperModel() string {
+	if v := envOr("WHISPER_MODEL", ""); v != "" {
+		if _, err := os.Stat(v); err == nil {
+			return v
+		}
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		"./models/ggml-base.en.bin",
+		"./models/ggml-small.en.bin",
+		"./models/ggml-medium.en.bin",
+		"/opt/homebrew/share/whisper-cpp/models/ggml-base.en.bin",
+		"/opt/homebrew/share/whisper-cpp/models/ggml-small.en.bin",
+		filepath.Join(home, ".cache/whisper/ggml-base.en.bin"),
+		filepath.Join(home, ".cache/whisper/ggml-small.en.bin"),
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// Last resort: glob ./models for any ggml-*.bin
+	if matches, err := filepath.Glob("./models/ggml-*.bin"); err == nil && len(matches) > 0 {
+		return matches[0]
+	}
+	return ""
 }
 
 // describeImage runs the image sidecar (Claude vision) on a single file.

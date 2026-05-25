@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { api, type Chat } from '../api'
+import { api, type Chat, type Circle } from '../api'
 import { chatListTime, chatTitle, isGroup, previewText } from './format'
 import { ChatAvatar } from './ChatAvatar'
 import { ContextMenu, type MenuItem } from './ContextMenu'
@@ -11,6 +11,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu'
 export function ChatList({
   chats,
   nameMap,
+  circles,
   selected,
   onOpen,
   onRequestHide,
@@ -18,6 +19,7 @@ export function ChatList({
 }: {
   chats: Chat[]
   nameMap: Map<string, string>
+  circles: Circle[]
   selected: string | null
   onOpen: (jid: string) => void
   onRequestHide: (jid: string, title: string) => void
@@ -25,6 +27,8 @@ export function ChatList({
 }) {
   const [q, setQ] = useState('')
   const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
+  // When set, shows the "Add to circle" picker for this chat.
+  const [picking, setPicking] = useState<{ jid: string; title: string } | null>(null)
 
   const rows = useMemo(() => {
     const withTitle = chats.map((c) => ({ chat: c, title: chatTitle(c, nameMap) }))
@@ -95,11 +99,113 @@ export function ChatList({
           items={buildChatMenu(
             chats.find((c) => c.jid === menu.jid),
             menu.title,
-            { onOpen, onRequestHide, onChanged },
+            {
+              onOpen,
+              onRequestHide,
+              onChanged,
+              onRequestAddToCircle: (jid, title) => setPicking({ jid, title }),
+            },
           )}
           onClose={() => setMenu(null)}
         />
       )}
+      {picking && (
+        <CirclePickerModal
+          jid={picking.jid}
+          chatTitle={picking.title}
+          circles={circles}
+          onClose={() => setPicking(null)}
+          onAdded={() => {
+            setPicking(null)
+            onChanged()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// CirclePickerModal: small list of circles to add the chat to. The chat (which
+// may be a group or a DM contact) is added via the regular circle-members API.
+function CirclePickerModal({
+  jid,
+  chatTitle,
+  circles,
+  onClose,
+  onAdded,
+}: {
+  jid: string
+  chatTitle: string
+  circles: Circle[]
+  onClose: () => void
+  onAdded: () => void
+}) {
+  const [busy, setBusy] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const memberType: 'group' | 'contact' = jid.endsWith('@g.us') ? 'group' : 'contact'
+
+  async function add(c: Circle) {
+    setBusy(c.id)
+    setError(null)
+    try {
+      await api.addCircleMember(c.id, memberType, jid)
+      onAdded()
+    } catch (e) {
+      setError((e as Error).message)
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-950 p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3">
+          <div className="text-sm font-semibold">Add to circle</div>
+          <div dir="auto" className="truncate text-xs text-neutral-500">
+            {chatTitle}
+          </div>
+        </div>
+        {circles.length === 0 ? (
+          <p className="py-6 text-center text-sm text-neutral-500">
+            You don’t have any circles yet. Create one from the Circles tab.
+          </p>
+        ) : (
+          <div className="flex max-h-[60vh] flex-col gap-1 overflow-y-auto">
+            {circles.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => add(c)}
+                disabled={busy === c.id}
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition hover:bg-neutral-900 disabled:opacity-50"
+              >
+                <span
+                  className="h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: c.color || '#737373' }}
+                />
+                <span dir="auto" className="min-w-0 flex-1 truncate text-neutral-200">
+                  {c.name}
+                </span>
+                {busy === c.id && <span className="text-xs text-neutral-500">…</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        {error && <div className="mt-2 text-xs text-red-400">{error}</div>}
+        <div className="mt-3 text-right">
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-neutral-700 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -114,6 +220,7 @@ function buildChatMenu(
     onOpen: (jid: string) => void
     onRequestHide: (jid: string, title: string) => void
     onChanged: () => void
+    onRequestAddToCircle: (jid: string, title: string) => void
   },
 ): MenuItem[] {
   if (!chat) return []
@@ -147,6 +254,12 @@ function buildChatMenu(
       label: chat.is_archived ? 'Unarchive' : 'Archive',
       icon: '📦',
       onClick: () => act(chat.is_archived ? 'unarchive' : 'archive'),
+    },
+    { divider: true },
+    {
+      label: 'Add to circle…',
+      icon: '⭕',
+      onClick: () => cb.onRequestAddToCircle(jid, title),
     },
     { divider: true },
   ]

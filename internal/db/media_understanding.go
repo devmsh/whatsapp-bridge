@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -68,10 +69,13 @@ type MediaStats struct {
 	ImageError       int `json:"image_error"`
 }
 
-// CountMedia returns counts by media type and analysis status.
+// CountMedia returns counts by media type and analysis status. "Audio"
+// includes both `audio` and `voice_note` — voice notes are the main use case
+// on WhatsApp and the transcription worker treats them identically.
 func (s *Store) CountMedia() MediaStats {
 	var st MediaStats
-	s.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE media_type='audio' AND media_path != ''`).Scan(&st.AudioTotal)
+	s.DB.QueryRow(`SELECT COUNT(*) FROM messages
+		WHERE media_type IN ('audio','voice_note') AND media_path != ''`).Scan(&st.AudioTotal)
 	s.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE media_type='image' AND media_path != ''`).Scan(&st.ImageTotal)
 
 	s.DB.QueryRow(`SELECT COUNT(*) FROM media_understanding WHERE kind = ? AND status = ?`, MUTranscript, MUOK).Scan(&st.AudioTranscribed)
@@ -104,21 +108,31 @@ type PendingMediaMessage struct {
 
 // PendingMedia returns up to limit messages whose media has no analysis row yet
 // (or where the row is still 'pending'). kind: 'audio' or 'image'.
+// Audio includes both `audio` and WhatsApp's `voice_note` media type.
 func (s *Store) PendingMedia(kind string, limit int) []PendingMediaMessage {
 	if limit <= 0 {
 		limit = 50
 	}
 	muKind := MUTranscript
+	mediaTypes := []string{"audio", "voice_note"}
 	if kind == "image" {
 		muKind = MUDescription
+		mediaTypes = []string{"image"}
 	}
+	args := []any{muKind}
+	placeholders := make([]string, len(mediaTypes))
+	for i, t := range mediaTypes {
+		placeholders[i] = "?"
+		args = append(args, t)
+	}
+	args = append(args, limit)
 	rows, err := s.DB.Query(`SELECT m.chat_jid, m.id, m.media_path
 		FROM messages m
 		LEFT JOIN media_understanding mu
 		  ON mu.chat_jid = m.chat_jid AND mu.message_id = m.id AND mu.kind = ?
-		WHERE m.media_type = ? AND m.media_path != ''
-		  AND (mu.status IS NULL OR mu.status = 'pending')
-		ORDER BY m.timestamp DESC LIMIT ?`, muKind, kind, limit)
+		WHERE m.media_type IN (`+strings.Join(placeholders, ",")+`) AND m.media_path != ''
+		  AND (mu.status IS NULL OR mu.status = 'pending' OR mu.status = 'error')
+		ORDER BY m.timestamp DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil
 	}

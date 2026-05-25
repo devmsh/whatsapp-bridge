@@ -123,6 +123,10 @@ export interface Message {
   reply_to_content?: string
   reactions?: Reaction[]
   chat_name?: string
+
+  // AI-derived (only present when the media-understanding worker has run):
+  transcript?: string         // voice-note transcript via whisper
+  media_description?: string  // image caption via vision
 }
 
 export interface Contact {
