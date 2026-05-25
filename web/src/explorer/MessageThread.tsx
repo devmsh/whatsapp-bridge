@@ -78,6 +78,12 @@ export function MessageThread({
   const [showDashboard, setShowDashboard] = useState(false)
   const [showHideDialog, setShowHideDialog] = useState(false)
   const [replyTo, setReplyTo] = useState<Message | null>(null)
+  // The message currently being edited (your own text bubble, inside WA's
+  // 15-minute window). Setting it puts the Composer into edit mode: textarea
+  // pre-filled with the original body, a pencil-marked chip above, and Send
+  // routes through api.edit instead of api.send. Mutually exclusive with
+  // replyTo — picking one clears the other.
+  const [editingMsg, setEditingMsg] = useState<Message | null>(null)
   // null = closed. Index into lightboxImages when the user clicks an image.
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   // null = closed. The message staged for forwarding to N other chats.
@@ -157,6 +163,7 @@ export function MessageThread({
     setLimit(PAGE)
     stickToBottom.current = true
     setReplyTo(null)
+    setEditingMsg(null)
     setLightboxIdx(null)
     setForwardMsg(null)
   }, [jid])
@@ -238,6 +245,27 @@ export function MessageThread({
       )
       console.warn('react failed:', e)
     }
+  }
+
+  // Switch the Composer into edit mode for one of your own bubbles. Reply
+  // and edit are mutually exclusive (the chip slot is shared and WA does the
+  // same), so picking edit clears any in-flight reply target.
+  function startEdit(target: Message) {
+    setReplyTo(null)
+    setEditingMsg(target)
+  }
+
+  // Called by the Composer after api.edit succeeds. Mutates the local bubble
+  // so the new text + the small italic "edited" marker appear right away,
+  // without waiting for a refetch.
+  function applyLocalEdit(messageID: string, newText: string) {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageID
+          ? { ...m, content: newText, is_edit: true }
+          : m,
+      ),
+    )
   }
 
   // Append a just-sent message locally. Sent messages go straight through the
@@ -423,10 +451,11 @@ export function MessageThread({
               onOpenTask={onOpenTask}
               onTasksChanged={onTasksChanged}
               onOpenChat={onOpenChat}
-              onReply={canSend ? setReplyTo : undefined}
+              onReply={canSend ? (m) => { setEditingMsg(null); setReplyTo(m) } : undefined}
               onReact={canSend ? handleReact : undefined}
               onForward={setForwardMsg}
               onStar={handleStar}
+              onEdit={canSend ? startEdit : undefined}
               onOpenImage={openLightboxFor}
               selfDigits={selfDigits}
             />
@@ -448,8 +477,11 @@ export function MessageThread({
           group={group}
           initialText={composerDraft || initialDraft}
           replyTo={replyTo}
+          editingMsg={editingMsg}
           nameMap={nameMap}
           onClearReply={() => setReplyTo(null)}
+          onClearEdit={() => setEditingMsg(null)}
+          onEdited={applyLocalEdit}
           onDraftConsumed={() => {
             if (composerDraft) setComposerDraft('')
             else onDraftConsumed?.()
@@ -559,8 +591,11 @@ function Composer({
   group,
   initialText = '',
   replyTo,
+  editingMsg,
   nameMap,
   onClearReply,
+  onClearEdit,
+  onEdited,
   onDraftConsumed,
   onSent,
   setAttachmentRef,
@@ -569,8 +604,18 @@ function Composer({
   group: boolean
   initialText?: string
   replyTo?: Message | null
+  /** When set, the composer is in edit mode for this (own) message: textarea
+   *  pre-fills with the original body, Send routes through api.edit, and the
+   *  attach button is disabled (WA's /edit only rewrites text). */
+  editingMsg?: Message | null
   nameMap?: Map<string, string>
   onClearReply?: () => void
+  /** Called when the user cancels edit mode (Esc, ✕ on the chip, or after
+   *  the edit succeeds). */
+  onClearEdit?: () => void
+  /** Called after api.edit succeeds, so the thread can mutate the local
+   *  message in-place (new text + is_edit=true) without a refetch. */
+  onEdited?: (messageID: string, newText: string) => void
   onDraftConsumed?: () => void
   onSent: (m: Message) => void
   /** Optional callback the parent uses to push a File into the attachment
@@ -639,6 +684,42 @@ function Composer({
     return () => window.removeEventListener('keydown', onKey)
   }, [replyTo?.id, onClearReply])
 
+  // Entering edit mode: copy the original body into the textarea, drop any
+  // staged attachment (WA's edit can't carry media), focus + place caret at
+  // the end so typing extends the existing text. Leaving edit mode (cleared
+  // by parent) restores the empty composer.
+  useEffect(() => {
+    if (!editingMsg) {
+      // Only clear the textarea on edit-exit if it still holds the original —
+      // the user might have already moved on and typed something fresh.
+      return
+    }
+    setAttachment(null)
+    setText(editingMsg.content || '')
+    requestAnimationFrame(() => {
+      resize()
+      const el = taRef.current
+      if (!el) return
+      el.focus()
+      const len = el.value.length
+      el.setSelectionRange(len, len)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingMsg?.id])
+
+  // Escape leaves edit mode without sending.
+  useEffect(() => {
+    if (!editingMsg) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setText('')
+        onClearEdit?.()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editingMsg?.id, onClearEdit])
+
   // Hand the parent a setter so drag-and-drop on the thread can stage an
   // attachment without colocating composer state up there.
   useEffect(() => {
@@ -673,6 +754,32 @@ function Composer({
 
   async function send() {
     const body = text.trim()
+    // Edit-mode path: rewrite the existing message's text and bail before any
+    // upload / send routing. Empty edits are blocked (WA does the same — the
+    // /edit endpoint also rejects empty new_text).
+    if (editingMsg) {
+      if (!body || body === editingMsg.content) {
+        // No-op: nothing to save / nothing changed. Just leave edit mode.
+        onClearEdit?.()
+        setText('')
+        return
+      }
+      if (sending) return
+      setSending(true)
+      setError('')
+      try {
+        await api.edit(jid, editingMsg.id, body)
+        onEdited?.(editingMsg.id, body)
+        onClearEdit?.()
+        setText('')
+        requestAnimationFrame(resize)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to edit')
+      } finally {
+        setSending(false)
+      }
+      return
+    }
     // Allow caption-less media sends — WA does too.
     if (!body && !attachment) return
     if (sending) return
@@ -901,19 +1008,25 @@ function Composer({
     return Array.from(seen)
   }
 
-  const canSendNow = (text.trim().length > 0 || attachment !== null) && !sending
+  // Send is allowed when there's typed text or a staged attachment, except
+  // in edit mode where only text counts (attachments are disabled anyway).
+  const canSendNow = editingMsg
+    ? text.trim().length > 0 && !sending
+    : (text.trim().length > 0 || attachment !== null) && !sending
 
   return (
     <div className="border-t border-neutral-800 px-4 py-3">
       {error && <div className="mb-1 text-xs text-red-400">{error}</div>}
-      {replyTo && (
+      {editingMsg ? (
+        <EditingChip onClear={() => { setText(''); onClearEdit?.() }} />
+      ) : replyTo ? (
         <ReplyQuote
           msg={replyTo}
           nameMap={nameMap || new Map()}
           onClear={() => onClearReply?.()}
         />
-      )}
-      {attachment && (
+      ) : null}
+      {attachment && !editingMsg && (
         <AttachmentPreview
           file={attachment}
           previewURL={previewURL}
@@ -934,9 +1047,10 @@ function Composer({
       <div className="flex items-end gap-2">
         <button
           onClick={() => fileRef.current?.click()}
-          title="Attach a file"
+          disabled={!!editingMsg}
+          title={editingMsg ? 'Attachments are disabled while editing' : 'Attach a file'}
           aria-label="Attach a file"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
         >
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49" />
@@ -966,7 +1080,9 @@ function Composer({
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             onSelect={(e) => updateMentionContext(text, (e.target as HTMLTextAreaElement).selectionStart)}
-            placeholder={attachment ? 'Add a caption…' : 'Type a message'}
+            placeholder={
+              editingMsg ? 'Edit message…' : attachment ? 'Add a caption…' : 'Type a message'
+            }
             className="max-h-40 min-h-[2.5rem] w-full resize-none rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-600"
           />
         </div>
@@ -974,9 +1090,9 @@ function Composer({
           onClick={send}
           disabled={!canSendNow}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          title={uploading ? 'Uploading…' : 'Send'}
+          title={editingMsg ? 'Save edit' : uploading ? 'Uploading…' : 'Send'}
         >
-          {sending ? '…' : '➤'}
+          {sending ? '…' : editingMsg ? '✓' : '➤'}
         </button>
       </div>
     </div>
@@ -1235,6 +1351,46 @@ function MentionPicker({
   )
 }
 
+// EditingChip is the slim banner the Composer shows above the textarea while
+// the user is editing one of their own messages. Sits in the same slot the
+// ReplyQuote uses for a fresh reply — at most one of the two is visible at a
+// time, mirroring official WA's mutually-exclusive edit / reply UX.
+function EditingChip({ onClear }: { onClear: () => void }) {
+  return (
+    <div
+      className="mb-2 flex items-center gap-2 rounded-lg bg-neutral-900 py-1.5 pr-2 text-xs"
+      style={{ borderInlineStart: `3px solid #06cf9c`, paddingInlineStart: '10px' }}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="14"
+        height="14"
+        fill="none"
+        stroke="#06cf9c"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+      </svg>
+      <div className="flex-1">
+        <div className="text-[11px] font-semibold text-emerald-300">Editing message</div>
+        <div className="text-neutral-500">Press Esc to cancel · Enter to save</div>
+      </div>
+      <button
+        onClick={onClear}
+        title="Cancel edit (Esc)"
+        aria-label="Cancel edit"
+        className="-mr-1 mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
 function ReplyQuote({
   msg,
   nameMap,
@@ -1304,6 +1460,7 @@ function Timeline({
   onReact,
   onForward,
   onStar,
+  onEdit,
   onOpenImage,
   selfDigits,
 }: {
@@ -1318,6 +1475,7 @@ function Timeline({
   onReact?: (msg: Message, emoji: string) => void
   onForward?: (msg: Message) => void
   onStar?: (msg: Message, starred: boolean) => void
+  onEdit?: (msg: Message) => void
   onOpenImage?: (msg: Message) => void
   selfDigits?: Set<string>
 }) {
@@ -1362,6 +1520,7 @@ function Timeline({
                 onReact={onReact}
                 onForward={onForward}
                 onStar={onStar}
+                onEdit={onEdit}
                 onOpenImage={onOpenImage}
                 selfDigits={selfDigits}
                 firstInGroup={firstInGroup}

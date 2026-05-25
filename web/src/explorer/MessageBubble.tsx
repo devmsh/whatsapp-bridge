@@ -22,6 +22,7 @@ export function MessageBubble({
   onReact,
   onForward,
   onStar,
+  onEdit,
   onOpenImage,
   selfDigits,
   firstInGroup = true,
@@ -46,6 +47,11 @@ export function MessageBubble({
   onForward?: (msg: Message) => void
   /** Toggle the local star bookmark on this message. */
   onStar?: (msg: Message, starred: boolean) => void
+  /** Called when the Edit action is clicked on one of your own bubbles —
+   *  lifts to the thread which puts the composer into edit mode for this
+   *  message. Only wired through for text messages within WA's 15-minute
+   *  edit window; otherwise the bubble suppresses the action itself. */
+  onEdit?: (msg: Message) => void
   /** Called when an image bubble is clicked — lifts to the thread which
    *  opens the in-app lightbox at this message's position. */
   onOpenImage?: (msg: Message) => void
@@ -84,6 +90,19 @@ export function MessageBubble({
   // and outgoing bubbles never get a sender avatar.
   const showAvatarSlot = group && !mine
 
+  // Edit is only meaningful for our own text messages within WhatsApp's
+  // 15-minute server window. Media captions can't be edited via /edit (the
+  // bridge wraps new_text in Conversation, not the image/video message), and
+  // edits past the window just fail loudly — better to hide the action than
+  // surprise the user. canEdit gates the pencil button on BubbleActions.
+  const EDIT_WINDOW_S = 15 * 60
+  const canEdit =
+    mine &&
+    !msg.is_deleted &&
+    !msg.media_type &&
+    !!msg.content &&
+    Math.floor(Date.now() / 1000) - msg.timestamp < EDIT_WINDOW_S
+
   return (
     <div className={'group/row flex items-end gap-2 ' + (mine ? 'justify-end' : 'justify-start')}>
       {showAvatarSlot && (
@@ -97,12 +116,13 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {(onReply || onReact || onForward || onStar) && mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || (onEdit && canEdit)) && mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
           onForward={onForward ? () => onForward(msg) : undefined}
           onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
+          onEdit={onEdit && canEdit ? () => onEdit(msg) : undefined}
           isStarred={!!msg.is_starred}
           side="left"
         />
@@ -207,6 +227,7 @@ function BubbleActions({
   onReact,
   onForward,
   onStar,
+  onEdit,
   isStarred,
   side,
 }: {
@@ -214,6 +235,9 @@ function BubbleActions({
   onReact?: (emoji: string) => void
   onForward?: () => void
   onStar?: () => void
+  /** Show the Edit pencil. Only passed in for own text messages within
+   *  WA's 15-minute window — gating happens in MessageBubble. */
+  onEdit?: () => void
   isStarred?: boolean
   side: 'left' | 'right'
 }) {
@@ -279,6 +303,19 @@ function BubbleActions({
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        </button>
+      )}
+      {onEdit && (
+        <button
+          onClick={onEdit}
+          title="Edit"
+          aria-label="Edit"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-800/80 text-neutral-300 transition hover:bg-neutral-700 hover:text-neutral-100"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
           </svg>
         </button>
       )}

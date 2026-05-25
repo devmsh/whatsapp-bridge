@@ -719,6 +719,16 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // edit replaces the text body of a sent message. WhatsApp's edit window is
+  // ~15 minutes server-side — past that the bridge call will fail; the UI
+  // already hides the Edit action after 15 min to avoid that surprise.
+  // Only text messages are editable (the bridge wraps new_text in
+  // Conversation, not media captions).
+  edit: (jid: string, messageID: string, newText: string) =>
+    postBody<{ success: boolean }>(`/api/v2/messages/${encodeURIComponent(messageID)}/edit`, {
+      chat_jid: jid,
+      new_text: newText,
+    }),
   // star / unstar a message — local bookmark only, like WhatsApp's
   // "Starred messages" list. listStarred returns the full message bodies
   // with their chat name attached.
