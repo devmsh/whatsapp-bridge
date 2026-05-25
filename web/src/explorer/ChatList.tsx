@@ -3,6 +3,7 @@ import { api, type Chat, type Circle } from '../api'
 import { chatListTime, chatTitle, isGroup, previewText } from './format'
 import { ChatAvatar } from './ChatAvatar'
 import { ContextMenu, type MenuItem } from './ContextMenu'
+import { useDrafts } from '../hooks/useDrafts'
 
 // ChatList shows the time-ordered list of chats. Search is handled by the
 // global SearchBar in the top bar — there's no per-list filter anymore.
@@ -26,6 +27,10 @@ export function ChatList({
   onRequestHide: (jid: string, title: string) => void
   onChanged: () => void
 }) {
+  // Live snapshot of per-chat drafts — the Composer dispatches
+  // `wa.draft-changed` on every keystroke / send so the "Draft: …" pill on
+  // matching rows updates immediately as the user types or sends. Map<jid, text>.
+  const drafts = useDrafts()
   const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
   // When set, shows the circle-membership picker for this chat.
   const [picking, setPicking] = useState<{ jid: string; title: string } | null>(null)
@@ -131,13 +136,25 @@ export function ChatList({
                 </span>
               </div>
               <div dir="auto" className="flex items-center gap-1.5 truncate text-xs text-neutral-500">
-                <span className="truncate">
-                  {chat.last_message
-                    ? previewText(chat.last_message, nameMap)
-                    : isGroup(chat.jid)
-                      ? 'Group'
-                      : chat.jid.replace('@s.whatsapp.net', '')}
-                </span>
+                {drafts.has(chat.jid) ? (
+                  // WA shows "Draft: <preview>" in red whenever the composer
+                  // has typed-but-unsent text — replaces the last-message
+                  // line entirely so the user spots unsent threads at a
+                  // glance. We mirror that exactly: same row, red "Draft:"
+                  // label, single-line preview of the saved buffer.
+                  <span className="truncate">
+                    <span className="font-medium text-red-400">Draft: </span>
+                    <span className="text-neutral-400">{drafts.get(chat.jid)}</span>
+                  </span>
+                ) : (
+                  <span className="truncate">
+                    {chat.last_message
+                      ? previewText(chat.last_message, nameMap)
+                      : isGroup(chat.jid)
+                        ? 'Group'
+                        : chat.jid.replace('@s.whatsapp.net', '')}
+                  </span>
+                )}
               </div>
             </div>
             <div className="ml-1 flex shrink-0 flex-col items-end gap-0.5">

@@ -1152,8 +1152,12 @@ function Composer({
       setAttachment(null)
       // The text-change effect already removes empty drafts, but be explicit
       // here so the key disappears synchronously with the successful send —
-      // no chance of a stale draft surviving a fast chat-switch.
-      try { localStorage.removeItem(draftKey(jid)) } catch {}
+      // no chance of a stale draft surviving a fast chat-switch. Notify the
+      // chat list so its "Draft: …" pill clears in the same tick.
+      try {
+        localStorage.removeItem(draftKey(jid))
+        window.dispatchEvent(new CustomEvent('wa.draft-changed'))
+      } catch {}
       requestAnimationFrame(resize)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to send')
@@ -1401,11 +1405,15 @@ function Composer({
                   resize()
                   updateMentionContext(v, e.target.selectionStart)
                   // Persist per-chat draft on every keystroke (skipped while
-                  // editing — see the draft persistence note above).
+                  // editing — see the draft persistence note above). The
+                  // custom event lets the chat list's "Draft: …" indicator
+                  // refresh live; localStorage's `storage` event only fires
+                  // in *other* tabs, not the one that did the write.
                   if (!editingMsg) {
                     try {
                       if (v.trim()) localStorage.setItem(draftKey(jid), v)
                       else localStorage.removeItem(draftKey(jid))
+                      window.dispatchEvent(new CustomEvent('wa.draft-changed'))
                     } catch {}
                   }
                 }}
