@@ -164,18 +164,32 @@ export function ChatList({
                   </span>
                 )}
               </div>
-              {chat.unread_count > 0 && (
-                <span
-                  className={
-                    'shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ' +
-                    (chat.is_muted
-                      ? 'bg-neutral-700 text-neutral-300'
-                      : 'bg-emerald-500 text-neutral-950')
-                  }
-                >
-                  {chat.unread_count}
-                </span>
-              )}
+              <div className="flex items-center gap-1">
+                {/* Mention chip: emerald @ pill, only when at least one of
+                    the chat's unread messages mentions the current user.
+                    Stays bright even on muted chats so a personal ping
+                    doesn't get lost behind the de-saturated unread badge. */}
+                {(chat.unread_mentions ?? 0) > 0 && (
+                  <span
+                    title={chat.unread_mentions === 1 ? 'You were mentioned' : `${chat.unread_mentions} mentions of you`}
+                    className="shrink-0 rounded-full bg-emerald-500 px-1 text-[11px] font-semibold leading-tight text-neutral-950"
+                  >
+                    @
+                  </span>
+                )}
+                {chat.unread_count > 0 && (
+                  <span
+                    className={
+                      'shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ' +
+                      (chat.is_muted
+                        ? 'bg-neutral-700 text-neutral-300'
+                        : 'bg-emerald-500 text-neutral-950')
+                    }
+                  >
+                    {chat.unread_count}
+                  </span>
+                )}
+              </div>
             </div>
           </button>
         ))}

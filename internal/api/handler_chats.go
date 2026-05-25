@@ -31,10 +31,26 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 	hidden := s.store.HiddenChatJIDs()
 	unlocked := s.isUnlocked(r)
 
+	// Precompute per-chat unread @-mention counts so the chat list can show
+	// a small '@' badge on chats waiting on the current user specifically
+	// (matches official WA's mention indicator). Only chats with unread>0
+	// are considered, and we cap the per-chat scan window so a chat with a
+	// huge offline backlog doesn't slow the response.
+	unreadByJID := map[string]int{}
+	for _, c := range chats {
+		if c.UnreadCount > 0 && !hidden[c.JID] == !unlocked {
+			unreadByJID[c.JID] = c.UnreadCount
+		}
+	}
+	mentionCounts, _ := s.store.UnreadMentionCounts(
+		unreadByJID, s.client.SelfMentionPatterns(), 100,
+	)
+
 	type chatWithPreview struct {
 		db.Chat
-		LastMessage *db.ChatPreview `json:"last_message,omitempty"`
-		IsHidden    bool            `json:"is_hidden,omitempty"`
+		LastMessage     *db.ChatPreview `json:"last_message,omitempty"`
+		IsHidden        bool            `json:"is_hidden,omitempty"`
+		UnreadMentions  int             `json:"unread_mentions,omitempty"`
 	}
 	out := make([]chatWithPreview, 0, len(chats))
 	for _, c := range chats {
@@ -47,6 +63,9 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 		if p, ok := previews[c.JID]; ok {
 			pv := p
 			row.LastMessage = &pv
+		}
+		if m := mentionCounts[c.JID]; m > 0 {
+			row.UnreadMentions = m
 		}
 		out = append(out, row)
 	}

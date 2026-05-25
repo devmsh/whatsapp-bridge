@@ -122,6 +122,26 @@ func (c *Client) ResolvePhoneForLID(lidJID string) string {
 
 // deviceInfo reads the linked account details from the device store.
 // Returns nil when no device is linked.
+// SelfMentionPatterns returns the substrings that identify "the current user"
+// inside the messages.mentions JSON column. WhatsApp emits @-mention
+// identifiers as a JID string like "63840813367480@lid" (LID form for newer
+// accounts) — we return both LID and phone forms so an old message that
+// happens to store the phone JID still matches. Empty when not logged in.
+func (c *Client) SelfMentionPatterns() []string {
+	store := c.WA.Store
+	if store == nil || store.ID == nil {
+		return nil
+	}
+	out := make([]string, 0, 2)
+	// LID form first — it's what whatsmeow stores for new mentions today.
+	if !store.LID.IsEmpty() {
+		out = append(out, store.LID.ToNonAD().String())
+	}
+	// Phone form is still present in older mentions and group-mention rows.
+	out = append(out, store.ID.ToNonAD().String())
+	return out
+}
+
 func (c *Client) deviceInfo() *DeviceInfo {
 	store := c.WA.Store
 	if store == nil || store.ID == nil {

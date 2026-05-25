@@ -86,6 +86,11 @@ export interface Chat {
   is_muted: boolean
   is_hidden?: boolean // only true when returned in unlocked "private mode"
   last_message?: ChatPreview
+  // Count of @-mentions of the current user inside this chat's unread
+  // window. Used by the chat list to render the small '@' badge next to
+  // the unread count, so a ping in a busy chat is obvious before opening
+  // it. Absent (or 0) means no pending mentions.
+  unread_mentions?: number
 }
 
 export interface Reaction {
