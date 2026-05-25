@@ -55,20 +55,27 @@ export type MentionEntry = { jid: string; name: string; unknown: boolean }
 //   - the contact's phone digits
 // Both point to the SAME phone-based JID, which is what openChat needs to
 // land in a DM.
+//
+// IMPORTANT: the contacts table also contains junk rows whose `jid` ends in
+// `@lid` (or `:N@lid`). On those rows `phone` actually holds the LID digits,
+// not a real phone number — using them would map an LID back to itself and
+// open the wrong (or non-existent) chat. So we trust phone/LID-digit
+// mappings ONLY from rows with a phone-form JID. Junk rows are skipped.
 export function buildMentionIndex(contacts: Contact[]): Map<string, MentionEntry> {
   const m = new Map<string, MentionEntry>()
   for (const c of contacts) {
+    if (!c.jid || !c.jid.endsWith('@s.whatsapp.net')) continue
     const name = c.name || c.push_name || c.business_name || ''
-    const phoneJID = c.phone ? c.phone + '@s.whatsapp.net' : c.jid
+    const phoneJID = c.jid // already phone-form
     const entry: MentionEntry = { jid: phoneJID, name, unknown: !name }
     if (c.lid) {
       const digits = c.lid.replace('@lid', '').split(':')[0]
       if (digits) m.set(digits, entry)
     }
     if (c.phone) m.set(c.phone, entry)
-    // Also index by the JID's user portion (digits before "@").
-    const jidUserPart = (c.jid || '').split('@')[0].split(':')[0]
-    if (jidUserPart && !m.has(jidUserPart)) m.set(jidUserPart, entry)
+    // Also index by the JID's user portion (the phone digits before "@").
+    const jidUserPart = c.jid.split('@')[0].split(':')[0]
+    if (jidUserPart) m.set(jidUserPart, entry)
   }
   return m
 }
