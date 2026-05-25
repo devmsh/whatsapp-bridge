@@ -29,6 +29,9 @@ export function ChatList({
   const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
   // When set, shows the circle-membership picker for this chat.
   const [picking, setPicking] = useState<{ jid: string; title: string } | null>(null)
+  // When set, shows the mute-duration picker (8h / 1 week / Always).
+  // WhatsApp asks the same three options every time you mute.
+  const [muting, setMuting] = useState<{ jid: string; title: string } | null>(null)
   // 'normal' shows non-archived chats + an 'Archived (N)' header at the top
   // when there is anything archived; 'archived' shows the archived-only view
   // with a back affordance. Mirrors WhatsApp's Archived screen exactly.
@@ -206,6 +209,7 @@ export function ChatList({
               onRequestHide,
               onChanged,
               onRequestAddToCircle: (jid, title) => setPicking({ jid, title }),
+              onRequestMute: (jid, title) => setMuting({ jid, title }),
             },
           )}
           onClose={() => setMenu(null)}
@@ -223,6 +227,114 @@ export function ChatList({
           }}
         />
       )}
+      {muting && (
+        <MuteDurationPicker
+          jid={muting.jid}
+          chatTitle={muting.title}
+          onDone={() => {
+            setMuting(null)
+            onChanged()
+          }}
+          onClose={() => setMuting(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// MuteDurationPicker is the small dialog WhatsApp pops when you choose Mute:
+// the same three buckets — 8 hours, 1 week, Always. Backend's chatAction
+// already accepts duration in hours (0 = forever), so this is purely a UI
+// affordance over the existing endpoint.
+function MuteDurationPicker({
+  jid,
+  chatTitle,
+  onDone,
+  onClose,
+}: {
+  jid: string
+  chatTitle: string
+  onDone: () => void
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState<number | null>(null)
+
+  // Esc closes — same dismissal contract as the other modals.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && busy === null) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, busy])
+
+  // duration is hours; 0 is the bridge's "forever" sentinel.
+  async function pick(duration: number) {
+    if (busy !== null) return
+    setBusy(duration)
+    try {
+      await api.chatAction(jid, 'mute', duration)
+      onDone()
+    } catch {
+      // Surface failure by just releasing the spinner — the row stays
+      // unchanged, the user can retry.
+      setBusy(null)
+    }
+  }
+
+  const options: { label: string; hours: number }[] = [
+    { label: '8 hours', hours: 8 },
+    { label: '1 week', hours: 168 },
+    { label: 'Always', hours: 0 },
+  ]
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm overflow-hidden rounded-2xl bg-neutral-900 shadow-xl ring-1 ring-neutral-800"
+      >
+        <div className="border-b border-neutral-800 px-4 py-3">
+          <div className="text-sm font-semibold text-neutral-100">Mute notifications</div>
+          <div dir="auto" className="mt-0.5 truncate text-xs text-neutral-500">
+            {chatTitle}
+          </div>
+        </div>
+        <div className="flex flex-col py-1">
+          {options.map((opt) => (
+            <button
+              key={opt.hours}
+              onClick={() => pick(opt.hours)}
+              disabled={busy !== null}
+              className={
+                'flex items-center justify-between px-4 py-2.5 text-left text-sm text-neutral-200 transition ' +
+                (busy === opt.hours
+                  ? 'bg-emerald-500/10'
+                  : 'hover:bg-neutral-800 disabled:opacity-50')
+              }
+            >
+              <span>{opt.label}</span>
+              {busy === opt.hours && (
+                <span className="text-xs text-emerald-300">…</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-neutral-800 px-3 py-2">
+          <button
+            onClick={onClose}
+            disabled={busy !== null}
+            className="rounded-lg px-3 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -438,6 +550,7 @@ function buildChatMenu(
     onRequestHide: (jid: string, title: string) => void
     onChanged: () => void
     onRequestAddToCircle: (jid: string, title: string) => void
+    onRequestMute: (jid: string, title: string) => void
   },
 ): MenuItem[] {
   if (!chat) return []
@@ -463,9 +576,13 @@ function buildChatMenu(
       onClick: () => act(chat.is_pinned ? 'unpin' : 'pin'),
     },
     {
-      label: chat.is_muted ? 'Unmute' : 'Mute',
+      label: chat.is_muted ? 'Unmute' : 'Mute…',
       icon: '🔇',
-      onClick: () => act(chat.is_muted ? 'unmute' : 'mute'),
+      // Mute opens the duration picker (8h / 1 week / Always — WA's
+      // exact choices). Unmute is a single-step toggle so it stays
+      // direct, no picker.
+      onClick: () =>
+        chat.is_muted ? act('unmute') : cb.onRequestMute(jid, title),
     },
     {
       label: chat.is_archived ? 'Unarchive' : 'Archive',
