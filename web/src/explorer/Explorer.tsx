@@ -9,6 +9,7 @@ import {
   type Group,
   type Message,
   type Tag,
+  type Task,
 } from '../api'
 import { buildNameMap } from './format'
 import { ChatList } from './ChatList'
@@ -16,7 +17,8 @@ import { ContactsPanel } from './ContactsPanel'
 import { CirclesPanel } from './CirclesPanel'
 import { CircleView } from './CircleView'
 import { RecommendationsView } from './RecommendationsView'
-import { TasksPanel } from './TasksPanel'
+import { TasksSidebar, type TasksSelection } from './TasksSidebar'
+import { TasksView } from './TasksView'
 import { TaskView } from './TaskView'
 import { MessageThread } from './MessageThread'
 import { MediaSettings } from '../Settings'
@@ -45,9 +47,12 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [selectedCircle, setSelectedCircle] = useState<number | null>(null)
   const [recoOpen, setRecoOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<number | null>(null)
-  const [taskChatFilter, setTaskChatFilter] = useState<string | null>(null)
-  const [taskCircleFilter, setTaskCircleFilter] = useState<number | null>(null)
   const [taskVersion, setTaskVersion] = useState(0)
+  // Sidebar selection for the new Tasks tab. Defaults to "all open".
+  const [taskSelection, setTaskSelection] = useState<TasksSelection>({ kind: 'view', view: 'open' })
+  // Flat list of every task, used by both the sidebar (for counts) and the
+  // main view (so we group/filter client-side). Reloaded when taskVersion bumps.
+  const [allTasks, setAllTasks] = useState<Task[]>([])
   const [liveMsg, setLiveMsg] = useState<Message | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
@@ -92,6 +97,16 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const reloadCircles = useCallback(() => {
     api.circles().then((c) => setCircles(c || [])).catch(() => {})
   }, [])
+
+  // Keep allTasks fresh whenever the Tasks tab is visible or tasks change.
+  // Used by the new TasksSidebar (for counts) + TasksView (for the list).
+  useEffect(() => {
+    if (tab !== 'tasks') return
+    api
+      .tasks({})
+      .then((t) => setAllTasks(t || []))
+      .catch(() => setAllTasks([]))
+  }, [tab, taskVersion])
 
   const reloadTags = useCallback(() => {
     api.tags().then((t) => setTags(t || [])).catch(() => {})
@@ -158,13 +173,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     setTab('tasks')
   }, [])
 
-  const openChatTasks = useCallback((jid: string) => {
+  const openChatTasks = useCallback((_jid: string) => {
+    // From a chat header's "✓ Tasks" — no chat scope in the new layout, so we
+    // just open the tasks tab on the default "all open" view.
     setRecoOpen(false)
     setSelected(null)
     setSelectedCircle(null)
     setSelectedTask(null)
-    setTaskCircleFilter(null)
-    setTaskChatFilter(jid)
+    setTaskSelection({ kind: 'view', view: 'open' })
     setTab('tasks')
   }, [])
 
@@ -173,16 +189,10 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     setSelected(null)
     setSelectedCircle(null)
     setSelectedTask(null)
-    setTaskChatFilter(null)
-    setTaskCircleFilter(id)
+    setTaskSelection({ kind: 'circle', id })
     setTab('tasks')
   }, [])
 
-  const clearTaskFilter = useCallback(() => {
-    setTaskChatFilter(null)
-    setTaskCircleFilter(null)
-    setSelectedTask(null)
-  }, [])
 
   const openContactDM = useCallback(
     (c: Contact) => {
@@ -340,17 +350,15 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           />
         )}
         {tab === 'tasks' && (
-          <TasksPanel
-            chats={chats}
-            nameMap={nameMap}
-            chatFilter={taskChatFilter}
-            circleFilter={taskCircleFilter}
-            circleName={circles.find((c) => c.id === taskCircleFilter)?.name || ''}
-            selected={selectedTask}
-            version={taskVersion}
-            onOpen={openTask}
-            onCreated={bumpTasks}
-            onClearFilter={clearTaskFilter}
+          <TasksSidebar
+            tasks={allTasks}
+            circles={circles}
+            ownJID={device?.jid || ''}
+            selected={taskSelection}
+            onSelect={(s) => {
+              setTaskSelection(s)
+              setSelectedTask(null) // back to the list when changing scope
+            }}
           />
         )}
       </aside>
@@ -378,15 +386,37 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
           />
         ) : selectedTask != null ? (
-          <TaskView
-            taskId={selectedTask}
-            contacts={contacts}
+          <div className="flex h-full flex-col">
+            <button
+              onClick={() => setSelectedTask(null)}
+              className="self-start px-5 py-2 text-xs text-neutral-400 hover:text-neutral-200"
+            >
+              ← Back to tasks
+            </button>
+            <div className="min-h-0 flex-1">
+              <TaskView
+                taskId={selectedTask}
+                contacts={contacts}
+                circles={circles}
+                nameMap={nameMap}
+                version={taskVersion}
+                onOpenChat={openChat}
+                onChanged={bumpTasks}
+                onDeleted={() => setSelectedTask(null)}
+              />
+            </div>
+          </div>
+        ) : tab === 'tasks' ? (
+          <TasksView
+            tasks={allTasks}
             circles={circles}
+            chats={chats}
             nameMap={nameMap}
-            version={taskVersion}
-            onOpenChat={openChat}
+            ownJID={device?.jid || ''}
+            selection={taskSelection}
+            onOpenTask={openTask}
+            onCreated={bumpTasks}
             onChanged={bumpTasks}
-            onDeleted={() => setSelectedTask(null)}
           />
         ) : selectedCircle != null ? (
           <CircleView
