@@ -199,45 +199,84 @@ func detectWhisperBinary() string {
 	return ""
 }
 
-// transcribeAudio runs whisper-cli on a file. Whisper requires a model file
-// via -m; without one it exits with code 3. We look in standard places (env
-// var WHISPER_MODEL, then a handful of brew/conventional locations) and emit
-// a clear error if nothing is found.
+// transcribeAudio handles a WhatsApp voice note end-to-end:
+//   1. ffmpeg-convert the source (typically 48kHz Opus .ogg) to 16kHz mono wav
+//      in a temp file — whisper.cpp expects 16kHz mono.
+//   2. Run whisper-cli on the wav with the user's preferred language (default
+//      Arabic, matching the meeting-scribe convention: -l ar handles mixed
+//      AR/EN best for this user's content).
+//
+// Model + language are overridable via .env:
+//   WHISPER_MODEL — full path to a ggml-*.bin file
+//   WHISPER_LANG  — language code ("ar", "en", "auto", …). Default: "ar".
 func (m *MediaUnderstandingManager) transcribeAudio(path string) (string, error) {
 	if m.audioBin == "" {
 		return "", fmt.Errorf("no whisper binary detected; install whisper.cpp (brew install whisper-cpp)")
 	}
 	model := findWhisperModel()
 	if model == "" {
-		return "", fmt.Errorf("no whisper model found. Set WHISPER_MODEL=<path-to-ggml-*.bin> in .env, " +
-			"or place a model at ./models/ggml-base.en.bin. Download a small one: " +
-			"curl -L -o ./models/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin")
+		return "", fmt.Errorf("no whisper model found. Set WHISPER_MODEL=<path-to-ggml-*.bin> in .env. " +
+			"Recommended: $HOME/whisper-models/ggml-large-v3-turbo.bin (~1.6 GB)")
 	}
-	// whisper-cli flags: -m <model> -f <audio> -otxt (write <path>.txt) -np
-	// (no progress) -nt (no timestamps). Stay quiet on stdout.
-	args := []string{"-m", model, "-f", path, "-otxt", "-np", "-nt"}
+	lang := envOr("WHISPER_LANG", "ar")
+
+	// 1) ffmpeg -> 16kHz mono wav in a temp file (matches meeting-scribe).
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return "", fmt.Errorf("ffmpeg not found; install with: brew install ffmpeg")
+	}
+	tmp, err := os.CreateTemp("", "wa-voice-*.wav")
+	if err != nil {
+		return "", fmt.Errorf("temp file: %w", err)
+	}
+	tmp.Close()
+	wavPath := tmp.Name()
+	defer os.Remove(wavPath)
+
 	ctx, cancel := newTimeoutCtx(5 * time.Minute)
 	defer cancel()
+
+	conv := exec.CommandContext(ctx, ffmpeg,
+		"-hide_banner", "-loglevel", "error", "-y",
+		"-i", path,
+		"-ar", "16000", "-ac", "1",
+		wavPath)
+	if out, err := conv.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("ffmpeg convert failed: %v: %s", err, snippet(string(out), 240))
+	}
+
+	// 2) whisper-cli on the 16kHz mono wav.
+	// Flags mirror meeting-scribe: -m model -f wav -otxt -nt --no-prints -l <lang>.
+	// -otxt makes whisper-cli write <wavPath>.txt with the transcript.
+	args := []string{
+		"-m", model,
+		"-f", wavPath,
+		"-otxt", "-nt", "--no-prints",
+	}
+	if lang != "" && lang != "auto" {
+		args = append(args, "-l", lang)
+	}
 	cmd := exec.CommandContext(ctx, m.audioBin, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("whisper failed: %v: %s", err, snippet(string(out), 240))
 	}
 	// Prefer the .txt sidecar whisper-cli writes; fall back to stdout.
-	txt := path + ".txt"
+	txt := wavPath + ".txt"
 	if b, e := readFileBytes(txt); e == nil {
-		os.Remove(txt) // we have the text; don't pollute the media dir
+		os.Remove(txt)
 		return strings.TrimSpace(string(b)), nil
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
 // findWhisperModel returns the path to a usable whisper.cpp model, or "".
-// Checked in priority order:
+// Priority order:
 //   1. $WHISPER_MODEL
-//   2. ./models/ggml-*.bin under the bridge cwd
-//   3. /opt/homebrew/share/whisper-cpp/models/ggml-*.bin (brew default)
-//   4. ~/.cache/whisper/ggml-*.bin
+//   2. ~/whisper-models/ggml-large-v3{-turbo,}.bin (the meeting-scribe path)
+//   3. ./models/ggml-*.bin under the bridge cwd
+//   4. /opt/homebrew/share/whisper-cpp/models/ggml-*.bin (brew default)
+//   5. ~/.cache/whisper/ggml-*.bin
 func findWhisperModel() string {
 	if v := envOr("WHISPER_MODEL", ""); v != "" {
 		if _, err := os.Stat(v); err == nil {
@@ -246,22 +285,32 @@ func findWhisperModel() string {
 	}
 	home, _ := os.UserHomeDir()
 	candidates := []string{
+		// Existing models from the meeting-scribe setup — preferred.
+		filepath.Join(home, "whisper-models/ggml-large-v3-turbo.bin"),
+		filepath.Join(home, "whisper-models/ggml-large-v3.bin"),
+		filepath.Join(home, "whisper-models/ggml-medium.bin"),
+		// Project-local
+		"./models/ggml-large-v3-turbo.bin",
+		"./models/ggml-large-v3.bin",
+		"./models/ggml-medium.bin",
 		"./models/ggml-base.en.bin",
-		"./models/ggml-small.en.bin",
-		"./models/ggml-medium.en.bin",
+		// Homebrew + whisper.cpp conventions
 		"/opt/homebrew/share/whisper-cpp/models/ggml-base.en.bin",
-		"/opt/homebrew/share/whisper-cpp/models/ggml-small.en.bin",
 		filepath.Join(home, ".cache/whisper/ggml-base.en.bin"),
-		filepath.Join(home, ".cache/whisper/ggml-small.en.bin"),
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
 	}
-	// Last resort: glob ./models for any ggml-*.bin
-	if matches, err := filepath.Glob("./models/ggml-*.bin"); err == nil && len(matches) > 0 {
-		return matches[0]
+	// Last resort: glob whisper-models and ./models for any ggml-*.bin
+	for _, pattern := range []string{
+		filepath.Join(home, "whisper-models/ggml-*.bin"),
+		"./models/ggml-*.bin",
+	} {
+		if matches, err := filepath.Glob(pattern); err == nil && len(matches) > 0 {
+			return matches[0]
+		}
 	}
 	return ""
 }
