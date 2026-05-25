@@ -37,6 +37,9 @@ func (s *Server) handleTTSSend(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "text is required")
 		return
 	}
+	if !s.guardChatAccess(w, r, req.JID) {
+		return
+	}
 
 	apiKey := s.cfg.ElevenLabsAPIKey
 	if apiKey == "" {

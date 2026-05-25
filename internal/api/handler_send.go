@@ -181,6 +181,9 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "message or media_path required")
 		return
 	}
+	if !s.guardChatAccess(w, r, req.JID) {
+		return
+	}
 
 	recipientJID, err := parseJID(req.JID)
 	if err != nil {
@@ -341,6 +344,9 @@ func (s *Server) handleReact(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")
+		return
+	}
+	if !s.guardChatAccess(w, r, req.ChatJID) {
 		return
 	}
 

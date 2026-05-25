@@ -25,6 +25,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "chat_jid required")
 		return
 	}
+	if !s.guardChatAccess(w, r, chatJID) {
+		return
+	}
 
 	since := int64(0)
 	if v := r.URL.Query().Get("since"); v != "" {
@@ -108,6 +111,9 @@ func (s *Server) handleMessageByID(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, 400, "chat_jid required")
 			return
 		}
+		if !s.guardChatAccess(w, r, chatJID) {
+			return
+		}
 		msg, err := s.store.GetMessage(msgID, chatJID)
 		if err != nil {
 			jsonError(w, 500, err.Error())
@@ -133,6 +139,9 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request, msgID, cha
 	}
 	if chatJID == "" {
 		jsonError(w, 400, "chat_jid required")
+		return
+	}
+	if !s.guardChatAccess(w, r, chatJID) {
 		return
 	}
 
@@ -171,6 +180,9 @@ func (s *Server) handleEdit(w http.ResponseWriter, r *http.Request, msgID, chatJ
 		jsonError(w, 400, "chat_jid and new_text required")
 		return
 	}
+	if !s.guardChatAccess(w, r, chatJID) {
+		return
+	}
 
 	jid, err := parseJID(chatJID)
 	if err != nil {
@@ -204,6 +216,9 @@ func (s *Server) handleMessageReceipts(w http.ResponseWriter, r *http.Request, m
 		jsonError(w, 400, "chat_jid required")
 		return
 	}
+	if !s.guardChatAccess(w, r, chatJID) {
+		return
+	}
 	receipts, err := s.store.GetReceipts(msgID, chatJID)
 	if err != nil {
 		jsonError(w, 500, err.Error())
@@ -229,6 +244,9 @@ func (s *Server) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.guardChatAccess(w, r, req.ChatJID) {
+		return
+	}
 	wa := s.client.GetWhatsmeowClient()
 	chatJID, err := parseJID(req.ChatJID)
 	if err != nil {

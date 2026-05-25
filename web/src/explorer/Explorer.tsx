@@ -67,6 +67,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
   const selectedRef = useRef<string | null>(null)
   selectedRef.current = selected
+  // Snapshot of the currently-visible chats — read inside openChat to refuse
+  // navigation to JIDs that aren't in the list (e.g. a hidden contact's DM
+  // when locked). Mirror via ref so the callback stays stable.
+  const chatsRef = useRef<Chat[]>([])
+  chatsRef.current = chats
 
   const nameMap = useMemo(() => buildNameMap(contacts, groups), [contacts, groups])
   const mentionIndex = useMemo(() => buildMentionIndex(contacts), [contacts])
@@ -147,6 +152,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const bumpTasks = useCallback(() => setTaskVersion((v) => v + 1), [])
 
   const openChat = useCallback((jid: string, draft?: string) => {
+    // Refuse to open a JID that isn't in the visible chats list. In locked
+    // private mode, hidden chats are filtered out by the API, so a mention
+    // chip pointing at a hidden contact would otherwise route to an empty
+    // thread and the messages endpoint would 403. Tell the user instead.
+    if (!chatsRef.current.some((c) => c.jid === jid)) {
+      alert('This chat is locked.\nUnlock private mode to open it.')
+      return
+    }
     setRecoOpen(false)
     setSelectedTask(null)
     setTab('chats')

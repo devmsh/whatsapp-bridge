@@ -42,6 +42,16 @@ func (s *Store) HiddenChatJIDs() map[string]bool {
 	return out
 }
 
+// ChatJIDForMediaPath returns the chat JID that owns a stored media file, or
+// "" if no message references that path. The media handler uses this to gate
+// downloads through the hidden-chats guard — without it, anyone with the URL
+// could fetch a file from a locked DM.
+func (s *Store) ChatJIDForMediaPath(mediaPath string) string {
+	var jid string
+	s.DB.QueryRow(`SELECT chat_jid FROM messages WHERE media_path = ? LIMIT 1`, mediaPath).Scan(&jid)
+	return jid
+}
+
 // HiddenChatJIDsList returns the same as a slice (handy for SQL IN clauses or
 // for passing to the MCP layer).
 func (s *Store) HiddenChatJIDsList() []string {

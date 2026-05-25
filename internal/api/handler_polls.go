@@ -32,6 +32,9 @@ func (s *Server) handlePollCreate(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "chat_jid, question, and at least 2 options required")
 		return
 	}
+	if !s.guardChatAccess(w, r, req.ChatJID) {
+		return
+	}
 
 	chatJID, err := parseJID(req.ChatJID)
 	if err != nil {
@@ -96,6 +99,9 @@ func (s *Server) handlePollByID(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, 400, "chat_jid required")
 			return
 		}
+		if !s.guardChatAccess(w, r, chatJID) {
+			return
+		}
 		poll, err := s.store.GetPoll(pollID, chatJID)
 		if err != nil {
 			jsonError(w, 404, "poll not found")
@@ -125,6 +131,9 @@ func (s *Server) handlePollVote(w http.ResponseWriter, r *http.Request, pollID s
 
 	if req.ChatJID == "" || len(req.Options) == 0 {
 		jsonError(w, 400, "chat_jid and options required")
+		return
+	}
+	if !s.guardChatAccess(w, r, req.ChatJID) {
 		return
 	}
 

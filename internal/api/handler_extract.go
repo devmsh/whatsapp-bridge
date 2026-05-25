@@ -201,6 +201,9 @@ func (s *Server) handleExtractions(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case q.Get("chat") != "":
 		match = q.Get("chat")
+		if !s.guardChatAccess(w, r, match) {
+			return
+		}
 		tag = "wa-extract:" + match
 	case q.Get("circle") != "":
 		id := q.Get("circle")
