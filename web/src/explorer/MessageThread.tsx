@@ -125,6 +125,15 @@ export function MessageThread({
   }
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+  // Mirror of stickToBottom as React state, so the floating scroll-to-bottom
+  // FAB can render conditionally. We keep the ref alongside because the
+  // useLayoutEffect that pins the view runs synchronously and would race a
+  // setState.
+  const [atBottom, setAtBottom] = useState(true)
+  // Number of incoming messages that arrived while the user was scrolled up
+  // — drives the small badge on the FAB, exactly like WhatsApp's "↓ 3" pill.
+  // Own messages don't count; sending one already snaps the view to bottom.
+  const [unreadBelow, setUnreadBelow] = useState(0)
 
   const chat = chats.find((c) => c.jid === jid)
   const title = chat ? chatTitle(chat, nameMap) : '+' + jidUser(jid)
@@ -162,19 +171,27 @@ export function MessageThread({
   useEffect(() => {
     setLimit(PAGE)
     stickToBottom.current = true
+    setAtBottom(true)
+    setUnreadBelow(0)
     setReplyTo(null)
     setEditingMsg(null)
     setLightboxIdx(null)
     setForwardMsg(null)
   }, [jid])
 
-  // Append a live message that belongs to this chat.
+  // Append a live message that belongs to this chat. If the user is scrolled
+  // up reading older history, bump the unread-below counter so the FAB's
+  // badge climbs (WA's "↓ 3" pill). Own messages never count toward it —
+  // sending one snaps the view to bottom in handleSent.
   useEffect(() => {
     if (!liveMsg || liveMsg.chat_jid !== jid) return
     setMessages((prev) => {
       if (prev.some((m) => m.id === liveMsg.id)) return prev
       return [...prev, liveMsg]
     })
+    if (!stickToBottom.current && !liveMsg.is_from_me) {
+      setUnreadBelow((n) => n + 1)
+    }
   }, [liveMsg, jid])
 
   // Keep the view pinned to the newest message after loads/appends.
@@ -186,11 +203,31 @@ export function MessageThread({
   function onScroll() {
     const el = scrollRef.current
     if (!el) return
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const nowAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    stickToBottom.current = nowAtBottom
+    // Only re-render when the boundary flips, not on every scroll tick.
+    setAtBottom((prev) => {
+      if (prev === nowAtBottom) return prev
+      // Bottom reached → clear the unread counter; the user has caught up.
+      if (nowAtBottom) setUnreadBelow(0)
+      return nowAtBottom
+    })
+  }
+
+  // Smooth scroll to the newest message + reset the unread-below counter.
+  // Called from the floating ↓ FAB.
+  function scrollToBottom() {
+    const el = scrollRef.current
+    if (!el) return
+    stickToBottom.current = true
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    setAtBottom(true)
+    setUnreadBelow(0)
   }
 
   function loadEarlier() {
     stickToBottom.current = false
+    setAtBottom(false)
     setLimit((l) => l + PAGE)
   }
 
@@ -270,8 +307,12 @@ export function MessageThread({
 
   // Append a just-sent message locally. Sent messages go straight through the
   // send API and are not echoed over the SSE stream, so we add them here.
+  // Sending always snaps to bottom — matches WA: hitting Enter scrolls you
+  // back to the newest message even if you were reading history.
   function handleSent(m: Message) {
     stickToBottom.current = true
+    setAtBottom(true)
+    setUnreadBelow(0)
     setMessages((prev) => (prev.some((p) => p.id === m.id) ? prev : [...prev, m]))
     onSent?.(m)
   }
@@ -392,9 +433,11 @@ export function MessageThread({
 
       {(group || isContact) && <ProfileCard type={group ? 'group' : 'contact'} ref_={jid} />}
 
+      {/* Scroll wrapper: stays `relative` so the floating ↓ FAB + the drop
+          overlay anchor to it (and don't scroll out of view) while the inner
+          div handles all the actual scrolling. */}
       <div
-        ref={scrollRef}
-        onScroll={onScroll}
+        className="relative min-h-0 flex-1"
         // Drag-and-drop: any file dropped onto the thread becomes the
         // composer's next attachment (same staging path as paperclip /
         // paste from loop #7). We count enter/leave depth so dragging
@@ -425,41 +468,49 @@ export function MessageThread({
           e.preventDefault()
           composerSetAttachment.current?.(file)
         }}
-        className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4"
       >
-        {loading && messages.length === 0 ? (
-          <div className="py-10 text-center text-sm text-neutral-600">Loading…</div>
-        ) : messages.length === 0 ? (
-          <div className="py-10 text-center text-sm text-neutral-600">No messages</div>
-        ) : (
-          <>
-            {hasMore && (
-              <div className="mb-4 text-center">
-                <button
-                  onClick={loadEarlier}
-                  className="rounded-full border border-neutral-700 px-4 py-1 text-xs text-neutral-400 transition hover:bg-neutral-800"
-                >
-                  Load earlier messages
-                </button>
-              </div>
-            )}
-            <Timeline
-              messages={messages}
-              group={group}
-              nameMap={nameMap}
-              mentionIndex={mentionIndex}
-              onOpenTask={onOpenTask}
-              onTasksChanged={onTasksChanged}
-              onOpenChat={onOpenChat}
-              onReply={canSend ? (m) => { setEditingMsg(null); setReplyTo(m) } : undefined}
-              onReact={canSend ? handleReact : undefined}
-              onForward={setForwardMsg}
-              onStar={handleStar}
-              onEdit={canSend ? startEdit : undefined}
-              onOpenImage={openLightboxFor}
-              selfDigits={selfDigits}
-            />
-          </>
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="h-full overflow-y-auto px-4 py-4"
+        >
+          {loading && messages.length === 0 ? (
+            <div className="py-10 text-center text-sm text-neutral-600">Loading…</div>
+          ) : messages.length === 0 ? (
+            <div className="py-10 text-center text-sm text-neutral-600">No messages</div>
+          ) : (
+            <>
+              {hasMore && (
+                <div className="mb-4 text-center">
+                  <button
+                    onClick={loadEarlier}
+                    className="rounded-full border border-neutral-700 px-4 py-1 text-xs text-neutral-400 transition hover:bg-neutral-800"
+                  >
+                    Load earlier messages
+                  </button>
+                </div>
+              )}
+              <Timeline
+                messages={messages}
+                group={group}
+                nameMap={nameMap}
+                mentionIndex={mentionIndex}
+                onOpenTask={onOpenTask}
+                onTasksChanged={onTasksChanged}
+                onOpenChat={onOpenChat}
+                onReply={canSend ? (m) => { setEditingMsg(null); setReplyTo(m) } : undefined}
+                onReact={canSend ? handleReact : undefined}
+                onForward={setForwardMsg}
+                onStar={handleStar}
+                onEdit={canSend ? startEdit : undefined}
+                onOpenImage={openLightboxFor}
+                selfDigits={selfDigits}
+              />
+            </>
+          )}
+        </div>
+        {!atBottom && (
+          <ScrollToBottomFab unread={unreadBelow} onClick={scrollToBottom} />
         )}
         {dragging && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-emerald-500/10 backdrop-blur-sm">
@@ -1348,6 +1399,48 @@ function MentionPicker({
         )
       })}
     </div>
+  )
+}
+
+// ScrollToBottomFab is the small floating ↓ button WhatsApp pops at the
+// bottom-right of a chat thread once you scroll up out of the live view.
+// Tap it to smooth-scroll back to the newest message. When new incoming
+// messages have arrived while you were reading history we stack a small
+// emerald badge on top with the count — same shorthand as official WA's
+// "↓ 3" pill. 99+ caps the badge so it never breaks the circle.
+function ScrollToBottomFab({
+  unread,
+  onClick,
+}: {
+  unread: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title="Scroll to bottom"
+      aria-label="Scroll to bottom"
+      className="absolute bottom-4 right-4 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-neutral-200 shadow-lg ring-1 ring-neutral-700 transition hover:bg-neutral-700"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="18"
+        height="18"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
+      {unread > 0 && (
+        <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-emerald-500 px-1 text-[10px] font-semibold tabular-nums text-neutral-950">
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
+    </button>
   )
 }
 
