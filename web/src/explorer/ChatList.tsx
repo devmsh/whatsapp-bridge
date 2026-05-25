@@ -62,19 +62,56 @@ export function ChatList({
                   {chatListTime(chat.last_message_at)}
                 </span>
               </div>
-              <div dir="auto" className="truncate text-xs text-neutral-500">
-                {chat.last_message
-                  ? previewText(chat.last_message, nameMap)
-                  : isGroup(chat.jid)
-                    ? 'Group'
-                    : chat.jid.replace('@s.whatsapp.net', '')}
+              <div dir="auto" className="flex items-center gap-1.5 truncate text-xs text-neutral-500">
+                <span className="truncate">
+                  {chat.last_message
+                    ? previewText(chat.last_message, nameMap)
+                    : isGroup(chat.jid)
+                      ? 'Group'
+                      : chat.jid.replace('@s.whatsapp.net', '')}
+                </span>
               </div>
             </div>
-            {chat.unread_count > 0 && (
-              <span className="ml-1 shrink-0 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[11px] font-semibold text-neutral-950">
-                {chat.unread_count}
-              </span>
-            )}
+            <div className="ml-1 flex shrink-0 flex-col items-end gap-0.5">
+              <div className="flex items-center gap-1 text-neutral-500">
+                {/* Muted indicator: bell-with-slash sized to the time row.
+                    Greys out the unread badge below so muted chats fade into
+                    the background even when they have new messages — exactly
+                    what official WA does. */}
+                {chat.is_muted && (
+                  <span title="Muted" aria-label="Muted">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                      <path d="M18.63 13A17.89 17.89 0 0 1 18 8" />
+                      <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
+                      <path d="M18 8a6 6 0 0 0-9.33-5" />
+                      <line x1="1" y1="1" x2="23" y2="23" />
+                    </svg>
+                  </span>
+                )}
+                {/* Pinned indicator: angled pushpin. Always visible (no
+                    hover), matching WA's persistent 📌 badge on pinned rows. */}
+                {chat.is_pinned && (
+                  <span title="Pinned" aria-label="Pinned" className="text-neutral-400">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
+                      <path d="M16 4l4 4-5.5 1.5L11 13l3 7-2 1-4-6-4 4-1-1 4-4-6-4 1-2 7 3 3.5-3.5L14.5 1 16 4z" />
+                    </svg>
+                  </span>
+                )}
+              </div>
+              {chat.unread_count > 0 && (
+                <span
+                  className={
+                    'shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-semibold ' +
+                    (chat.is_muted
+                      ? 'bg-neutral-700 text-neutral-300'
+                      : 'bg-emerald-500 text-neutral-950')
+                  }
+                >
+                  {chat.unread_count}
+                </span>
+              )}
+            </div>
           </button>
         ))}
       </div>

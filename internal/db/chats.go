@@ -26,11 +26,13 @@ func (s *Store) StoreChat(c *Chat) error {
 	return err
 }
 
-// GetChats returns all chats ordered by last message time.
+// GetChats returns all chats ordered with pinned chats first (matching
+// WhatsApp's chat-list rule), then by most-recent activity within each
+// group.
 func (s *Store) GetChats() ([]Chat, error) {
 	rows, err := s.DB.Query(`SELECT jid, name, chat_type, last_message_at, unread_count,
 		is_archived, is_pinned, is_muted, muted_until, disappearing_timer
-		FROM chats ORDER BY last_message_at DESC`)
+		FROM chats ORDER BY is_pinned DESC, last_message_at DESC`)
 	if err != nil {
 		return nil, err
 	}
