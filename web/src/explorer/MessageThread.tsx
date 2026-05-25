@@ -16,6 +16,7 @@ import { DashboardModal } from './Dashboard'
 import { HideChatDialog } from './HideChatDialog'
 import { setUnlockToken } from '../hidden'
 import { ImageLightbox, type LightboxImage } from './ImageLightbox'
+import { ForwardPicker } from './ForwardPicker'
 
 const PAGE = 100
 
@@ -74,6 +75,8 @@ export function MessageThread({
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   // null = closed. Index into lightboxImages when the user clicks an image.
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
+  // null = closed. The message staged for forwarding to N other chats.
+  const [forwardMsg, setForwardMsg] = useState<Message | null>(null)
 
   // Build the carousel from every downloaded image in the current message
   // window. Sender labels match the rest of the thread (per-sender color is
@@ -127,11 +130,13 @@ export function MessageThread({
     }
   }, [jid, limit])
 
-  // Reset page size + clear any reply context when switching chats.
+  // Reset page size + clear any per-message UI when switching chats.
   useEffect(() => {
     setLimit(PAGE)
     stickToBottom.current = true
     setReplyTo(null)
+    setLightboxIdx(null)
+    setForwardMsg(null)
   }, [jid])
 
   // Append a live message that belongs to this chat.
@@ -335,6 +340,7 @@ export function MessageThread({
               onOpenChat={onOpenChat}
               onReply={canSend ? setReplyTo : undefined}
               onReact={canSend ? handleReact : undefined}
+              onForward={setForwardMsg}
               onOpenImage={openLightboxFor}
             />
           </>
@@ -430,6 +436,15 @@ export function MessageThread({
           index={lightboxIdx}
           onIndex={setLightboxIdx}
           onClose={() => setLightboxIdx(null)}
+        />
+      )}
+
+      {forwardMsg && (
+        <ForwardPicker
+          msg={forwardMsg}
+          chats={chats}
+          nameMap={nameMap}
+          onClose={() => setForwardMsg(null)}
         />
       )}
     </div>
@@ -812,6 +827,7 @@ function Timeline({
   onOpenChat,
   onReply,
   onReact,
+  onForward,
   onOpenImage,
 }: {
   messages: Message[]
@@ -823,6 +839,7 @@ function Timeline({
   onOpenChat?: (jid: string) => void
   onReply?: (msg: Message) => void
   onReact?: (msg: Message, emoji: string) => void
+  onForward?: (msg: Message) => void
   onOpenImage?: (msg: Message) => void
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
@@ -864,6 +881,7 @@ function Timeline({
                 onOpenChat={onOpenChat}
                 onReply={onReply}
                 onReact={onReact}
+                onForward={onForward}
                 onOpenImage={onOpenImage}
                 firstInGroup={firstInGroup}
               />

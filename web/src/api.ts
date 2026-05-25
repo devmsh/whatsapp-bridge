@@ -642,6 +642,16 @@ export const api = {
       message,
       media_path: opts?.mediaPath,
     }),
+  // forward reposts the message at (fromChat, messageID) into a different
+  // chat. Backend currently re-sends the text body with the WA "Forwarded"
+  // badge (ContextInfo.IsForwarded=true). Call once per target chat for
+  // multi-forward — the UI's share-sheet does exactly that.
+  forward: (fromChat: string, messageID: string, toChat: string) =>
+    postBody<{ success: boolean; message_id: string }>('/api/v2/forward', {
+      from_chat: fromChat,
+      message_id: messageID,
+      to_chat: toChat,
+    }),
   // react adds (or removes, when emoji is "") a reaction to a message — the
   // same /react endpoint the agents already use. WhatsApp treats reactions as
   // self-replacing: posting any emoji clears your previous one on that

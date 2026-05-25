@@ -19,6 +19,7 @@ export function MessageBubble({
   onOpenChat,
   onReply,
   onReact,
+  onForward,
   onOpenImage,
   firstInGroup = true,
 }: {
@@ -33,6 +34,9 @@ export function MessageBubble({
   /** Called when the user picks an emoji from the quick-react popover.
    *  Empty string removes any existing reaction (WA's toggle semantics). */
   onReact?: (msg: Message, emoji: string) => void
+  /** Called when the user clicks the Forward action — lifts to the thread
+   *  which opens the multi-target share-sheet picker. */
+  onForward?: (msg: Message) => void
   /** Called when an image bubble is clicked — lifts to the thread which
    *  opens the in-app lightbox at this message's position. */
   onOpenImage?: (msg: Message) => void
@@ -53,10 +57,11 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {(onReply || onReact) && mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward) && mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
+          onForward={onForward ? () => onForward(msg) : undefined}
           side="left"
         />
       )}
@@ -128,10 +133,11 @@ export function MessageBubble({
           {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
-      {(onReply || onReact) && !mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward) && !mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
+          onForward={onForward ? () => onForward(msg) : undefined}
           side="right"
         />
       )}
@@ -147,10 +153,12 @@ export function MessageBubble({
 function BubbleActions({
   onReply,
   onReact,
+  onForward,
   side,
 }: {
   onReply?: () => void
   onReact?: (emoji: string) => void
+  onForward?: () => void
   side: 'left' | 'right'
 }) {
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -185,6 +193,19 @@ function BubbleActions({
             <path d="M8 14s1.5 2 4 2 4-2 4-2" />
             <circle cx="9" cy="10" r="0.6" fill="currentColor" />
             <circle cx="15" cy="10" r="0.6" fill="currentColor" />
+          </svg>
+        </button>
+      )}
+      {onForward && (
+        <button
+          onClick={onForward}
+          title="Forward"
+          aria-label="Forward"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-800/80 text-neutral-300 transition hover:bg-neutral-700 hover:text-neutral-100"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 17 20 12 15 7" />
+            <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
           </svg>
         </button>
       )}
