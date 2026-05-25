@@ -109,13 +109,7 @@ export function MessageBubble({
         )}
 
         {msg.reactions && msg.reactions.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {msg.reactions.map((r, i) => (
-              <span key={i} className="rounded-full bg-black/30 px-1.5 text-xs">
-                {r.emoji}
-              </span>
-            ))}
-          </div>
+          <ReactionChips reactions={msg.reactions} />
         )}
 
         <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-neutral-400">
@@ -218,6 +212,49 @@ function BubbleActions({
           }}
         />
       )}
+    </div>
+  )
+}
+
+// ReactionChips aggregates the per-reactor rows into one chip per emoji with
+// a count (when more than one person reacted with it) — matching official
+// WA's reaction display. The chip the current user added is tinted emerald
+// so they can spot their own reaction at a glance.
+function ReactionChips({ reactions }: { reactions: NonNullable<Message['reactions']> }) {
+  // Group by emoji, count, and remember whether the user themself reacted
+  // with that emoji. '__me__' is the sentinel handleReact assigns for the
+  // optimistic local update — server-pulled reactions don't carry it, so a
+  // page refresh currently loses the "mine" highlight (acceptable tradeoff
+  // until the bridge exposes self-JID).
+  type Agg = { emoji: string; count: number; mine: boolean }
+  const map = new Map<string, Agg>()
+  for (const r of reactions) {
+    if (!r.emoji) continue
+    const cur = map.get(r.emoji) || { emoji: r.emoji, count: 0, mine: false }
+    cur.count += 1
+    if (r.sender === '__me__') cur.mine = true
+    map.set(r.emoji, cur)
+  }
+  const aggregated = Array.from(map.values())
+  if (aggregated.length === 0) return null
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {aggregated.map(({ emoji, count, mine }) => (
+        <span
+          key={emoji}
+          className={
+            'flex items-center rounded-full px-1.5 py-0.5 text-xs ring-1 ' +
+            (mine
+              ? 'bg-emerald-500/20 text-emerald-100 ring-emerald-500/40'
+              : 'bg-black/30 text-neutral-100 ring-black/0')
+          }
+        >
+          <span className="leading-none">{emoji}</span>
+          {count > 1 && (
+            <span className="ml-1 text-[10px] tabular-nums opacity-80">{count}</span>
+          )}
+        </span>
+      ))}
     </div>
   )
 }

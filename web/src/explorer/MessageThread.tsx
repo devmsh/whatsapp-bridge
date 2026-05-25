@@ -77,6 +77,14 @@ export function MessageThread({
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null)
   // null = closed. The message staged for forwarding to N other chats.
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null)
+  // Whether a file is currently being dragged over the thread area — drives
+  // the "Drop to send" overlay. Drag enter/leave events fire on every child
+  // so we count them to avoid flicker.
+  const [dragging, setDragging] = useState(false)
+  const dragDepth = useRef(0)
+  // Callback ref the Composer hands us on mount so we can push a File into
+  // its attachment slot when the user drops one on the thread.
+  const composerSetAttachment = useRef<((f: File) => void) | null>(null)
 
   // Build the carousel from every downloaded image in the current message
   // window. Sender labels match the rest of the thread (per-sender color is
@@ -313,7 +321,41 @@ export function MessageThread({
 
       {(group || isContact) && <ProfileCard type={group ? 'group' : 'contact'} ref_={jid} />}
 
-      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        // Drag-and-drop: any file dropped onto the thread becomes the
+        // composer's next attachment (same staging path as paperclip /
+        // paste from loop #7). We count enter/leave depth so dragging
+        // over child elements doesn't flicker the overlay.
+        onDragEnter={(e) => {
+          if (!canSend) return
+          if (!Array.from(e.dataTransfer.types).includes('Files')) return
+          dragDepth.current += 1
+          setDragging(true)
+        }}
+        onDragOver={(e) => {
+          if (canSend && Array.from(e.dataTransfer.types).includes('Files')) {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'copy'
+          }
+        }}
+        onDragLeave={() => {
+          if (!canSend) return
+          dragDepth.current = Math.max(0, dragDepth.current - 1)
+          if (dragDepth.current === 0) setDragging(false)
+        }}
+        onDrop={(e) => {
+          if (!canSend) return
+          dragDepth.current = 0
+          setDragging(false)
+          const file = e.dataTransfer.files?.[0]
+          if (!file) return
+          e.preventDefault()
+          composerSetAttachment.current?.(file)
+        }}
+        className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4"
+      >
         {loading && messages.length === 0 ? (
           <div className="py-10 text-center text-sm text-neutral-600">Loading…</div>
         ) : messages.length === 0 ? (
@@ -345,6 +387,14 @@ export function MessageThread({
             />
           </>
         )}
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-emerald-500/10 backdrop-blur-sm">
+            <div className="rounded-2xl border-2 border-dashed border-emerald-400/70 bg-neutral-900/80 px-8 py-6 text-center text-sm text-emerald-100 shadow-lg">
+              <div className="mb-2 text-3xl">📎</div>
+              Drop to attach
+            </div>
+          </div>
+        )}
       </div>
 
       {canSend && (
@@ -360,6 +410,9 @@ export function MessageThread({
             else onDraftConsumed?.()
           }}
           onSent={handleSent}
+          setAttachmentRef={(setter) => {
+            composerSetAttachment.current = setter
+          }}
         />
       )}
 
@@ -465,6 +518,7 @@ function Composer({
   onClearReply,
   onDraftConsumed,
   onSent,
+  setAttachmentRef,
 }: {
   jid: string
   group: boolean
@@ -474,6 +528,9 @@ function Composer({
   onClearReply?: () => void
   onDraftConsumed?: () => void
   onSent: (m: Message) => void
+  /** Optional callback the parent uses to push a File into the attachment
+   *  slot from outside the composer — used by drag-and-drop on the thread. */
+  setAttachmentRef?: (setter: ((f: File) => void) | null) => void
 }) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
@@ -518,6 +575,13 @@ function Composer({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [replyTo?.id, onClearReply])
+
+  // Hand the parent a setter so drag-and-drop on the thread can stage an
+  // attachment without colocating composer state up there.
+  useEffect(() => {
+    setAttachmentRef?.(setAttachment)
+    return () => setAttachmentRef?.(null)
+  }, [setAttachmentRef])
 
   function resize() {
     const el = taRef.current
