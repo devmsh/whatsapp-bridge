@@ -459,14 +459,59 @@ func (s *Server) handleForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	wa := s.client.GetWhatsmeowClient()
-	msg := &waE2E.Message{
-		ExtendedTextMessage: &waE2E.ExtendedTextMessage{
-			Text: proto.String(original.Content),
-			ContextInfo: &waE2E.ContextInfo{
-				IsForwarded:     proto.Bool(true),
-				ForwardingScore: proto.Uint32(1),
-			},
-		},
+
+	// Every forwarded message carries this on its ContextInfo. Set it on
+	// whichever payload type buildMediaMessageEx produces (or on the
+	// text payload below).
+	fwdCtx := &waE2E.ContextInfo{
+		IsForwarded:     proto.Bool(true),
+		ForwardingScore: proto.Uint32(1),
+	}
+
+	msg := &waE2E.Message{}
+	msgType := "text"
+	echoContent := original.Content
+	hasMedia := original.MediaPath != ""
+
+	if hasMedia {
+		// Re-upload the on-disk file the bridge already has from when it
+		// originally received the message. Voice notes keep their PTT flag
+		// so they arrive as voice messages, not plain audio attachments.
+		// forceImage=false preserves stickers (.webp → StickerMessage)
+		// instead of demoting them to plain images, the way WA itself does
+		// when you forward a sticker.
+		ptt := original.MediaType == "voice_note"
+		if err := buildMediaMessageEx(wa, msg, original.MediaPath, original.MediaCaption, false, ptt); err != nil {
+			jsonError(w, 500, fmt.Sprintf("forward media build failed: %v", err))
+			return
+		}
+		// Attach the Forwarded ContextInfo to whichever message type
+		// buildMediaMessageEx populated — same branch table handleReply uses.
+		switch {
+		case msg.ImageMessage != nil:
+			msg.ImageMessage.ContextInfo = fwdCtx
+		case msg.VideoMessage != nil:
+			msg.VideoMessage.ContextInfo = fwdCtx
+		case msg.AudioMessage != nil:
+			msg.AudioMessage.ContextInfo = fwdCtx
+		case msg.DocumentMessage != nil:
+			msg.DocumentMessage.ContextInfo = fwdCtx
+		case msg.StickerMessage != nil:
+			msg.StickerMessage.ContextInfo = fwdCtx
+		}
+		msgType = "media"
+		// echoContent is what shows up in the local outgoing-message record;
+		// for media we record the caption (or the original placeholder if
+		// there's no caption) so chat-list previews stay meaningful.
+		if original.MediaCaption != "" {
+			echoContent = original.MediaCaption
+		}
+	} else {
+		// Text-only forward (or media we never downloaded — best-effort).
+		msg.ExtendedTextMessage = &waE2E.ExtendedTextMessage{
+			Text:        proto.String(original.Content),
+			ContextInfo: fwdCtx,
+		}
 	}
 
 	resp, err := wa.SendMessage(context.Background(), toJID, msg)
@@ -475,7 +520,7 @@ func (s *Server) handleForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.storeOutgoingMessage(resp.ID, req.ToChat, original.Content, "text")
+	s.storeOutgoingMessage(resp.ID, req.ToChat, echoContent, msgType)
 
 	jsonOK(w, map[string]interface{}{"success": true, "message_id": resp.ID})
 }
