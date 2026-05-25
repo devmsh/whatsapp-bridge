@@ -28,6 +28,7 @@ export function MessageBubble({
   selfDigits,
   firstInGroup = true,
   highlighted = false,
+  highlightQuery,
 }: {
   msg: Message
   group: boolean
@@ -69,6 +70,10 @@ export function MessageBubble({
    *  Adds a strong amber ring around the bubble; MessageThread scrolls it
    *  into view as the user steps ↑/↓ through matches. */
   highlighted?: boolean
+  /** When set, body text + caption + AI transcripts wrap matches of this
+   *  string in an amber <mark> so the user sees exactly where the search
+   *  hit lives inside the bubble. */
+  highlightQuery?: string
 }) {
   const mine = msg.is_from_me
   const sender =
@@ -216,6 +221,7 @@ export function MessageBubble({
               mentionIndex={mentionIndex}
               onOpenChat={onOpenChat}
               selfDigits={selfDigits}
+              highlightQuery={highlightQuery}
             />
             <MediaUnderstanding
               msg={msg}
@@ -223,6 +229,7 @@ export function MessageBubble({
               mentionIndex={mentionIndex}
               onOpenChat={onOpenChat}
               selfDigits={selfDigits}
+              highlightQuery={highlightQuery}
             />
           </>
         )}
@@ -481,20 +488,22 @@ function TextContent({
   mentionIndex,
   onOpenChat,
   selfDigits,
+  highlightQuery,
 }: {
   msg: Message
   mentionIndex: Map<string, MentionEntry>
   onOpenChat?: (jid: string) => void
   selfDigits?: Set<string>
+  highlightQuery?: string
 }) {
   if (msg.media_type) {
     const caption = msg.media_caption
     return caption ? (
-      <RichText text={caption} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} />
+      <RichText text={caption} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} highlightQuery={highlightQuery} />
     ) : null
   }
   if (!msg.content) return null
-  return <RichText text={msg.content} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} />
+  return <RichText text={msg.content} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} highlightQuery={highlightQuery} />
 }
 
 function MediaContent({
@@ -708,12 +717,14 @@ function MediaUnderstanding({
   mentionIndex,
   onOpenChat,
   selfDigits,
+  highlightQuery,
 }: {
   msg: Message
   mine: boolean
   mentionIndex: Map<string, MentionEntry>
   onOpenChat?: (jid: string) => void
   selfDigits?: Set<string>
+  highlightQuery?: string
 }) {
   const isAudio = msg.media_type === 'voice_note' || msg.media_type === 'audio'
   const text = isAudio ? msg.transcript : msg.media_description
@@ -727,7 +738,7 @@ function MediaUnderstanding({
       }
     >
       <div className="mb-0.5 text-[10px] uppercase tracking-wider opacity-70">{label}</div>
-      <RichText text={text} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} />
+      <RichText text={text} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} highlightQuery={highlightQuery} />
     </div>
   )
 }

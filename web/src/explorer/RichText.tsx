@@ -13,13 +13,16 @@ const URL_TRAIL = /[.,;:!?)\]}>"']+$/
 // RichText renders a message body with:
 //   - clickable URLs (opens in new tab)
 //   - "@<digits>" mentions resolved to contact names; click → onOpenChat
-// Falls back to plain text when neither is needed. dir="auto" keeps mixed
+//   - WA-style inline markup (*bold*, _italic_, ~strike~, `code`)
+//   - optional substring highlight for in-chat search
+// Falls back to plain text when none of those apply. dir="auto" keeps mixed
 // AR/EN messages aligned correctly.
 export function RichText({
   text,
   mentions,
   onOpenChat,
   selfDigits,
+  highlightQuery,
   className = '',
 }: {
   text: string
@@ -29,6 +32,10 @@ export function RichText({
    *  digits). A mention whose digits match any of these is rendered in
    *  emerald so the user spots being pinged in a busy chat at a glance. */
   selfDigits?: Set<string>
+  /** When set, plain-text runs are split around case-insensitive matches
+   *  of this string and the matches get an amber `<mark>` background.
+   *  Drives the visible yellow highlight on in-chat search hits. */
+  highlightQuery?: string
   className?: string
 }) {
   if (!text) return null
@@ -36,7 +43,7 @@ export function RichText({
   return (
     <div dir="auto" className={'whitespace-pre-wrap break-words text-start ' + className}>
       {parts.map((p, i) => {
-        if (p.kind === 'text') return <Fragment key={i}>{formatMarkup(p.value)}</Fragment>
+        if (p.kind === 'text') return <Fragment key={i}>{formatMarkup(p.value, 0, highlightQuery)}</Fragment>
         if (p.kind === 'url') {
           return (
             <a
@@ -140,8 +147,14 @@ const MARKUP_PATTERNS: Array<{ tag: 'b' | 'i' | 's' | 'code'; re: RegExp }> = [
 // code applied per WA's rules. Depth-capped so a pathological input can't
 // stack thousands of frames; in practice we never see more than a couple
 // of nesting levels.
-function formatMarkup(text: string, depth = 0): ReactNode {
-  if (!text || depth > 8) return text
+//
+// When highlightQuery is set, leaf strings are further split around
+// case-insensitive matches and the matches get an amber <mark>. We only
+// highlight at the leaves so a query like "foo" still lights up inside
+// "*foo*" (the wrapMarkup recursion still threads the query down) but
+// never breaks up the markup parsing itself.
+function formatMarkup(text: string, depth = 0, highlightQuery?: string): ReactNode {
+  if (!text || depth > 8) return highlightString(text, highlightQuery)
   // Find the earliest marker in the string (across all four patterns) so we
   // don't pick a later italic when there's a bold sitting in front of it.
   let best: { tag: 'b' | 'i' | 's' | 'code'; match: RegExpExecArray } | null = null
@@ -152,19 +165,55 @@ function formatMarkup(text: string, depth = 0): ReactNode {
       best = { tag: p.tag, match: m }
     }
   }
-  if (!best) return text
+  if (!best) return highlightString(text, highlightQuery)
   const before = text.slice(0, best.match.index)
   const content = best.match[1]
   const after = text.slice(best.match.index + best.match[0].length)
-  // Code blocks don't recurse — their content is literal.
-  const inner = best.tag === 'code' ? content : formatMarkup(content, depth + 1)
+  // Code blocks don't recurse — their content is literal — but they still
+  // get highlight, so a code-fenced match still lights up.
+  const inner =
+    best.tag === 'code'
+      ? highlightString(content, highlightQuery)
+      : formatMarkup(content, depth + 1, highlightQuery)
   return (
     <>
-      {before}
+      {highlightString(before, highlightQuery)}
       {wrapMarkup(best.tag, inner)}
-      {formatMarkup(after, depth + 1)}
+      {formatMarkup(after, depth + 1, highlightQuery)}
     </>
   )
+}
+
+// highlightString splits `text` around case-insensitive occurrences of
+// `query` and wraps each match in an amber <mark>. Returns the input
+// untouched when no query is set or no match exists — keeps the common
+// path zero-overhead.
+function highlightString(text: string, query?: string): ReactNode {
+  if (!query) return text
+  const q = query.trim()
+  if (!q) return text
+  const lower = text.toLowerCase()
+  const needle = q.toLowerCase()
+  let i = 0
+  let idx = lower.indexOf(needle, i)
+  if (idx < 0) return text
+  const parts: ReactNode[] = []
+  let key = 0
+  while (idx >= 0) {
+    if (idx > i) parts.push(<Fragment key={key++}>{text.slice(i, idx)}</Fragment>)
+    parts.push(
+      <mark
+        key={key++}
+        className="rounded-sm bg-amber-300/40 px-0.5 text-amber-100"
+      >
+        {text.slice(idx, idx + q.length)}
+      </mark>,
+    )
+    i = idx + q.length
+    idx = lower.indexOf(needle, i)
+  }
+  if (i < text.length) parts.push(<Fragment key={key++}>{text.slice(i)}</Fragment>)
+  return <>{parts}</>
 }
 
 function wrapMarkup(tag: 'b' | 'i' | 's' | 'code', inner: ReactNode): ReactNode {

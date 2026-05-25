@@ -646,6 +646,7 @@ export function MessageThread({
                 selfDigits={selfDigits}
                 highlightId={flashId || activeMatchId}
                 unreadDivider={unreadDivider}
+                highlightQuery={searchOpen ? searchQuery : ''}
               />
             </>
           )}
@@ -2164,6 +2165,7 @@ function Timeline({
   selfDigits,
   highlightId,
   unreadDivider,
+  highlightQuery,
 }: {
   messages: Message[]
   group: boolean
@@ -2188,6 +2190,10 @@ function Timeline({
   /** When set, render a "N unread messages" divider just before the row
    *  with id = beforeId. Snapshotted at chat-open so the line stays put. */
   unreadDivider?: { beforeId: string; count: number } | null
+  /** Forwarded to each bubble's RichText: wraps in-bubble matches of this
+   *  string with an amber <mark> so search hits are visible inside the
+   *  bubble, not just by a ring around it. Empty / undefined = no-op. */
+  highlightQuery?: string
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -2248,6 +2254,7 @@ function Timeline({
                 selfDigits={selfDigits}
                 firstInGroup={firstInGroup}
                 highlighted={highlightId === m.id}
+                highlightQuery={highlightQuery}
               />
             </div>
           </div>
