@@ -17,6 +17,7 @@ export function MessageBubble({
   onTasksChanged,
   onOpenChat,
   onReply,
+  firstInGroup = true,
 }: {
   msg: Message
   group: boolean
@@ -26,9 +27,16 @@ export function MessageBubble({
   onTasksChanged?: () => void
   onOpenChat?: (jid: string) => void
   onReply?: (msg: Message) => void
+  /** When false, this message is a continuation of the previous sender's burst
+   *  — the sender label is suppressed, matching the official WA "clustering"
+   *  rule where the name only shows on the first bubble of a streak. */
+  firstInGroup?: boolean
 }) {
   const mine = msg.is_from_me
-  const sender = group && !mine ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap) : ''
+  const sender =
+    group && !mine && firstInGroup
+      ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap)
+      : ''
 
   return (
     <div className={'group/row flex items-center gap-1 ' + (mine ? 'justify-end' : 'justify-start')}>

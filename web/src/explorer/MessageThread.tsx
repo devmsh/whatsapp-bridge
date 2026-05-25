@@ -602,13 +602,25 @@ function Timeline({
   onOpenChat?: (jid: string) => void
   onReply?: (msg: Message) => void
 }) {
+  // Same-sender bursts cluster together: a new day, a new sender, or a >60s
+  // gap from the previous message ends one cluster and starts another. WA does
+  // exactly this — sender label only on the first bubble of the cluster, and
+  // a tighter vertical gap between bubbles inside it.
+  const CLUSTER_GAP_S = 60
   let lastDay = ''
+  let lastKey = ''
+  let lastTs = 0
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col">
       {messages.map((m) => {
         const day = dayLabel(m.timestamp)
         const sep = day !== lastDay
         lastDay = day
+        const senderKey = m.is_from_me ? '__me__' : m.sender
+        const firstInGroup =
+          sep || senderKey !== lastKey || m.timestamp - lastTs > CLUSTER_GAP_S
+        lastKey = senderKey
+        lastTs = m.timestamp
         return (
           <div key={m.id + m.timestamp}>
             {sep && (
@@ -618,16 +630,19 @@ function Timeline({
                 </span>
               </div>
             )}
-            <MessageBubble
-              msg={m}
-              group={group}
-              nameMap={nameMap}
-              mentionIndex={mentionIndex}
-              onOpenTask={onOpenTask}
-              onTasksChanged={onTasksChanged}
-              onOpenChat={onOpenChat}
-              onReply={onReply}
-            />
+            <div className={sep ? '' : firstInGroup ? 'mt-2' : 'mt-0.5'}>
+              <MessageBubble
+                msg={m}
+                group={group}
+                nameMap={nameMap}
+                mentionIndex={mentionIndex}
+                onOpenTask={onOpenTask}
+                onTasksChanged={onTasksChanged}
+                onOpenChat={onOpenChat}
+                onReply={onReply}
+                firstInGroup={firstInGroup}
+              />
+            </div>
           </div>
         )
       })}
