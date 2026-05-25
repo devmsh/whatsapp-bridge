@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, type Chat, type Circle, type Message, type Tag } from '../api'
-import { chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser } from './format'
+import {
+  chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser,
+  type MentionEntry,
+} from './format'
 import { MessageBubble } from './MessageBubble'
 import { ChatCircles } from './ChatCircles'
 import { TagChips, TagEditor } from './Tags'
@@ -20,6 +23,7 @@ export function MessageThread({
   jid,
   chats,
   nameMap,
+  mentionIndex,
   liveMsg,
   circles,
   allTags,
@@ -31,12 +35,14 @@ export function MessageThread({
   onOpenTask,
   onTasksChanged,
   onOpenChatTasks,
+  onOpenChat,
   onOpenCircle,
   onSent,
 }: {
   jid: string
   chats: Chat[]
   nameMap: Map<string, string>
+  mentionIndex: Map<string, MentionEntry>
   liveMsg: Message | null
   circles: Circle[]
   allTags: Tag[]
@@ -48,6 +54,7 @@ export function MessageThread({
   onOpenTask: (id: number) => void
   onTasksChanged: () => void
   onOpenChatTasks: (jid: string) => void
+  onOpenChat?: (jid: string) => void
   onOpenCircle?: (id: number) => void
   onSent?: (m: Message) => void
 }) {
@@ -254,8 +261,10 @@ export function MessageThread({
               messages={messages}
               group={group}
               nameMap={nameMap}
+              mentionIndex={mentionIndex}
               onOpenTask={onOpenTask}
               onTasksChanged={onTasksChanged}
+              onOpenChat={onOpenChat}
             />
           </>
         )}
@@ -459,14 +468,18 @@ function Timeline({
   messages,
   group,
   nameMap,
+  mentionIndex,
   onOpenTask,
   onTasksChanged,
+  onOpenChat,
 }: {
   messages: Message[]
   group: boolean
   nameMap: Map<string, string>
+  mentionIndex: Map<string, MentionEntry>
   onOpenTask: (id: number) => void
   onTasksChanged: () => void
+  onOpenChat?: (jid: string) => void
 }) {
   let lastDay = ''
   return (
@@ -488,8 +501,10 @@ function Timeline({
               msg={m}
               group={group}
               nameMap={nameMap}
+              mentionIndex={mentionIndex}
               onOpenTask={onOpenTask}
               onTasksChanged={onTasksChanged}
+              onOpenChat={onOpenChat}
             />
           </div>
         )

@@ -1,21 +1,28 @@
 import type { Message } from '../api'
-import { clockTime, humanSize, mediaURL, senderTitle } from './format'
+import { clockTime, humanSize, mediaURL, senderTitle, type MentionEntry } from './format'
 import { MessageTaskButton } from './MessageTaskButton'
+import { RichText } from './RichText'
 
 // MessageBubble renders one message: alignment, sender (in groups), reply
 // preview, media, text, reactions, and edited/deleted/forwarded markers.
+// Body text is run through RichText so URLs become clickable and "@<digits>"
+// mentions resolve to contact names + click → open DM.
 export function MessageBubble({
   msg,
   group,
   nameMap,
+  mentionIndex,
   onOpenTask,
   onTasksChanged,
+  onOpenChat,
 }: {
   msg: Message
   group: boolean
   nameMap: Map<string, string>
+  mentionIndex: Map<string, MentionEntry>
   onOpenTask?: (id: number) => void
   onTasksChanged?: () => void
+  onOpenChat?: (jid: string) => void
 }) {
   const mine = msg.is_from_me
   const sender = group && !mine ? senderTitle(msg.sender, msg.sender_name, msg.push_name, nameMap) : ''
@@ -49,8 +56,13 @@ export function MessageBubble({
         ) : (
           <>
             <MediaContent msg={msg} />
-            <TextContent msg={msg} />
-            <MediaUnderstanding msg={msg} mine={mine} />
+            <TextContent msg={msg} mentionIndex={mentionIndex} onOpenChat={onOpenChat} />
+            <MediaUnderstanding
+              msg={msg}
+              mine={mine}
+              mentionIndex={mentionIndex}
+              onOpenChat={onOpenChat}
+            />
           </>
         )}
 
@@ -84,21 +96,23 @@ export function MessageBubble({
 
 // TextContent shows message text, but not the "[image:…]" placeholder we store
 // for pure-media messages (the media itself + caption already cover it).
-function TextContent({ msg }: { msg: Message }) {
+function TextContent({
+  msg,
+  mentionIndex,
+  onOpenChat,
+}: {
+  msg: Message
+  mentionIndex: Map<string, MentionEntry>
+  onOpenChat?: (jid: string) => void
+}) {
   if (msg.media_type) {
     const caption = msg.media_caption
     return caption ? (
-      <div dir="auto" className="whitespace-pre-wrap break-words text-start">
-        {caption}
-      </div>
+      <RichText text={caption} mentions={mentionIndex} onOpenChat={onOpenChat} />
     ) : null
   }
   if (!msg.content) return null
-  return (
-    <div dir="auto" className="whitespace-pre-wrap break-words text-start">
-      {msg.content}
-    </div>
-  )
+  return <RichText text={msg.content} mentions={mentionIndex} onOpenChat={onOpenChat} />
 }
 
 function MediaContent({ msg }: { msg: Message }) {
@@ -153,7 +167,17 @@ function MediaContent({ msg }: { msg: Message }) {
 // MediaUnderstanding renders the AI-derived transcript (for voice notes) or
 // description (for images) as a smaller, dimmer footnote under the media,
 // separated by a hairline divider. Hidden when no AI text exists.
-function MediaUnderstanding({ msg, mine }: { msg: Message; mine: boolean }) {
+function MediaUnderstanding({
+  msg,
+  mine,
+  mentionIndex,
+  onOpenChat,
+}: {
+  msg: Message
+  mine: boolean
+  mentionIndex: Map<string, MentionEntry>
+  onOpenChat?: (jid: string) => void
+}) {
   const isAudio = msg.media_type === 'voice_note' || msg.media_type === 'audio'
   const text = isAudio ? msg.transcript : msg.media_description
   if (!text) return null
@@ -166,9 +190,7 @@ function MediaUnderstanding({ msg, mine }: { msg: Message; mine: boolean }) {
       }
     >
       <div className="mb-0.5 text-[10px] uppercase tracking-wider opacity-70">{label}</div>
-      <div dir="auto" className="whitespace-pre-wrap break-words text-start">
-        {text}
-      </div>
+      <RichText text={text} mentions={mentionIndex} onOpenChat={onOpenChat} />
     </div>
   )
 }

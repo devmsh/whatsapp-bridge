@@ -27,8 +27,8 @@ function looksLikeName(s: string): boolean {
 }
 
 // buildNameMap indexes display names by JID: group names from the groups table,
-// and contacts by JID and by phone. Group and contact JIDs never collide
-// (@g.us vs @s.whatsapp.net), so one map serves both.
+// and contacts by JID, by phone, and by LID. Group and contact JIDs never
+// collide (@g.us vs @s.whatsapp.net vs @lid), so one map serves all of them.
 export function buildNameMap(contacts: Contact[], groups: Group[] = []): Map<string, string> {
   const m = new Map<string, string>()
   for (const g of groups) {
@@ -39,8 +39,47 @@ export function buildNameMap(contacts: Contact[], groups: Group[] = []): Map<str
     if (!name) continue
     if (c.jid) m.set(c.jid, name)
     if (c.phone) m.set(c.phone + '@s.whatsapp.net', name)
+    if (c.lid) m.set(c.lid + '@lid', name)
   }
   return m
+}
+
+// MentionEntry: a JID that's openable as a DM (always phone form), plus a
+// display name. `unknown` is true when nothing is in the contact book.
+export type MentionEntry = { jid: string; name: string; unknown: boolean }
+
+// buildMentionIndex maps the bare digit identifier inside a "@<digits>"
+// mention to the contact's phone-based JID + display name. WhatsApp emits
+// mention identifiers as LIDs ("@157419191689245"), so we index by:
+//   - the contact's LID digits (when set)
+//   - the contact's phone digits
+// Both point to the SAME phone-based JID, which is what openChat needs to
+// land in a DM.
+export function buildMentionIndex(contacts: Contact[]): Map<string, MentionEntry> {
+  const m = new Map<string, MentionEntry>()
+  for (const c of contacts) {
+    const name = c.name || c.push_name || c.business_name || ''
+    const phoneJID = c.phone ? c.phone + '@s.whatsapp.net' : c.jid
+    const entry: MentionEntry = { jid: phoneJID, name, unknown: !name }
+    if (c.lid) {
+      const digits = c.lid.replace('@lid', '').split(':')[0]
+      if (digits) m.set(digits, entry)
+    }
+    if (c.phone) m.set(c.phone, entry)
+    // Also index by the JID's user portion (digits before "@").
+    const jidUserPart = (c.jid || '').split('@')[0].split(':')[0]
+    if (jidUserPart && !m.has(jidUserPart)) m.set(jidUserPart, entry)
+  }
+  return m
+}
+
+// resolveMention looks up a "@<digits>" token. Falls back to a phone-form JID
+// + "+<digits>" label when the contact isn't in the book (so a click still
+// tries to open a DM with that number).
+export function resolveMention(digits: string, index: Map<string, MentionEntry>): MentionEntry {
+  const hit = index.get(digits)
+  if (hit) return hit
+  return { jid: digits + '@s.whatsapp.net', name: '+' + digits, unknown: true }
 }
 
 // chatTitle resolves the best display name for a chat.

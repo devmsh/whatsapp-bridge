@@ -11,7 +11,7 @@ import {
   type Tag,
   type Task,
 } from '../api'
-import { buildNameMap } from './format'
+import { buildMentionIndex, buildNameMap } from './format'
 import { ChatList } from './ChatList'
 import { ContactsPanel } from './ContactsPanel'
 import { CirclesPanel } from './CirclesPanel'
@@ -69,6 +69,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   selectedRef.current = selected
 
   const nameMap = useMemo(() => buildNameMap(contacts, groups), [contacts, groups])
+  const mentionIndex = useMemo(() => buildMentionIndex(contacts), [contacts])
 
   // Initial loads. Also re-runs whenever the hidden-chats unlock state changes
   // so freshly-unlocked chats appear (or relocked ones disappear).
@@ -413,6 +414,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             jid={selected}
             chats={chats}
             nameMap={nameMap}
+            mentionIndex={mentionIndex}
             liveMsg={liveMsg}
             circles={circles}
             allTags={tags}
@@ -424,6 +426,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onOpenTask={openTask}
             onTasksChanged={bumpTasks}
             onOpenChatTasks={openChatTasks}
+            onOpenChat={openChat}
             onOpenCircle={openCircle}
             onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
           />
