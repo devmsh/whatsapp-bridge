@@ -142,6 +142,13 @@ export function MessageThread({
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIdx, setSearchIdx] = useState(0)
+  // Transient "flash this message" state — set by jumpToMessage when the
+  // user clicks a quoted-reply preview, auto-cleared after a brief moment.
+  // Visualized the same way as the search highlight (amber ring on the
+  // matching bubble) but lives in a separate state so a search-in-progress
+  // doesn't get permanently overridden by a one-shot jump.
+  const [flashId, setFlashId] = useState<string | null>(null)
+  const flashTimer = useRef<number | null>(null)
 
   const chat = chats.find((c) => c.jid === jid)
   const title = chat ? chatTitle(chat, nameMap) : '+' + jidUser(jid)
@@ -188,6 +195,11 @@ export function MessageThread({
     setSearchOpen(false)
     setSearchQuery('')
     setSearchIdx(0)
+    setFlashId(null)
+    if (flashTimer.current) {
+      window.clearTimeout(flashTimer.current)
+      flashTimer.current = null
+    }
   }, [jid])
 
   // Build the ordered list of message IDs that match the search query.
@@ -335,6 +347,27 @@ export function MessageThread({
   function startEdit(target: Message) {
     setReplyTo(null)
     setEditingMsg(target)
+  }
+
+  // Jump to a specific message in the thread (used when the user clicks a
+  // quoted-reply preview to find the original). Reuses the same data-msg-id
+  // anchor + amber ring the search uses, but auto-clears after 1.6s so the
+  // jump feels like a quick flash rather than a sticky highlight. Silently
+  // no-ops if the message isn't in the loaded window — WA's "Load earlier"
+  // is the escape hatch.
+  function jumpToMessage(id: string) {
+    const root = scrollRef.current
+    if (!root) return
+    const el = root.querySelector(`[data-msg-id="${CSS.escape(id)}"]`) as HTMLElement | null
+    if (!el) return
+    stickToBottom.current = false
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlashId(id)
+    if (flashTimer.current) window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => {
+      setFlashId(null)
+      flashTimer.current = null
+    }, 1600)
   }
 
   // Called by the Composer after api.edit succeeds. Mutates the local bubble
@@ -577,8 +610,9 @@ export function MessageThread({
                 onStar={handleStar}
                 onEdit={canSend ? startEdit : undefined}
                 onOpenImage={openLightboxFor}
+                onJumpToMessage={jumpToMessage}
                 selfDigits={selfDigits}
-                highlightId={activeMatchId}
+                highlightId={flashId || activeMatchId}
               />
             </>
           )}
@@ -2093,6 +2127,7 @@ function Timeline({
   onStar,
   onEdit,
   onOpenImage,
+  onJumpToMessage,
   selfDigits,
   highlightId,
 }: {
@@ -2109,6 +2144,9 @@ function Timeline({
   onStar?: (msg: Message, starred: boolean) => void
   onEdit?: (msg: Message) => void
   onOpenImage?: (msg: Message) => void
+  /** Click handler for the quoted-reply preview chip — jumps to + flashes
+   *  the original message. No-ops silently if the target isn't loaded. */
+  onJumpToMessage?: (id: string) => void
   selfDigits?: Set<string>
   /** Message ID of the current search match — gets an emerald ring around
    *  its bubble + is the scrollIntoView target driven from MessageThread. */
@@ -2157,6 +2195,7 @@ function Timeline({
                 onStar={onStar}
                 onEdit={onEdit}
                 onOpenImage={onOpenImage}
+                onJumpToMessage={onJumpToMessage}
                 selfDigits={selfDigits}
                 firstInGroup={firstInGroup}
                 highlighted={highlightId === m.id}

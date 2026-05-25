@@ -24,6 +24,7 @@ export function MessageBubble({
   onStar,
   onEdit,
   onOpenImage,
+  onJumpToMessage,
   selfDigits,
   firstInGroup = true,
   highlighted = false,
@@ -56,6 +57,10 @@ export function MessageBubble({
   /** Called when an image bubble is clicked — lifts to the thread which
    *  opens the in-app lightbox at this message's position. */
   onOpenImage?: (msg: Message) => void
+  /** Called when the quoted-reply preview chip is clicked — lifts to the
+   *  thread, which jumps to the original message and briefly flashes it.
+   *  No-ops silently if the original isn't in the loaded window. */
+  onJumpToMessage?: (id: string) => void
   /** When false, this message is a continuation of the previous sender's burst
    *  — the sender label is suppressed, matching the official WA "clustering"
    *  rule where the name only shows on the first bubble of a streak. */
@@ -174,11 +179,31 @@ export function MessageBubble({
         {msg.is_forwarded && <div className="mb-1 text-[11px] italic text-neutral-400">↪ Forwarded</div>}
 
         {msg.reply_to_content && (
-          <div className="mb-1 border-l-2 border-emerald-400/60 bg-black/20 px-2 py-1 text-xs text-neutral-300">
-            <div dir="auto" className="line-clamp-2 text-start">
-              {msg.reply_to_content}
+          // Quoted-reply chip — clickable when we know which message it's
+          // quoting AND the thread provided a jump handler. WA's mobile UX
+          // is identical: tap the chip → original message scrolls into
+          // view with a quick flash. The button takes the full width of the
+          // chip so the entire area is the target, not just the text.
+          onJumpToMessage && msg.reply_to_id ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onJumpToMessage(msg.reply_to_id!)
+              }}
+              title="Jump to the original message"
+              className="mb-1 block w-full border-l-2 border-emerald-400/60 bg-black/20 px-2 py-1 text-start text-xs text-neutral-300 transition hover:bg-black/40"
+            >
+              <div dir="auto" className="line-clamp-2">
+                {msg.reply_to_content}
+              </div>
+            </button>
+          ) : (
+            <div className="mb-1 border-l-2 border-emerald-400/60 bg-black/20 px-2 py-1 text-xs text-neutral-300">
+              <div dir="auto" className="line-clamp-2 text-start">
+                {msg.reply_to_content}
+              </div>
             </div>
-          </div>
+          )
         )}
 
         {msg.is_deleted ? (
