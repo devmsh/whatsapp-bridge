@@ -504,6 +504,25 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     setRecoOpen(true)
   }, [])
 
+  // --- Mobile single-pane layout ----------------------------------------
+  // The desktop two-pane layout (320px list + conversation) does not fit a
+  // phone, so below `md` we show ONE pane: the list, or — once the user
+  // opens something — the main pane full-screen with a Back affordance.
+  // detailOpen = the main pane is showing navigated-into content.
+  const detailOpen =
+    recoOpen || selected != null || selectedCircle != null || selectedTask != null
+  // The Tasks tab renders its list in <main> (the sidebar holds only the
+  // scope picker), so treat that tab as "show main" on mobile too.
+  const showMainMobile = detailOpen || tab === 'tasks'
+  // Back steps up one level: detail → its list, then list → chats.
+  const closeMobileDetail = () => {
+    if (selected != null) return setSelected(null)
+    if (selectedCircle != null) return setSelectedCircle(null)
+    if (recoOpen) return setRecoOpen(false)
+    if (selectedTask != null) return setSelectedTask(null)
+    if (tab === 'tasks') return setTab('chats')
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
@@ -581,7 +600,12 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         />
       )}
 
-      <aside className="flex w-80 shrink-0 flex-col border-r border-neutral-800">
+      <aside
+        className={
+          'w-full shrink-0 flex-col border-r border-neutral-800 md:flex md:w-80 ' +
+          (showMainMobile ? 'hidden' : 'flex')
+        }
+      >
         <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-neutral-950">
@@ -825,7 +849,24 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         )}
       </aside>
 
-      <main className="min-w-0 flex-1">
+      <main
+        className={
+          'min-w-0 flex-1 flex-col ' + (showMainMobile ? 'flex' : 'hidden md:flex')
+        }
+      >
+        {/* Mobile-only back bar: returns to the list pane. Hidden on md+. */}
+        {showMainMobile && (
+          <button
+            onClick={closeMobileDetail}
+            className="flex shrink-0 items-center gap-1.5 border-b border-neutral-800 px-3 py-2.5 text-sm text-neutral-300 transition hover:text-neutral-100 md:hidden"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+        )}
+        <div className="min-h-0 flex-1">
         {recoOpen ? (
           <RecommendationsView onChanged={reloadCircles} onOpenCircle={openCircle} />
         ) : tab === 'tasks' ? (
@@ -909,6 +950,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         ) : (
           <EmptyState />
         )}
+        </div>
       </main>
     </div>
   )
