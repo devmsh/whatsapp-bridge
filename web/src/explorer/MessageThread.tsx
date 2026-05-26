@@ -49,6 +49,8 @@ export function MessageThread({
   onOpenChat,
   onOpenCircle,
   onSent,
+  pendingJumpId,
+  onJumpHandled,
 }: {
   jid: string
   chats: Chat[]
@@ -72,6 +74,13 @@ export function MessageThread({
   onOpenChat?: (jid: string) => void
   onOpenCircle?: (id: number) => void
   onSent?: (m: Message) => void
+  /** Message id the parent (Explorer) wants us to jump to once it's in
+   *  the loaded window — set when the universal search picks a message
+   *  result. The thread fires jumpToMessage(id) + calls onJumpHandled
+   *  to clear it; if the message isn't in the current page we silently
+   *  give up (Load earlier will eventually surface it). */
+  pendingJumpId?: string | null
+  onJumpHandled?: () => void
 }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [limit, setLimit] = useState(PAGE)
@@ -579,6 +588,25 @@ export function MessageThread({
       }
     }
   }
+
+  // Honor a parent-driven jump request (universal search → message hit).
+  // Wait until the messages window contains the target, then call
+  // jumpToMessage + notify the parent so the same id doesn't keep firing
+  // on every re-render. We deliberately don't auto-load earlier pages —
+  // a search hit outside the loaded window is the user's cue to "Load
+  // earlier" themselves; auto-loading could thrash if the message is far
+  // back in history.
+  useEffect(() => {
+    if (!pendingJumpId) return
+    if (!messages.some((m) => m.id === pendingJumpId)) return
+    // Defer to next frame so layout-effect's pin-to-bottom doesn't fight
+    // us on the same render.
+    requestAnimationFrame(() => {
+      jumpToMessage(pendingJumpId)
+      onJumpHandled?.()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingJumpId, messages.length])
 
   // Jump to a specific message in the thread (used when the user clicks a
   // quoted-reply preview to find the original). Reuses the same data-msg-id

@@ -65,6 +65,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
   const [dndOpen, setDndOpen] = useState(false)
+  // Message ID the universal search asked us to land on after the chat
+  // opens. MessageThread watches it, fires jumpToMessage once the row is
+  // in the loaded window, then calls onJumpHandled to clear it so the
+  // next chat-switch doesn't re-trigger an old jump.
+  const [pendingJumpId, setPendingJumpId] = useState<string | null>(null)
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
@@ -537,7 +542,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               if (h.kind === 'contact' || h.kind === 'group') openChat(h.id)
               else if (h.kind === 'circle') openCircle(parseInt(h.id, 10))
               else if (h.kind === 'task') openTask(parseInt(h.id, 10))
-              else if (h.kind === 'message' && h.chat_jid) openChat(h.chat_jid)
+              else if (h.kind === 'message' && h.chat_jid) {
+                // Open the chat, then ask MessageThread to scroll to the
+                // exact message id. The thread fires jumpToMessage once
+                // the row lands in the loaded window — same flash as
+                // tapping a quoted-reply chip.
+                openChat(h.chat_jid)
+                setPendingJumpId(h.id)
+              }
             }}
           />
         </div>
@@ -679,6 +691,8 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onOpenChatTasks={openChatTasks}
             onOpenChat={openChat}
             onOpenCircle={openCircle}
+            pendingJumpId={pendingJumpId}
+            onJumpHandled={() => setPendingJumpId(null)}
             onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
           />
         ) : selectedCircle != null ? (
