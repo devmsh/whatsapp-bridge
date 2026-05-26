@@ -27,6 +27,7 @@ export function MessageBubble({
   onEdit,
   onInfo,
   onSelect,
+  onCopy,
   onOpenImage,
   onJumpToMessage,
   selfDigits,
@@ -67,6 +68,11 @@ export function MessageBubble({
    *  enters multi-select mode with this message pre-selected. Suppressed
    *  while already in select mode (the row click handles toggling there). */
   onSelect?: (msg: Message) => void
+  /** Called when the Copy action is clicked. The thread normalises the
+   *  message body (caption falls back to content, deleted messages skip)
+   *  and writes it to the clipboard. Suppressed for deleted / empty rows
+   *  via the canCopy gate in MessageBubble. */
+  onCopy?: (msg: Message) => void
   /** Called when an image bubble is clicked — lifts to the thread which
    *  opens the in-app lightbox at this message's position. */
   onOpenImage?: (msg: Message) => void
@@ -130,6 +136,10 @@ export function MessageBubble({
     !!msg.content &&
     Math.floor(Date.now() / 1000) - msg.timestamp < EDIT_WINDOW_S
 
+  // Copy is meaningful only when there's actually text to copy — body
+  // content OR a media caption. Deleted messages skip entirely.
+  const canCopy = !msg.is_deleted && !!(msg.content || msg.media_caption)
+
   // The "promote to task" action is bridge-specific (not a WA feature) but
   // we render it inside the same gutter cluster as the other actions so the
   // bubble has one visual language. The bubble decides whether to offer it
@@ -160,7 +170,7 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {(onReply || onReact || onForward || onStar || (onEdit && canEdit) || onInfo || onSelect || taskButton) && mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || (onEdit && canEdit) || onInfo || onSelect || (onCopy && canCopy) || taskButton) && mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
@@ -169,6 +179,7 @@ export function MessageBubble({
           onEdit={onEdit && canEdit ? () => onEdit(msg) : undefined}
           onInfo={onInfo ? () => onInfo(msg) : undefined}
           onSelect={onSelect ? () => onSelect(msg) : undefined}
+          onCopy={onCopy && canCopy ? () => onCopy(msg) : undefined}
           taskButton={taskButton}
           isStarred={!!msg.is_starred}
           side="left"
@@ -300,13 +311,14 @@ export function MessageBubble({
           {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
-      {(onReply || onReact || onForward || onStar || onSelect || taskButton) && !mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || onSelect || (onCopy && canCopy) || taskButton) && !mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
           onForward={onForward ? () => onForward(msg) : undefined}
           onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
           onSelect={onSelect ? () => onSelect(msg) : undefined}
+          onCopy={onCopy && canCopy ? () => onCopy(msg) : undefined}
           taskButton={taskButton}
           isStarred={!!msg.is_starred}
           side="right"
@@ -329,6 +341,7 @@ function BubbleActions({
   onEdit,
   onInfo,
   onSelect,
+  onCopy,
   taskButton,
   isStarred,
   side,
@@ -347,6 +360,11 @@ function BubbleActions({
    *  with this bubble pre-selected; the thread's selection bar then
    *  takes over for batch actions. */
   onSelect?: () => void
+  /** Show the Copy button. Only passed in when there's actual text to
+   *  copy (content or media caption); the canCopy gate happens in
+   *  MessageBubble. Returns true on success so the button can flash a
+   *  brief "Copied!" state — see the local copiedAt timer below. */
+  onCopy?: () => void
   /** Pre-rendered "promote to task" button (MessageTaskButton). Lives in the
    *  same gutter cluster so it reads as a sibling action, not a stray icon
    *  in the footer. The bubble builds it with full context (chatJID, etc.). */
@@ -354,6 +372,14 @@ function BubbleActions({
   isStarred?: boolean
   side: 'left' | 'right'
 }) {
+  // Brief "✓ Copied" affordance on the Copy button — clears after a
+  // beat so the user gets immediate feedback without a separate toast.
+  const [copiedAt, setCopiedAt] = useState<number>(0)
+  useEffect(() => {
+    if (!copiedAt) return
+    const t = window.setTimeout(() => setCopiedAt(0), 1500)
+    return () => window.clearTimeout(t)
+  }, [copiedAt])
   const [pickerOpen, setPickerOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -457,6 +483,33 @@ function BubbleActions({
             <rect x="3" y="3" width="18" height="18" rx="3" />
             <polyline points="8 12 11 15 16 9" />
           </svg>
+        </button>
+      )}
+      {onCopy && (
+        <button
+          onClick={() => {
+            onCopy()
+            setCopiedAt(Date.now())
+          }}
+          title={copiedAt ? 'Copied!' : 'Copy text'}
+          aria-label={copiedAt ? 'Text copied' : 'Copy text'}
+          className={
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ' +
+            (copiedAt
+              ? 'bg-emerald-500/30 text-emerald-200'
+              : 'bg-neutral-800/80 text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100')
+          }
+        >
+          {copiedAt ? (
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          )}
         </button>
       )}
       {taskButton}

@@ -447,6 +447,33 @@ export function MessageThread({
     setEditingMsg(target)
   }
 
+  // Copy a single bubble's text to the clipboard. We prefer the message
+  // body, then the media caption — the same shorthand the chat-list
+  // preview uses. Fails silently if the browser's clipboard API isn't
+  // available (older Safari without HTTPS, etc.); the button's transient
+  // "Copied!" state is gated on click anyway, so a silent failure is no
+  // worse than the user not seeing the affordance.
+  function copyMessage(target: Message) {
+    const text = target.content || target.media_caption || ''
+    if (!text) return
+    try {
+      navigator.clipboard?.writeText(text)
+    } catch {
+      // Older browsers without the async clipboard API — fall back to
+      // the legacy execCommand path via a hidden textarea.
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.left = '-9999px'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch {}
+    }
+  }
+
   // Toggle a message's inclusion in the selection set. Adds when missing,
   // removes when present; an empty set exits select-mode automatically
   // (the SelectionBar render gates on size > 0).
@@ -810,6 +837,7 @@ export function MessageThread({
                 onStar={handleStar}
                 onEdit={canSend ? startEdit : undefined}
                 onInfo={setInfoMsg}
+                onCopy={copyMessage}
                 onOpenImage={openLightboxFor}
                 onJumpToMessage={jumpToMessage}
                 selfDigits={selfDigits}
@@ -2623,6 +2651,7 @@ function Timeline({
   onStar,
   onEdit,
   onInfo,
+  onCopy,
   onOpenImage,
   onJumpToMessage,
   selfDigits,
@@ -2648,6 +2677,9 @@ function Timeline({
   /** Open the Message Info overlay for one of your own messages — shows
    *  per-recipient delivered / read timestamps. Only wired for mine. */
   onInfo?: (msg: Message) => void
+  /** Copy the bubble's text body to the clipboard. Suppressed for empty
+   *  / deleted rows by the canCopy gate in MessageBubble. */
+  onCopy?: (msg: Message) => void
   onOpenImage?: (msg: Message) => void
   /** Click handler for the quoted-reply preview chip — jumps to + flashes
    *  the original message. No-ops silently if the target isn't loaded. */
@@ -2771,6 +2803,7 @@ function Timeline({
                   onEdit={selectMode ? undefined : onEdit}
                   onInfo={selectMode ? undefined : onInfo}
                   onSelect={selectMode || !onToggleSelect ? undefined : (msg) => onToggleSelect(msg.id)}
+                  onCopy={selectMode ? undefined : onCopy}
                   onOpenImage={selectMode ? undefined : onOpenImage}
                   onJumpToMessage={selectMode ? undefined : onJumpToMessage}
                   selfDigits={selfDigits}
