@@ -832,6 +832,16 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // revoke ("delete for everyone") retracts a sent message. Bridge endpoint
+  // POST /messages/{id}/revoke uses whatsmeow.RevokeMessage; the bubble's
+  // is_deleted flag flips immediately on the local DB row, and the UI
+  // re-renders as "🚫 This message was deleted". WA enforces a server-side
+  // window for this; past that the call fails and the local bubble stays
+  // intact — same behaviour as the official client.
+  revoke: (jid: string, messageID: string) =>
+    postBody<{ success: boolean }>(`/api/v2/messages/${encodeURIComponent(messageID)}/revoke`, {
+      chat_jid: jid,
+    }),
   // edit replaces the text body of a sent message. WhatsApp's edit window is
   // ~15 minutes server-side — past that the bridge call will fail; the UI
   // already hides the Edit action after 15 min to avoid that surprise.

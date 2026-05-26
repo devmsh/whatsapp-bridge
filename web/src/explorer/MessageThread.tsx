@@ -410,6 +410,62 @@ export function MessageThread({
 
   const selectMode = selectedIds.size > 0
 
+  // Derived state the SelectionBar uses to label its buttons. We compute
+  // these once per render (cheap — selection is at most a few items) so the
+  // bar can show "Unstar" instead of "Star" when every selected message is
+  // already starred (toggle behaviour), and so it can disable the Delete
+  // button when no own messages are selected (revoke only works on yours).
+  const selectionPicked = selectMode ? messages.filter((m) => selectedIds.has(m.id)) : []
+  const selectionAllStarred =
+    selectionPicked.length > 0 && selectionPicked.every((m) => !!m.is_starred)
+  const selectionHasOwn = selectionPicked.some((m) => m.is_from_me && !m.is_deleted)
+
+  // Star or unstar every selected message in one pass. Toggles based on
+  // current state: all-starred → unstar all; otherwise → star all. Same
+  // semantics WA uses when you long-press multiple and tap the star.
+  async function batchStar() {
+    if (selectionPicked.length === 0) return
+    const next = !selectionAllStarred
+    // Optimistic local flip so the gutter ⭐ + footer ★ update before the
+    // round-trip. The handleStar single-message path does the same.
+    setMessages((prev) =>
+      prev.map((m) => (selectedIds.has(m.id) ? { ...m, is_starred: next } : m)),
+    )
+    setSelectedIds(new Set())
+    for (const m of selectionPicked) {
+      try {
+        if (next) await api.star(jid, m.id)
+        else await api.unstar(jid, m.id)
+      } catch (e) {
+        console.warn('batch star failed:', e)
+      }
+    }
+  }
+
+  // Revoke every selected own-message (delete-for-everyone). Confirms
+  // first — WA does the same; mass-deletes are not undoable. Only
+  // is_from_me messages are eligible; others silently skip. Local
+  // is_deleted flip is optimistic per row.
+  async function batchDelete() {
+    const own = selectionPicked.filter((m) => m.is_from_me && !m.is_deleted)
+    if (own.length === 0) return
+    const word = own.length === 1 ? 'message' : 'messages'
+    if (!window.confirm(`Delete ${own.length} ${word} for everyone? This can't be undone.`)) {
+      return
+    }
+    setMessages((prev) =>
+      prev.map((m) => (own.some((o) => o.id === m.id) ? { ...m, is_deleted: true } : m)),
+    )
+    setSelectedIds(new Set())
+    for (const m of own) {
+      try {
+        await api.revoke(jid, m.id)
+      } catch (e) {
+        console.warn('batch delete failed:', e)
+      }
+    }
+  }
+
   // Jump to a specific message in the thread (used when the user clicks a
   // quoted-reply preview to find the original). Reuses the same data-msg-id
   // anchor + amber ring the search uses, but auto-clears after 1.6s so the
@@ -603,6 +659,8 @@ export function MessageThread({
       {selectMode && (
         <SelectionBar
           count={selectedIds.size}
+          selectionAllStarred={selectionAllStarred}
+          selectionHasOwn={selectionHasOwn}
           onCancel={() => setSelectedIds(new Set())}
           onForward={() => {
             // Preserve thread order — selectedIds is a Set with no ordering.
@@ -613,6 +671,8 @@ export function MessageThread({
             if (picked.length === 0) return
             setBatchForward(picked)
           }}
+          onStar={() => batchStar()}
+          onDelete={() => batchDelete()}
         />
       )}
 
@@ -1964,21 +2024,27 @@ function MentionPicker({
 }
 
 // SelectionBar sits between the chat header and the message thread while
-// multi-select is on. Mirrors WA's top action bar in selection mode: a
-// count, batch actions (just Forward for v1; delete/star follow-up), and
-// a ✕ to cancel. Esc also cancels — installed in MessageThread's reset
-// effect by clearing selectedIds.
+// multi-select is on. Mirrors WA's top action bar: count, batch actions
+// (Star/Unstar toggle, Delete-for-everyone, Forward), and a ✕ to cancel.
+// Esc also cancels — installed here (not the thread) so the binding
+// unmounts as soon as the user leaves select mode.
 function SelectionBar({
   count,
+  selectionAllStarred,
+  selectionHasOwn,
   onCancel,
   onForward,
+  onStar,
+  onDelete,
 }: {
   count: number
+  selectionAllStarred: boolean
+  selectionHasOwn: boolean
   onCancel: () => void
   onForward: () => void
+  onStar: () => void
+  onDelete: () => void
 }) {
-  // Esc cancels selection. Lives in the bar (not the thread) so it
-  // unmounts as soon as the user leaves select mode.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onCancel()
@@ -1987,7 +2053,7 @@ function SelectionBar({
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
   return (
-    <div className="flex items-center gap-3 border-b border-neutral-800 bg-emerald-500/10 px-4 py-2">
+    <div className="flex items-center gap-2 border-b border-neutral-800 bg-emerald-500/10 px-4 py-2">
       <button
         onClick={onCancel}
         title="Cancel selection (Esc)"
@@ -1999,6 +2065,38 @@ function SelectionBar({
       <div className="flex-1 text-sm font-medium text-emerald-200 tabular-nums">
         {count} selected
       </div>
+      {/* Star / Unstar toggle — label flips when every selected message is
+          already starred, matching WA's own behaviour. */}
+      <button
+        onClick={onStar}
+        title={selectionAllStarred ? 'Unstar selected messages' : 'Star selected messages'}
+        aria-label={selectionAllStarred ? 'Unstar selected messages' : 'Star selected messages'}
+        className={
+          'flex h-8 w-8 items-center justify-center rounded-lg transition ' +
+          (selectionAllStarred
+            ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+            : 'text-neutral-300 hover:bg-emerald-500/15 hover:text-neutral-100')
+        }
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill={selectionAllStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+      </button>
+      {/* Delete is only enabled when at least one selected message is yours
+          and not already deleted — revoke (delete-for-everyone) doesn't
+          work on others' messages, same constraint WA shows. */}
+      <button
+        onClick={onDelete}
+        disabled={!selectionHasOwn}
+        title={selectionHasOwn ? 'Delete selected messages for everyone' : 'Only your own messages can be deleted for everyone'}
+        aria-label="Delete selected messages"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-300 transition hover:bg-red-500/20 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-300"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="3 6 5 6 21 6" />
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        </svg>
+      </button>
       <button
         onClick={onForward}
         title="Forward selected messages"
