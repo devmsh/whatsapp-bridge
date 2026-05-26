@@ -39,6 +39,17 @@ export function RichText({
   className?: string
 }) {
   if (!text) return null
+  // Jumbo-emoji render: messages that are 1-3 emoji (and nothing else)
+  // get a much bigger glyph, exactly like WA. Skip all the URL / mention
+  // / markup tokenisation — the body is just emoji and any further
+  // transform would be wasted work.
+  if (isJumboEmoji(text)) {
+    return (
+      <div dir="auto" className={'whitespace-pre-wrap break-words text-start text-5xl leading-tight ' + className}>
+        {text.trim()}
+      </div>
+    )
+  }
   const parts = tokenize(text)
   return (
     <div dir="auto" className={'whitespace-pre-wrap break-words text-start ' + className}>
@@ -122,6 +133,24 @@ function tokenize(text: string): Part[] {
   }
   if (last < text.length) out.push({ kind: 'text', value: text.slice(last) })
   return out
+}
+
+// isJumboEmoji decides whether a message body should render at the big
+// jumbo-emoji size. WA does this when the body is "emoji-only" up to a
+// small count (~3 emoji incl. modifiers). We approximate that with two
+// gates: cap on the trimmed character length (so a wall of 50 emoji
+// doesn't blow up) and a presence check for at least one pictograph,
+// plus a reject for any ASCII letter / digit / common punctuation so a
+// sentence with a trailing emoji never triggers it.
+function isJumboEmoji(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed || trimmed.length > 12) return false
+  if (/[a-zA-Z0-9.,!?;:'"@#$%^&*()_+=\-\[\]{}<>/\\|`~]/.test(trimmed)) return false
+  try {
+    return /\p{Extended_Pictographic}/u.test(trimmed)
+  } catch {
+    return false
+  }
 }
 
 // WhatsApp-style inline markup. Each pattern requires non-whitespace right
