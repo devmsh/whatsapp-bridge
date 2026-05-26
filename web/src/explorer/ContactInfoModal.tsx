@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type DashContact } from '../api'
 import { ChatAvatar } from './ChatAvatar'
+import { DisappearingSection } from './DisappearingSection'
 
 // ContactInfoModal is the focused DM equivalent of GroupInfoModal —
 // hero avatar (clickable for full-screen preview), name, phone, business
@@ -103,6 +104,8 @@ export function ContactInfoModal({
             <div dir="auto" className="text-[12px] text-neutral-500">{businessName}</div>
           )}
         </div>
+
+        <DisappearingSection jid={jid} isGroup={false} />
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {error && <div className="rounded bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</div>}

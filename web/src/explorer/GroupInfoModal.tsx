@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type GroupParticipant } from '../api'
 import { ChatAvatar } from './ChatAvatar'
+import { DisappearingSection } from './DisappearingSection'
 
 // GroupInfoModal mirrors WA's "Group info" — a focused panel showing the
 // group's avatar, name, member count, and the participant list with
@@ -107,6 +108,7 @@ export function GroupInfoModal({
         </div>
 
         <InviteLinkSection jid={jid} title={title} />
+        <DisappearingSection jid={jid} isGroup={true} />
 
         <div className="flex-1 overflow-y-auto py-1">
           {error && (

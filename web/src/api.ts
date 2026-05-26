@@ -91,6 +91,14 @@ export interface Chat {
   // the unread count, so a ping in a busy chat is obvious before opening
   // it. Absent (or 0) means no pending mentions.
   unread_mentions?: number
+  // Mute end-time as a Unix second; 0 / absent = unmuted or muted "Always"
+  // (no expiry). Bridge returns it on every chat row but most UIs only
+  // need is_muted — kept here for the rare countdown surface.
+  muted_until?: number
+  // Disappearing-messages timer in seconds: 0 = off, 86400 = 24h,
+  // 604800 = 7d, 7776000 = 90d. WA only accepts those four values; the
+  // bridge round-trips them via PUT /chats/{jid}/disappearing.
+  disappearing_timer?: number
 }
 
 export interface Reaction {
@@ -1145,6 +1153,19 @@ export const api = {
     postBody<{ success: boolean }>(`/api/v2/chats/${encodeURIComponent(jid)}/action`, {
       action,
       duration,
+    }),
+  // chatDisappearing sets (or clears) the disappearing-messages timer for this
+  // chat. timer is in seconds — WA only accepts 0 (off), 86400 (24h),
+  // 604800 (7 days), 7776000 (90 days); any other value is rejected by
+  // whatsmeow upstream. Round-trip both writes via PUT to the bridge.
+  chatDisappearing: (jid: string, timer: number) =>
+    fetch(`/api/v2/chats/${encodeURIComponent(jid)}/disappearing`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timer }),
+    }).then((r) => {
+      if (!r.ok) throw new Error('Failed to set disappearing timer')
+      return r.json() as Promise<{ success: boolean }>
     }),
   removeTaskCircle: (id: number, circleId: number) =>
     del(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
