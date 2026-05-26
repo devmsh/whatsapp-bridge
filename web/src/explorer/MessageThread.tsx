@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api, type Chat, type Circle, type GroupParticipant, type Message, type PresenceEntry, type Tag } from '../api'
+import { api, type Chat, type ChatEvent, type Circle, type GroupParticipant, type Message, type PresenceEntry, type Tag } from '../api'
 import {
   chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, mediaURL, senderTitle,
   type MentionEntry,
@@ -88,6 +88,9 @@ export function MessageThread({
   onJumpHandled?: () => void
 }) {
   const [messages, setMessages] = useState<Message[]>([])
+  // Protocol-level events scoped to this chat (disappearing-timer changes,
+  // etc). Loaded alongside messages, merged into the Timeline by timestamp.
+  const [chatEvents, setChatEvents] = useState<ChatEvent[]>([])
   const [limit, setLimit] = useState(PAGE)
   const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(false)
@@ -274,6 +277,15 @@ export function MessageThread({
         setLoading(false)
       })
       .catch(() => !cancelled && setLoading(false))
+    // Protocol-level events (disappearing-timer changes etc) — fire in
+    // parallel with messages; the Timeline merges by timestamp on render.
+    // Failures are silent: missing system pills don't break the chat.
+    api
+      .chatEvents(jid, 200)
+      .then((ev) => {
+        if (!cancelled) setChatEvents(ev || [])
+      })
+      .catch(() => !cancelled && setChatEvents([]))
     return () => {
       cancelled = true
     }
@@ -1055,6 +1067,7 @@ export function MessageThread({
               )}
               <Timeline
                 messages={messages}
+                events={chatEvents}
                 group={group}
                 nameMap={nameMap}
                 mentionIndex={mentionIndex}
@@ -3541,6 +3554,7 @@ function mediaWord(t?: string): string {
 // Timeline renders bubbles with day separators between different dates.
 function Timeline({
   messages,
+  events,
   group,
   nameMap,
   mentionIndex,
@@ -3566,6 +3580,10 @@ function Timeline({
   adminJids,
 }: {
   messages: Message[]
+  /** Protocol-level events scoped to this chat — disappearing-timer
+   *  changes etc. Rendered as centered grey/amber system pills in their
+   *  timestamp position alongside regular bubbles. */
+  events?: ChatEvent[]
   group: boolean
   nameMap: Map<string, string>
   mentionIndex: Map<string, MentionEntry>
@@ -3615,30 +3633,64 @@ function Timeline({
   // a tighter vertical gap between bubbles inside it.
   const CLUSTER_GAP_S = 60
 
-  // Group messages by their dayLabel, preserving order. Cluster logic
-  // (firstInGroup) is computed per-day so the first message of each
-  // section is always firstInGroup — matches the old reset-on-day-break
-  // behaviour. Each group becomes its own <section> below so the day
-  // pill at the top can stick (WA's drifting date header).
-  type Row = { msg: Message; firstInGroup: boolean }
+  // Merge messages + protocol events into one chronological stream so the
+  // system pills land between bubbles at the right position. Cluster logic
+  // resets on each system row too — a "disappearing was changed" interrupts
+  // the run of bubbles even when it's from the same sender as before.
+  type Row =
+    | { kind: 'msg'; msg: Message; firstInGroup: boolean; ts: number }
+    | { kind: 'event'; event: ChatEvent; ts: number }
+  const merged: Row[] = []
+  // Messages stream + event stream, merge-sort by timestamp.
+  const msgIter = messages.slice()
+  const evIter = (events || []).slice().sort((a, b) => a.timestamp - b.timestamp)
+  let mi = 0
+  let ei = 0
+  while (mi < msgIter.length || ei < evIter.length) {
+    const m = msgIter[mi]
+    const e = evIter[ei]
+    const takeMsg =
+      m && (!e || m.timestamp <= e.timestamp)
+    if (takeMsg) {
+      merged.push({ kind: 'msg', msg: m, firstInGroup: false, ts: m.timestamp })
+      mi++
+    } else {
+      merged.push({ kind: 'event', event: e, ts: e.timestamp })
+      ei++
+    }
+  }
+
+  // Group by dayLabel, preserving order. Cluster logic (firstInGroup) is
+  // computed per-day so the first row of each section is always firstInGroup
+  // — matches the old reset-on-day-break behaviour. Each group becomes its
+  // own <section> below so the day pill at the top can stick (WA's drifting
+  // date header).
   const groups: { day: string; rows: Row[] }[] = []
   {
     let cur: { day: string; rows: Row[] } | null = null
     let lastKey = ''
     let lastTs = 0
-    for (const m of messages) {
-      const day = dayLabel(m.timestamp)
+    for (const row of merged) {
+      const day = dayLabel(row.ts)
       if (!cur || cur.day !== day) {
         cur = { day, rows: [] }
         groups.push(cur)
         lastKey = ''
         lastTs = 0
       }
-      const senderKey = m.is_from_me ? '__me__' : m.sender
-      const firstInGroup = senderKey !== lastKey || m.timestamp - lastTs > CLUSTER_GAP_S
-      lastKey = senderKey
-      lastTs = m.timestamp
-      cur.rows.push({ msg: m, firstInGroup })
+      if (row.kind === 'msg') {
+        const senderKey = row.msg.is_from_me ? '__me__' : row.msg.sender
+        const firstInGroup = senderKey !== lastKey || row.msg.timestamp - lastTs > CLUSTER_GAP_S
+        lastKey = senderKey
+        lastTs = row.msg.timestamp
+        cur.rows.push({ kind: 'msg', msg: row.msg, firstInGroup, ts: row.ts })
+      } else {
+        // System rows interrupt the cluster — reset so the next bubble
+        // becomes firstInGroup again. Mirrors WA's visual break.
+        lastKey = ''
+        lastTs = 0
+        cur.rows.push(row)
+      }
     }
   }
 
@@ -3657,7 +3709,24 @@ function Timeline({
               {day}
             </span>
           </div>
-          {rows.map(({ msg: m, firstInGroup }, i) => (
+          {rows.map((row, i) => {
+            if (row.kind === 'event') {
+              // System pill — centered grey/amber line that interrupts the
+              // bubble stream. Today only ephemeral_setting is rendered;
+              // unknown event_types degrade to a neutral fallback so they
+              // never crash the timeline even when the bridge gains new
+              // ones the client hasn't taught itself about yet.
+              return (
+                <SystemPill
+                  key={'ev:' + row.event.id}
+                  event={row.event}
+                  nameMap={nameMap}
+                />
+              )
+            }
+            const m = row.msg
+            const firstInGroup = row.firstInGroup
+            return (
             <div key={m.id + m.timestamp} data-msg-id={m.id}>
               {unreadDivider && unreadDivider.beforeId === m.id && (
                 // Horizontal "N unread messages" line, drawn just before the
@@ -3741,9 +3810,62 @@ function Timeline({
                 )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </section>
       ))}
+    </div>
+  )
+}
+
+// SystemPill renders a single protocol-level event from the chat's event log
+// as a small centered grey pill that interrupts the bubble stream. WA does
+// the same thing — these lines are subtle but they tell you *why* the chat
+// suddenly has a clock icon or a "you can't message" banner.
+//
+// Today only event_type="ephemeral_setting" is recognised (carries
+// JSON {"timer":<seconds>}); future event types render with the generic
+// label "—" so unknown bridge versions don't crash the timeline.
+function SystemPill({
+  event,
+  nameMap,
+}: {
+  event: ChatEvent
+  nameMap: Map<string, string>
+}) {
+  let label = ''
+  if (event.event_type === 'ephemeral_setting') {
+    let timer = 0
+    try {
+      const parsed = JSON.parse(event.data || '{}')
+      timer = Number(parsed.timer) || 0
+    } catch {}
+    const actor = event.actor_jid
+      ? nameMap.get(event.actor_jid) || ''
+      : ''
+    const who = actor
+      ? actor.split(/\s+/)[0]
+      : 'Someone'
+    label = timer === 0
+      ? `${who} turned disappearing messages off`
+      : `${who} set disappearing messages to ${formatDisappearing(timer)}`
+  } else {
+    // Generic fallback so future event types still render readably.
+    label = event.event_type.replace(/_/g, ' ')
+  }
+  const ts = new Date(event.timestamp * 1000)
+  const hh = ts.getHours().toString().padStart(2, '0')
+  const mm = ts.getMinutes().toString().padStart(2, '0')
+  return (
+    <div className="my-2 flex justify-center">
+      <span className="inline-flex max-w-[80%] items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-center text-[11px] text-amber-200">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+        {label}
+        <span className="text-amber-300/60">· {hh}:{mm}</span>
+      </span>
     </div>
   )
 }

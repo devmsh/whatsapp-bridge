@@ -61,6 +61,20 @@ export interface HistorySettings {
   note?: string
 }
 
+// ChatEvent mirrors the bridge's db.EventLog row — one structured
+// protocol-level event scoped to a chat. event_type today is one of:
+//   "ephemeral_setting" — disappearing-messages timer changed; `data` is
+//                         JSON like `{"timer": 604800}` (seconds).
+// More event types (group_added, group_left, etc) are planned upstream.
+export interface ChatEvent {
+  id: number
+  event_type: string
+  jid: string
+  actor_jid?: string
+  data?: string
+  timestamp: number
+}
+
 // LinkedDevice is one row in the WA Settings → Linked devices list — a
 // JID with the bare booleans the UI needs to render a "this is the
 // primary phone" / "this is the current session" badge.
@@ -911,6 +925,18 @@ export const api = {
   presenceGet: async (jid: string): Promise<PresenceEntry | null> => {
     const res = await fetch('/api/v2/presence/' + encodeURIComponent(jid))
     if (!res.ok) return null
+    return res.json()
+  },
+  // chatEvents returns the protocol-level events scoped to this chat — the
+  // small grey "Disappearing messages set to 7 days" / "X joined" pills WA
+  // renders inline. Today only ephemeral_setting (disappearing-timer
+  // changes) gets logged; the bridge will grow more event types over time.
+  // Sorted newest-first; the timeline merges by timestamp on the client.
+  chatEvents: async (jid: string, limit = 200): Promise<ChatEvent[]> => {
+    const res = await fetch(
+      `/api/v2/chats/${encodeURIComponent(jid)}/events?limit=${limit}`,
+    )
+    if (!res.ok) return []
     return res.json()
   },
   // chatTyping returns the sender JIDs currently typing in this chat (group

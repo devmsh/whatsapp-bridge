@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +98,8 @@ func (s *Server) handleChatByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleChatUnhide(w, r, jid)
 	case "typing":
 		s.handleChatTyping(w, r, jid)
+	case "events":
+		s.handleChatEvents(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
@@ -195,6 +198,36 @@ func (s *Server) handleChatTyping(w http.ResponseWriter, r *http.Request, jid st
 		typers = []string{}
 	}
 	jsonOK(w, typers)
+}
+
+// handleChatEvents returns the events_log entries scoped to this chat,
+// newest-first. Today only ephemeral_setting (disappearing-timer changes)
+// is logged — the client renders each as a centered grey system pill in
+// the timeline so the user can see the change in place, exactly how WA
+// mobile shows it. Empty array (not 404) when there's nothing to show.
+func (s *Server) handleChatEvents(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.guardChatAccess(w, r, jid) {
+		return
+	}
+	limit := 200
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	events, err := s.store.GetEventLogsForChat(jid, limit)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	if events == nil {
+		events = []db.EventLog{}
+	}
+	jsonOK(w, events)
 }
 
 func (s *Server) handleChatDisappearing(w http.ResponseWriter, r *http.Request, jid string) {

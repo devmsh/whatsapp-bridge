@@ -39,3 +39,30 @@ func (s *Store) GetEventLogs(limit int) ([]EventLog, error) {
 	}
 	return logs, rows.Err()
 }
+
+// GetEventLogsForChat returns the events_log entries scoped to one chat,
+// newest-first. Used by the timeline to render system pills (disappearing
+// timer changes, etc) at the right position by interleaving with messages
+// on the client.
+func (s *Store) GetEventLogsForChat(jid string, limit int) ([]EventLog, error) {
+	rows, err := s.DB.Query(
+		`SELECT id, event_type, jid, actor_jid, data, timestamp
+		 FROM events_log
+		 WHERE jid = ?
+		 ORDER BY timestamp DESC
+		 LIMIT ?`, jid, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var logs []EventLog
+	for rows.Next() {
+		var e EventLog
+		if err := rows.Scan(&e.ID, &e.EventType, &e.JID, &e.ActorJID, &e.Data, &e.Timestamp); err != nil {
+			return logs, err
+		}
+		logs = append(logs, e)
+	}
+	return logs, rows.Err()
+}
