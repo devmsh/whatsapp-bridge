@@ -147,7 +147,7 @@ export function ChatList({
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Filter pills — only in normal view (archived has its own affordance). */}
       {view === 'normal' && (
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-neutral-800 px-3 py-2 overflow-x-auto">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-neutral-800 px-3 py-2">
           <FilterPill id="all" current={filter} onPick={setFilter}>All</FilterPill>
           <FilterPill id="unread" current={filter} onPick={setFilter} count={filterCounts.unread}>
             Unread
