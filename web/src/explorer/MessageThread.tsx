@@ -789,6 +789,28 @@ export function MessageThread({
                     : 'Group')
                 : presenceLine || jid.replace('@s.whatsapp.net', '')}
             </span>
+            {/* Mute chip — bell-slash + (when there's an expiry) the
+                relative "left" until the mute lifts. WA mobile shows this
+                right next to the contact name. Click toggles unmute via
+                the same context-menu action the chat-list row uses (handled
+                upstream by the menu API, not wired here directly — for now
+                clicking just routes to the info modal). */}
+            {chat?.is_muted && (
+              <button
+                onClick={() => (group ? setGroupInfoOpen(true) : setContactInfoOpen(true))}
+                title={formatMuteTooltip(chat.muted_until)}
+                className="flex shrink-0 items-center gap-0.5 rounded-full bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium text-neutral-400 transition hover:bg-neutral-700 hover:text-neutral-200"
+              >
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                  <path d="M18.63 13A17.89 17.89 0 0 1 18 8" />
+                  <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" />
+                  <path d="M18 8a6 6 0 0 0-9.33-5" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+                {formatMuteRemaining(chat.muted_until)}
+              </button>
+            )}
             {/* Disappearing-messages chip: small clock + the active timer
                 ("24h" / "7d" / "90d"). Mirrors WA mobile's header indicator
                 — there's no other passive surface telling you the chat is
@@ -2745,6 +2767,38 @@ function useGroupTyping(jid: string | null): string[] {
 //   3+       → "Several people are typing…"  (matches official WA cap)
 //
 // Returns '' when nobody is typing, so the caller can fall back to "Group".
+// formatMuteRemaining is the tiny label inside the header mute chip.
+// "Muted" alone when there's no expiry (always-muted) or the timestamp has
+// already passed; otherwise the short relative "Nh left" / "Nm left" /
+// "Nd left" — same shorthand WA mobile uses.
+function formatMuteRemaining(until?: number): string {
+  if (!until || until === 0) return 'Muted'
+  const now = Math.floor(Date.now() / 1000)
+  const diff = until - now
+  if (diff <= 0) return 'Muted'
+  if (diff < 60) return 'Muted · <1m'
+  if (diff < 3600) return `Muted · ${Math.round(diff / 60)}m left`
+  if (diff < 86400) return `Muted · ${Math.round(diff / 3600)}h left`
+  return `Muted · ${Math.round(diff / 86400)}d left`
+}
+
+// formatMuteTooltip is the longer hover-text on the same chip — spells out
+// the absolute time the mute lifts, so a user who wants to know "exactly
+// when does this come back" can hover and see it.
+function formatMuteTooltip(until?: number): string {
+  if (!until || until === 0) return 'Muted until you unmute manually — tap to open Info'
+  const now = Math.floor(Date.now() / 1000)
+  if (until <= now) return 'Mute has expired — tap to open Info'
+  const d = new Date(until * 1000)
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+  const today = new Date()
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  if (sameDay(d, today)) return `Muted until ${hh}:${mm} today — tap to open Info`
+  return `Muted until ${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${hh}:${mm} — tap to open Info`
+}
+
 // formatDisappearing turns a disappearing-messages timer (seconds) into the
 // short label the header chip and tooltips share. WA only allows three live
 // values, so this is fast-path; anything else degrades to "Nd" so the chip
