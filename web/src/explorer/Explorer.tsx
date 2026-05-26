@@ -32,6 +32,7 @@ import { HiddenBadge } from './HiddenBadge'
 import { ChatUnlockModal } from './ChatUnlockModal'
 import { StarredPanel } from './StarredPanel'
 import { CallsPanel } from './CallsPanel'
+import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls'
 
@@ -164,6 +165,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         if (!m || !m.chat_jid) return
         setLiveMsg(m)
         setChats((prev) => bumpChat(prev, m, selectedRef.current))
+        // Fire a desktop notification if the OS / user has opted in.
+        // All gating (own / muted / focused-current-chat) lives inside.
+        fireNotificationRef.current(m)
       }
       es.onerror = () => {
         es?.close()
@@ -269,6 +273,22 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     setTaskSelection({ kind: 'view', view: 'open' })
     setTab('tasks')
   }, [])
+
+  // Desktop notifications for live incoming messages. Gating, preview
+  // formatting, permission + opt-out state all live inside the hook; we
+  // just call fire(m) from the SSE handler below and render the optional
+  // "Enable notifications" banner at the top of the sidebar.
+  const notifications = useDesktopNotifications({
+    chats,
+    nameMap,
+    selectedJid: selected,
+    onOpenChat: openChat,
+  })
+  // Stash fire() in a ref so the SSE useEffect (which subscribes once on
+  // mount with empty deps) can always reach the latest closure without
+  // re-subscribing the stream.
+  const fireNotificationRef = useRef(notifications.fire)
+  useEffect(() => { fireNotificationRef.current = notifications.fire }, [notifications.fire])
 
   const openCircleTasks = useCallback((id: number) => {
     setRecoOpen(false)
@@ -394,6 +414,31 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             </IconButton>
           </div>
         </header>
+
+        {notifications.permission === 'default' && !notifications.dismissed && (
+          // One-shot prompt to enable native OS notifications. WA's web
+          // client does the same up top. Click "Enable" → browser permission
+          // dialog → if granted, alerts start firing on the SSE handler.
+          // ✕ persists a dismissed flag so it doesn't keep nagging.
+          <div className="flex items-center gap-2 border-b border-neutral-800 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
+            <span aria-hidden="true">🔔</span>
+            <span className="flex-1">Get notified when a message arrives</span>
+            <button
+              onClick={notifications.request}
+              className="rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-neutral-950 transition hover:bg-emerald-500"
+            >
+              Enable
+            </button>
+            <button
+              onClick={notifications.dismissBanner}
+              title="Dismiss"
+              aria-label="Dismiss notification banner"
+              className="flex h-6 w-6 items-center justify-center rounded text-emerald-300/80 hover:bg-emerald-500/15 hover:text-emerald-100"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         <div className="border-b border-neutral-800 px-3 py-2">
           <SearchBar
