@@ -61,6 +61,21 @@ export interface HistorySettings {
   note?: string
 }
 
+// PrivacySettings mirrors whatsmeow's types.PrivacySettings — every field is
+// one of a small string enum. Empty string = WA hasn't synced it yet (we
+// surface as "Default" in the UI). See api.privacy() for the value set per
+// field.
+export interface PrivacySettings {
+  GroupAdd: string
+  LastSeen: string
+  Status: string
+  Profile: string
+  ReadReceipts: string
+  CallAdd: string
+  Online: string
+  Messages: string
+}
+
 export interface ChatPreview {
   chat_jid: string
   sender: string
@@ -1165,6 +1180,38 @@ export const api = {
       body: JSON.stringify({ timer }),
     }).then((r) => {
       if (!r.ok) throw new Error('Failed to set disappearing timer')
+      return r.json() as Promise<{ success: boolean }>
+    }),
+  // privacy returns the user's current privacy settings — exactly what WA's
+  // "Settings → Privacy" panel shows. Whatsmeow's `PrivacySettings` struct
+  // is serialised with PascalCase fields, so we expose the same shape here.
+  // Every field is one of a small enum of strings — see the canonical list:
+  //
+  //   LastSeen / Status / Profile / GroupAdd:
+  //     "all" | "contacts" | "contact_blacklist" | "none"
+  //   ReadReceipts:  "all" | "none"
+  //   Online:        "all" | "match_last_seen"
+  //   CallAdd:       "all" | "known"
+  //   Messages:      "all" | "contacts"
+  //
+  // The bridge falls back to "" for any setting WA hasn't yet synced — the
+  // UI renders those as a neutral "Default" so we don't lie about what's
+  // actually applied server-side.
+  privacy: async (): Promise<PrivacySettings> => {
+    const res = await fetch('/api/v2/privacy')
+    if (!res.ok) throw new Error('Failed to load privacy settings')
+    return res.json()
+  },
+  // setPrivacy writes one setting. setting names are the whatsmeow keys
+  // (last / online / status / profile / readreceipts / groupadd / calladd /
+  // messages / stickers / defense); value is one of the enums above.
+  setPrivacy: (setting: string, value: string) =>
+    fetch('/api/v2/privacy', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ setting, value }),
+    }).then((r) => {
+      if (!r.ok) throw new Error('Failed to save privacy setting')
       return r.json() as Promise<{ success: boolean }>
     }),
   // blocklist returns the set of JIDs the current user has blocked. The

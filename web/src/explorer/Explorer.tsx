@@ -22,6 +22,7 @@ import { TasksView } from './TasksView'
 import { TaskView } from './TaskView'
 import { MessageThread } from './MessageThread'
 import { MediaSettings } from '../Settings'
+import { PrivacySettings } from './PrivacySettings'
 import { ProfilingStatusModal } from './ProfilingStatus'
 import { BriefingModal } from './BriefingView'
 import { SearchBar } from './Search'
@@ -62,6 +63,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [liveMsg, setLiveMsg] = useState<Message | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showPrivacy, setShowPrivacy] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
   const [dndOpen, setDndOpen] = useState(false)
@@ -493,6 +495,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   return (
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
+      {showPrivacy && <PrivacySettings onClose={() => setShowPrivacy(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {showCompose && (
         <NewChatModal
@@ -591,6 +594,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             </IconButton>
             <IconButton title="Profiles & AI context" onClick={() => setShowProfiling(true)}>
               🧠
+            </IconButton>
+            <IconButton title="Privacy" onClick={() => setShowPrivacy(true)}>
+              🔒
             </IconButton>
             <IconButton title="Media settings" onClick={() => setShowSettings(true)}>
               ⚙
