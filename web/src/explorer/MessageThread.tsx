@@ -20,6 +20,7 @@ import { ForwardPicker } from './ForwardPicker'
 import { EmojiPicker } from './EmojiPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
+import { SharedMediaModal } from './SharedMediaModal'
 
 const PAGE = 100
 
@@ -94,6 +95,10 @@ export function MessageThread({
   // null = closed. The own-message whose delivery receipts the user wants
   // to inspect via the "Info" action. Opens MessageInfo modal.
   const [infoMsg, setInfoMsg] = useState<Message | null>(null)
+  // Shared-media grid open/closed. WA's chat-info → Media tab equivalent.
+  // Tapping a thumbnail closes this and re-opens the existing lightbox at
+  // that index, so the gallery-to-image flow re-uses cycle-N machinery.
+  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
   // IDs of messages the user has selected for batch actions. Non-empty
   // means "select mode" is on; bubbles then show a checkbox overlay
   // and clicking a bubble toggles its selection instead of acting on it.
@@ -216,6 +221,7 @@ export function MessageThread({
     setLightboxIdx(null)
     setForwardMsg(null)
     setInfoMsg(null)
+    setMediaGalleryOpen(false)
     setSelectedIds(new Set())
     setBatchForward(null)
     setSearchOpen(false)
@@ -668,6 +674,20 @@ export function MessageThread({
             <path d="m21 21-4.3-4.3" />
           </svg>
         </button>
+        {lightboxImages.length > 0 && (
+          <button
+            onClick={() => setMediaGalleryOpen(true)}
+            title="Media — see every photo in this chat"
+            aria-label="Open shared media gallery"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="9" cy="9" r="2" />
+              <path d="M21 15l-5-5L5 21" />
+            </svg>
+          </button>
+        )}
         <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
       </header>
 
@@ -897,6 +917,18 @@ export function MessageThread({
           index={lightboxIdx}
           onIndex={setLightboxIdx}
           onClose={() => setLightboxIdx(null)}
+        />
+      )}
+
+      {mediaGalleryOpen && (
+        <SharedMediaModal
+          title={title}
+          images={lightboxImages}
+          onClose={() => setMediaGalleryOpen(false)}
+          onOpenIndex={(i) => {
+            setMediaGalleryOpen(false)
+            setLightboxIdx(i)
+          }}
         />
       )}
 
