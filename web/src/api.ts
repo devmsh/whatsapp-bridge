@@ -1167,6 +1167,21 @@ export const api = {
       if (!r.ok) throw new Error('Failed to set disappearing timer')
       return r.json() as Promise<{ success: boolean }>
     }),
+  // blocklist returns the set of JIDs the current user has blocked. The
+  // bridge wraps whatsmeow's GetBlocklist which returns `{ DHash, JIDs }`;
+  // we just hand back the JID list — DHash is only useful for diffing on
+  // the server. Used by Contact info to decide Block / Unblock label.
+  blocklist: async (): Promise<string[]> => {
+    const res = await fetch('/api/v2/blocklist')
+    if (!res.ok) return []
+    const body = (await res.json()) as { JIDs?: string[] }
+    return body.JIDs || []
+  },
+  // blockContact blocks or unblocks `jid`. WA hides everything in both
+  // directions while blocked (status, presence, profile photo, messages).
+  // The bridge POSTs to /blocklist with action 'block' | 'unblock'.
+  blockContact: (jid: string, action: 'block' | 'unblock') =>
+    postBody<{ success: boolean }>('/api/v2/blocklist', { jid, action }),
   removeTaskCircle: (id: number, circleId: number) =>
     del(`/api/v2/tasks/${id}/circles`, { circle_id: circleId }),
   deleteCircle: (id: number) => del(`/api/v2/circles/${id}`),

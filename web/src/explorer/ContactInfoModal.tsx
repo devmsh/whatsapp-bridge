@@ -26,6 +26,13 @@ export function ContactInfoModal({
 }) {
   const [data, setData] = useState<DashContact | null>(null)
   const [error, setError] = useState('')
+  // null while loading — the footer Block / Unblock button stays disabled
+  // until we know which one to show. Cheap call; one /blocklist request
+  // returns the full JID list and we just check membership.
+  const [blocked, setBlocked] = useState<boolean | null>(null)
+  // Set when a block/unblock POST is in flight, drives the button spinner /
+  // disabled state so a double-click can't fire two mutations.
+  const [blocking, setBlocking] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -34,8 +41,38 @@ export function ContactInfoModal({
     }).catch((e) => {
       if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load contact')
     })
+    api.blocklist().then((list) => {
+      if (!cancelled) setBlocked(list.includes(jid))
+    }).catch(() => {
+      if (!cancelled) setBlocked(false)
+    })
     return () => { cancelled = true }
   }, [jid])
+
+  async function toggleBlock() {
+    if (blocked === null || blocking) return
+    const next = !blocked
+    // Confirm the destructive direction. Unblock is reversible by re-blocking,
+    // but block silently severs the contact in both directions — WA itself
+    // asks before doing it. We mirror that copy.
+    if (next) {
+      const ok = window.confirm(
+        `Block this contact?\n\nThey won't see your messages, status, or profile photo, and you won't see theirs. You can unblock any time from here.`,
+      )
+      if (!ok) return
+    }
+    setBlocking(true)
+    try {
+      await api.blockContact(jid, next ? 'block' : 'unblock')
+      setBlocked(next)
+    } catch (e) {
+      window.alert(
+        'Block action failed: ' + (e instanceof Error ? e.message : 'unknown error'),
+      )
+    } finally {
+      setBlocking(false)
+    }
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -94,6 +131,14 @@ export function ContactInfoModal({
                 className="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-sky-200"
               >
                 Business
+              </span>
+            )}
+            {blocked && (
+              <span
+                title="You blocked this contact — they can't see or message you"
+                className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-red-300"
+              >
+                Blocked
               </span>
             )}
           </div>
@@ -161,9 +206,28 @@ export function ContactInfoModal({
         </div>
 
         <footer className="flex items-center justify-between gap-2 border-t border-neutral-800 px-4 py-3">
-          <span className="text-[11px] text-neutral-500">
-            Need the full picture?
-          </span>
+          {/* Block / Unblock — destructive direction (block) gets the red
+              border; unblock is a friendly neutral. Disabled until the
+              blocklist fetch lands so we never show the wrong verb. */}
+          <button
+            onClick={toggleBlock}
+            disabled={blocked === null || blocking}
+            className={
+              'rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ' +
+              (blocked
+                ? 'border border-neutral-700 text-neutral-200 hover:bg-neutral-800'
+                : 'border border-red-700/70 text-red-300 hover:bg-red-950/40')
+            }
+            title={blocked ? 'Unblock — restore messaging both ways' : 'Block — hide messages and presence both ways'}
+          >
+            {blocking
+              ? blocked
+                ? 'Unblocking…'
+                : 'Blocking…'
+              : blocked
+                ? 'Unblock'
+                : 'Block contact'}
+          </button>
           <button
             onClick={onOpenDashboard}
             className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-emerald-500"
