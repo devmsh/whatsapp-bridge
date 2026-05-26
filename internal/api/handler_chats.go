@@ -100,6 +100,8 @@ func (s *Server) handleChatByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleChatTyping(w, r, jid)
 	case "events":
 		s.handleChatEvents(w, r, jid)
+	case "calls":
+		s.handleChatCalls(w, r, jid)
 	default:
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w)
@@ -198,6 +200,34 @@ func (s *Server) handleChatTyping(w http.ResponseWriter, r *http.Request, jid st
 		typers = []string{}
 	}
 	jsonOK(w, typers)
+}
+
+// handleChatCalls returns the call events scoped to this chat — used by the
+// timeline to render inline "📞 Voice call" pills the same way WA mobile
+// folds calls into the chat. Newest-first, capped by limit (default 200).
+func (s *Server) handleChatCalls(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.guardChatAccess(w, r, jid) {
+		return
+	}
+	limit := 200
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+	calls, err := s.store.GetCallsForChat(jid, limit)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	if calls == nil {
+		calls = []db.CallEvent{}
+	}
+	jsonOK(w, calls)
 }
 
 // handleChatEvents returns the events_log entries scoped to this chat,

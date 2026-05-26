@@ -927,6 +927,17 @@ export const api = {
     if (!res.ok) return null
     return res.json()
   },
+  // chatCalls returns the call events scoped to this chat — used to render
+  // WA-style inline "📞 Voice call" pills in the timeline. The bridge logs
+  // every event_type row (offer / accept / terminate / etc); the client
+  // coalesces them into one pill per call_id before rendering.
+  chatCalls: async (jid: string, limit = 200): Promise<CallEvent[]> => {
+    const res = await fetch(
+      `/api/v2/chats/${encodeURIComponent(jid)}/calls?limit=${limit}`,
+    )
+    if (!res.ok) return []
+    return res.json()
+  },
   // chatEvents returns the protocol-level events scoped to this chat — the
   // small grey "Disappearing messages set to 7 days" / "X joined" pills WA
   // renders inline. Today only ephemeral_setting (disappearing-timer

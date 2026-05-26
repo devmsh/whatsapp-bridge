@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api, type Chat, type ChatEvent, type Circle, type GroupParticipant, type Message, type PresenceEntry, type Tag } from '../api'
+import { api, type CallEvent, type Chat, type ChatEvent, type Circle, type GroupParticipant, type Message, type PresenceEntry, type Tag } from '../api'
 import {
   chatTitle, dayLabel, isGroup, isNewsletter, isStatus, jidUser, mediaURL, senderTitle,
   type MentionEntry,
@@ -91,6 +91,9 @@ export function MessageThread({
   // Protocol-level events scoped to this chat (disappearing-timer changes,
   // etc). Loaded alongside messages, merged into the Timeline by timestamp.
   const [chatEvents, setChatEvents] = useState<ChatEvent[]>([])
+  // Voice / video call events for this chat — also merged into the Timeline
+  // as inline pills (WA mobile shows "📞 Voice call · 14:32" inline).
+  const [chatCalls, setChatCalls] = useState<CallEvent[]>([])
   const [limit, setLimit] = useState(PAGE)
   const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(false)
@@ -286,6 +289,13 @@ export function MessageThread({
         if (!cancelled) setChatEvents(ev || [])
       })
       .catch(() => !cancelled && setChatEvents([]))
+    // Call events — same parallel fetch + silent failure pattern.
+    api
+      .chatCalls(jid, 200)
+      .then((cs) => {
+        if (!cancelled) setChatCalls(cs || [])
+      })
+      .catch(() => !cancelled && setChatCalls([]))
     return () => {
       cancelled = true
     }
@@ -1068,6 +1078,7 @@ export function MessageThread({
               <Timeline
                 messages={messages}
                 events={chatEvents}
+                calls={chatCalls}
                 group={group}
                 nameMap={nameMap}
                 mentionIndex={mentionIndex}
@@ -3555,6 +3566,7 @@ function mediaWord(t?: string): string {
 function Timeline({
   messages,
   events,
+  calls,
   group,
   nameMap,
   mentionIndex,
@@ -3584,6 +3596,11 @@ function Timeline({
    *  changes etc. Rendered as centered grey/amber system pills in their
    *  timestamp position alongside regular bubbles. */
   events?: ChatEvent[]
+  /** Voice / video call events for this chat — rendered as inline
+   *  "📞 Voice call · 14:32" pills the same way WA mobile folds calls
+   *  into the chat thread. Multiple events_log rows for the same call_id
+   *  collapse to a single pill. */
+  calls?: CallEvent[]
   group: boolean
   nameMap: Map<string, string>
   mentionIndex: Map<string, MentionEntry>
@@ -3633,30 +3650,84 @@ function Timeline({
   // a tighter vertical gap between bubbles inside it.
   const CLUSTER_GAP_S = 60
 
-  // Merge messages + protocol events into one chronological stream so the
-  // system pills land between bubbles at the right position. Cluster logic
-  // resets on each system row too — a "disappearing was changed" interrupts
-  // the run of bubbles even when it's from the same sender as before.
+  // Coalesce raw call-event rows into one logical "call" per call_id —
+  // WA emits offer / accept / terminate as separate rows, but the UI only
+  // wants a single pill summarising what happened. We keep the *earliest*
+  // row's timestamp (the offer / ring time) and pick the most useful
+  // event_type seen across the bundle (missed > rejected > accepted >
+  // anything else) so the label matches the user's experience.
+  type CoalescedCall = {
+    call_id: string
+    ts: number
+    event_type: string
+    is_video: boolean
+  }
+  const coalesced: CoalescedCall[] = (() => {
+    const acc = new Map<string, CoalescedCall>()
+    const priority = (t: string) =>
+      t === 'missed' ? 4
+      : t === 'terminate-by-caller' ? 3
+      : t === 'reject' ? 3
+      : t === 'accept' ? 2
+      : 1
+    for (const c of calls || []) {
+      const prev = acc.get(c.call_id)
+      const dataLower = (c.data || '').toLowerCase()
+      const isVideo = /video/.test(dataLower)
+      if (!prev) {
+        acc.set(c.call_id, {
+          call_id: c.call_id,
+          ts: c.timestamp,
+          event_type: c.event_type,
+          is_video: isVideo,
+        })
+      } else {
+        if (c.timestamp < prev.ts) prev.ts = c.timestamp
+        if (priority(c.event_type) > priority(prev.event_type)) {
+          prev.event_type = c.event_type
+        }
+        if (isVideo) prev.is_video = true
+      }
+    }
+    return [...acc.values()].sort((a, b) => a.ts - b.ts)
+  })()
+
+  // Merge messages + protocol events + calls into one chronological stream
+  // so the system pills land between bubbles at the right position. Cluster
+  // logic resets on each system row too — a "disappearing was changed"
+  // interrupts the run of bubbles even when it's from the same sender as
+  // before.
   type Row =
     | { kind: 'msg'; msg: Message; firstInGroup: boolean; ts: number }
     | { kind: 'event'; event: ChatEvent; ts: number }
+    | { kind: 'call'; call: CoalescedCall; ts: number }
   const merged: Row[] = []
-  // Messages stream + event stream, merge-sort by timestamp.
+  // Multi-way merge by timestamp.
   const msgIter = messages.slice()
   const evIter = (events || []).slice().sort((a, b) => a.timestamp - b.timestamp)
+  const callIter = coalesced
   let mi = 0
   let ei = 0
-  while (mi < msgIter.length || ei < evIter.length) {
+  let ci = 0
+  while (mi < msgIter.length || ei < evIter.length || ci < callIter.length) {
     const m = msgIter[mi]
     const e = evIter[ei]
-    const takeMsg =
-      m && (!e || m.timestamp <= e.timestamp)
-    if (takeMsg) {
+    const c = callIter[ci]
+    // Pick whichever stream has the smallest timestamp still available.
+    const ts = Math.min(
+      m ? m.timestamp : Infinity,
+      e ? e.timestamp : Infinity,
+      c ? c.ts : Infinity,
+    )
+    if (m && m.timestamp === ts) {
       merged.push({ kind: 'msg', msg: m, firstInGroup: false, ts: m.timestamp })
       mi++
-    } else {
+    } else if (e && e.timestamp === ts) {
       merged.push({ kind: 'event', event: e, ts: e.timestamp })
       ei++
+    } else if (c) {
+      merged.push({ kind: 'call', call: c, ts: c.ts })
+      ci++
     }
   }
 
@@ -3685,8 +3756,8 @@ function Timeline({
         lastTs = row.msg.timestamp
         cur.rows.push({ kind: 'msg', msg: row.msg, firstInGroup, ts: row.ts })
       } else {
-        // System rows interrupt the cluster — reset so the next bubble
-        // becomes firstInGroup again. Mirrors WA's visual break.
+        // Event + call rows interrupt the cluster — reset so the next
+        // bubble becomes firstInGroup again. Mirrors WA's visual break.
         lastKey = ''
         lastTs = 0
         cur.rows.push(row)
@@ -3723,6 +3794,9 @@ function Timeline({
                   nameMap={nameMap}
                 />
               )
+            }
+            if (row.kind === 'call') {
+              return <CallPill key={'call:' + row.call.call_id} call={row.call} />
             }
             const m = row.msg
             const firstInGroup = row.firstInGroup
@@ -3814,6 +3888,65 @@ function Timeline({
           })}
         </section>
       ))}
+    </div>
+  )
+}
+
+// CallPill renders one coalesced call (offer/accept/terminate all collapsed
+// to a single row) as the inline "📞 Voice call · 14:32" pill WA mobile
+// folds into the chat thread. Colour tone reflects the outcome:
+//   missed / reject → red-ish (you should notice it)
+//   accept          → emerald (it actually connected)
+//   anything else   → neutral
+//
+// The icon flips between phone (voice) and camera (video) based on the
+// coalesced is_video flag.
+function CallPill({
+  call,
+}: {
+  call: { call_id: string; ts: number; event_type: string; is_video: boolean }
+}) {
+  const isMissed = call.event_type === 'missed'
+  const isRejected = call.event_type === 'reject'
+  const isAccepted = call.event_type === 'accept'
+  const kind = call.is_video ? 'Video call' : 'Voice call'
+  let label = kind
+  if (isMissed) label = `Missed ${kind.toLowerCase()}`
+  else if (isRejected) label = `Declined ${kind.toLowerCase()}`
+  else if (isAccepted) label = kind // "accept" alone means the call went through
+  const d = new Date(call.ts * 1000)
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  const palette =
+    isMissed || isRejected
+      ? 'bg-red-500/10 text-red-200'
+      : isAccepted
+        ? 'bg-emerald-500/10 text-emerald-200'
+        : 'bg-neutral-800/80 text-neutral-300'
+  const dotPalette =
+    isMissed || isRejected
+      ? 'text-red-300/60'
+      : isAccepted
+        ? 'text-emerald-300/60'
+        : 'text-neutral-500'
+  return (
+    <div className="my-2 flex justify-center">
+      <span className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] ${palette}`}>
+        {call.is_video ? (
+          /* Camera glyph for video */
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 8 16 12l6 4V8z" />
+            <rect x="2" y="6" width="14" height="12" rx="2" />
+          </svg>
+        ) : (
+          /* Phone-handset glyph for voice */
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.33 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
+          </svg>
+        )}
+        {label}
+        <span className={dotPalette}>· {hh}:{mm}</span>
+      </span>
     </div>
   )
 }

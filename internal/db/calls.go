@@ -47,3 +47,35 @@ func (s *Store) GetCalls(limit int) ([]CallEvent, error) {
 	}
 	return calls, rows.Err()
 }
+
+// GetCallsForChat returns the call events scoped to one chat. For DMs the
+// chat JID matches from_jid; for groups it matches group_jid. The timeline
+// uses this to render WA-style "📞 Voice call · 14:32" pills inline.
+//
+// We surface every event_type row — the client coalesces them into one pill
+// per call_id so a noisy "offer / accept / terminate" sequence reads as a
+// single line, exactly how WA mobile renders it.
+func (s *Store) GetCallsForChat(jid string, limit int) ([]CallEvent, error) {
+	rows, err := s.DB.Query(
+		`SELECT call_id, from_jid, timestamp, call_creator, group_jid,
+		 event_type, remote_platform, remote_version, data
+		 FROM calls
+		 WHERE from_jid = ? OR group_jid = ?
+		 ORDER BY timestamp DESC
+		 LIMIT ?`, jid, jid, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var calls []CallEvent
+	for rows.Next() {
+		var c CallEvent
+		if err := rows.Scan(&c.CallID, &c.FromJID, &c.Timestamp, &c.CallCreator, &c.GroupJID,
+			&c.EventType, &c.RemotePlatform, &c.RemoteVersion, &c.Data); err != nil {
+			return calls, err
+		}
+		calls = append(calls, c)
+	}
+	return calls, rows.Err()
+}
