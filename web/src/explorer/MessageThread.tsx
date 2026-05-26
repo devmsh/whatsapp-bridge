@@ -21,6 +21,7 @@ import { EmojiPicker } from './EmojiPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
 import { ScheduleSendModal } from './ScheduleSendModal'
+import { SendLocationModal } from './SendLocationModal'
 import { useScheduledMessages, type ScheduledMessage } from '../hooks/useScheduledMessages'
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
@@ -1350,6 +1351,10 @@ function Composer({
   // Hook into the shared scheduled-message queue so this composer can stage
   // a new entry — the autopilot in Explorer takes over from there.
   const scheduled = useScheduledMessages()
+  // Send-location modal toggle. The bridge accepts coordinates straight in
+  // a dedicated POST /send-location, so the composer just opens the picker
+  // and lets it fire when the user confirms.
+  const [locationOpen, setLocationOpen] = useState(false)
   // Open mention-picker state: when the user is typing '@<query>' in the
   // textarea we open an autocomplete of group participants. `start` is the
   // caret position of the '@'; `query` is what's been typed after it.
@@ -2102,6 +2107,22 @@ function Composer({
                 <path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.49" />
               </svg>
             </button>
+            {/* Send location — the second "share" verb after paperclip. WA
+                lumps both under one + menu on mobile; we keep them as
+                discrete buttons because desktop pointer affordances are
+                cheap. Disabled during edit (same reason as paperclip). */}
+            <button
+              onClick={() => setLocationOpen(true)}
+              disabled={!!editingMsg}
+              title={editingMsg ? 'Location share is disabled while editing' : 'Send location'}
+              aria-label="Send location"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="10" r="3" />
+                <path d="M12 21s-7-7.58-7-12a7 7 0 0 1 14 0c0 4.42-7 12-7 12z" />
+              </svg>
+            </button>
             <div className="relative shrink-0">
               <button
                 onClick={() => setEmojiOpen((v) => !v)}
@@ -2250,6 +2271,18 @@ function Composer({
           onClose={() => setScheduleOpen(false)}
           onPick={(when) => {
             void schedule(when)
+          }}
+        />
+      )}
+      {locationOpen && (
+        <SendLocationModal
+          jid={jid}
+          onClose={() => setLocationOpen(false)}
+          onSent={() => {
+            // The bridge accepted the location message; the SSE round-trip
+            // will deliver the real bubble. We don't echo a placeholder
+            // here — the timeline already handles incoming-from-self
+            // messages via the stream subscription.
           }}
         />
       )}

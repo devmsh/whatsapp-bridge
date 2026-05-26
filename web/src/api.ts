@@ -1275,6 +1275,14 @@ export const api = {
       if (!r.ok) throw new Error('Failed to set disappearing timer')
       return r.json() as Promise<{ success: boolean }>
     }),
+  // sendLocation fires a WA LocationMessage — the "📍" share-where-I-am
+  // gesture every WA user knows. name + address are optional (render as the
+  // location bubble's title + subtitle in WA); coordinates are required.
+  sendLocation: (jid: string, lat: number, lng: number, name?: string, address?: string) =>
+    postBody<{ success: boolean; message_id: string; timestamp: number }>(
+      '/api/v2/send-location',
+      { jid, latitude: lat, longitude: lng, name, address },
+    ),
   // linkedDevices returns every device JID currently paired to this account
   // (WA Settings → Linked devices). Resolved upstream via GetUserInfo.
   // Includes a `current` JID so the UI can flag which row is *this* session.
