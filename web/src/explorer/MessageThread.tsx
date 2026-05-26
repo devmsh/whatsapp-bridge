@@ -21,6 +21,7 @@ import { EmojiPicker } from './EmojiPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
 import { SharedMediaModal } from './SharedMediaModal'
+import { GroupInfoModal } from './GroupInfoModal'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
 
 const PAGE = 100
@@ -100,6 +101,10 @@ export function MessageThread({
   // Tapping a thumbnail closes this and re-opens the existing lightbox at
   // that index, so the gallery-to-image flow re-uses cycle-N machinery.
   const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false)
+  // Group info modal open/closed (groups only). WA's chat-info → Members
+  // tab equivalent: hero avatar + member count + sorted participant list
+  // with admin badges. Clicking a member opens a DM with them.
+  const [groupInfoOpen, setGroupInfoOpen] = useState(false)
   // IDs of messages the user has selected for batch actions. Non-empty
   // means "select mode" is on; bubbles then show a checkbox overlay
   // and clicking a bubble toggles its selection instead of acting on it.
@@ -246,6 +251,7 @@ export function MessageThread({
     setForwardMsg(null)
     setInfoMsg(null)
     setMediaGalleryOpen(false)
+    setGroupInfoOpen(false)
     setSelectedIds(new Set())
     setBatchForward(null)
     setSearchOpen(false)
@@ -756,6 +762,21 @@ export function MessageThread({
             <path d="M21 15l-5-5L5 21" />
           </svg>
         </button>
+        {group && (
+          <button
+            onClick={() => setGroupInfoOpen(true)}
+            title="Group members + admins"
+            aria-label="Open group info"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          </button>
+        )}
         <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
       </header>
 
@@ -1002,6 +1023,17 @@ export function MessageThread({
             setMediaGalleryOpen(false)
             setLightboxIdx(i)
           }}
+        />
+      )}
+
+      {groupInfoOpen && group && (
+        <GroupInfoModal
+          jid={jid}
+          title={title}
+          memberCount={memberCount}
+          nameMap={nameMap}
+          onClose={() => setGroupInfoOpen(false)}
+          onOpenChat={(j) => onOpenChat?.(j) ?? onOpenChatTasks(j)}
         />
       )}
 
