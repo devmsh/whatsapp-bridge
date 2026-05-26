@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Contact, Group } from '../api'
+import type { Contact, DeviceInfo, Group } from '../api'
 import { ChatAvatar } from './ChatAvatar'
 import { isGroup } from './format'
 
@@ -15,11 +15,17 @@ import { isGroup } from './format'
 export function NewChatModal({
   contacts,
   groups,
+  selfDevice,
   onClose,
   onPick,
 }: {
   contacts: Contact[]
   groups: Group[]
+  /** Connected-device info (when known). Drives the "Message yourself"
+   *  / Saved Messages row at the top of the picker — pings the user's
+   *  own JID, which whatsmeow handles as the WA "message yourself"
+   *  feature so it doubles as a personal notepad. */
+  selfDevice?: DeviceInfo
   onClose: () => void
   onPick: (jid: string) => void
 }) {
@@ -55,13 +61,30 @@ export function NewChatModal({
   // gesture WA mobile uses when you type a number into search.
   const matches = useMemo(() => {
     type Row = {
-      kind: 'contact' | 'group' | 'phone'
+      kind: 'contact' | 'group' | 'phone' | 'self'
       jid: string
       title: string
       subtitle: string
     }
     const needle = q.trim().toLowerCase()
     const out: Row[] = []
+    // Saved Messages / "Message yourself" — top of the list when we know
+    // the connected device's JID. WA's recent feature for personal notes:
+    // sends to yourself land back via the SSE stream as a self-thread.
+    // Skipped when the user has typed a query (the picker becomes a
+    // filtered list of matches, and a generic "Saved messages" wouldn't
+    // match anyway unless they typed "saved" specifically).
+    if (selfDevice?.jid && !needle) {
+      // Strip the device suffix (`:NN`) — the non-suffixed JID is the
+      // "message yourself" target whatsmeow accepts.
+      const self = selfDevice.jid.replace(/:\d+@/, '@')
+      out.push({
+        kind: 'self',
+        jid: self,
+        title: '⭐ Saved messages',
+        subtitle: 'Message yourself · keep notes, links, anything',
+      })
+    }
     // Phone shortcut — sits above contacts so a typed number always has a
     // one-click path even when contacts happen to share digits.
     const phoneMatch = q.trim().match(/^\+?(\d{6,15})$/)
@@ -97,7 +120,7 @@ export function NewChatModal({
     groupRows.sort((a, b) => a.title.localeCompare(b.title))
     // Cap to keep the modal snappy even with thousands of contacts.
     return [...out, ...contactRows, ...groupRows].slice(0, 200)
-  }, [contacts, groups, q])
+  }, [contacts, groups, q, selfDevice?.jid])
 
   return (
     <div

@@ -232,12 +232,18 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     }
 
     // Fallthrough A — looks like a phone-style DM JID we've never chatted
-    // with (NewChatModal's "Start chat with +XXX" shortcut, or a deep
-    // link). Stub it into extraChats so MessageThread can render an
-    // empty thread with the composer; the first send will land in the
-    // real chats table and the row will graduate to the sidebar list.
+    // with (NewChatModal's "Start chat with +XXX" shortcut, the Saved
+    // Messages row, or a deep link). Stub it into extraChats so
+    // MessageThread can render an empty thread with the composer; the
+    // first send will land in the real chats table and the row will
+    // graduate to the sidebar list.
     const phoneMatch = jid.match(/^(\d{6,15})@s\.whatsapp\.net$/)
     if (phoneMatch) {
+      // If the target is our own JID (device suffix stripped) label it
+      // "Saved messages" instead of the raw "+digits" — same hint WA
+      // surfaces for the Message-yourself thread.
+      const selfJID = device?.jid?.replace(/:\d+@/, '@')
+      const isSelf = selfJID && selfJID === jid
       setExtraChats((prev) =>
         prev[jid]
           ? prev
@@ -245,7 +251,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               ...prev,
               [jid]: {
                 jid,
-                name: '+' + phoneMatch[1],
+                name: isSelf ? '⭐ Saved messages' : '+' + phoneMatch[1],
                 chat_type: 'dm',
                 last_message_at: 0,
                 unread_count: 0,
@@ -264,7 +270,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
     // Fallthrough B: still unknown — we genuinely can't route here.
     alert('This chat is locked or not available.')
-  }, [contacts, extraChats])
+  }, [contacts, extraChats, device?.jid])
 
   // Called by ChatUnlockModal once Touch ID succeeded and a per-chat token
   // was stored. We fetch the chat row (now authorised by the new token via
@@ -484,6 +490,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         <NewChatModal
           contacts={contacts}
           groups={groups}
+          selfDevice={device}
           onPick={(jid) => openChat(jid)}
           onClose={() => setShowCompose(false)}
         />
