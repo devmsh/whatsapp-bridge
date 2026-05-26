@@ -2659,107 +2659,134 @@ function Timeline({
   // exactly this — sender label only on the first bubble of the cluster, and
   // a tighter vertical gap between bubbles inside it.
   const CLUSTER_GAP_S = 60
-  let lastDay = ''
-  let lastKey = ''
-  let lastTs = 0
+
+  // Group messages by their dayLabel, preserving order. Cluster logic
+  // (firstInGroup) is computed per-day so the first message of each
+  // section is always firstInGroup — matches the old reset-on-day-break
+  // behaviour. Each group becomes its own <section> below so the day
+  // pill at the top can stick (WA's drifting date header).
+  type Row = { msg: Message; firstInGroup: boolean }
+  const groups: { day: string; rows: Row[] }[] = []
+  {
+    let cur: { day: string; rows: Row[] } | null = null
+    let lastKey = ''
+    let lastTs = 0
+    for (const m of messages) {
+      const day = dayLabel(m.timestamp)
+      if (!cur || cur.day !== day) {
+        cur = { day, rows: [] }
+        groups.push(cur)
+        lastKey = ''
+        lastTs = 0
+      }
+      const senderKey = m.is_from_me ? '__me__' : m.sender
+      const firstInGroup = senderKey !== lastKey || m.timestamp - lastTs > CLUSTER_GAP_S
+      lastKey = senderKey
+      lastTs = m.timestamp
+      cur.rows.push({ msg: m, firstInGroup })
+    }
+  }
+
   return (
     <div className="flex flex-col">
-      {messages.map((m) => {
-        const day = dayLabel(m.timestamp)
-        const sep = day !== lastDay
-        lastDay = day
-        const senderKey = m.is_from_me ? '__me__' : m.sender
-        const firstInGroup =
-          sep || senderKey !== lastKey || m.timestamp - lastTs > CLUSTER_GAP_S
-        lastKey = senderKey
-        lastTs = m.timestamp
-        return (
-          <div key={m.id + m.timestamp} data-msg-id={m.id}>
-            {sep && (
-              <div className="my-3 flex justify-center">
-                <span className="rounded-full bg-neutral-800 px-3 py-1 text-[11px] text-neutral-400">
-                  {day}
-                </span>
-              </div>
-            )}
-            {unreadDivider && unreadDivider.beforeId === m.id && (
-              // Horizontal "N unread messages" line, drawn just before the
-              // first unread incoming message. Emerald so it pops against
-              // the neutral thread without competing with day separators.
-              // data-unread-divider lets the thread's layout-effect find
-              // it for the once-per-chat-open auto-scroll.
-              <div
-                data-unread-divider="true"
-                className="my-3 flex items-center gap-3 text-[11px] font-medium text-emerald-300/80"
-              >
-                <div className="h-px flex-1 bg-emerald-500/30" />
-                <span className="uppercase tracking-wider">
-                  {unreadDivider.count} unread {unreadDivider.count === 1 ? 'message' : 'messages'}
-                </span>
-                <div className="h-px flex-1 bg-emerald-500/30" />
-              </div>
-            )}
-            <div
-              className={
-                (sep ? '' : firstInGroup ? 'mt-2' : 'mt-0.5') +
-                ' ' +
-                (selectMode ? 'relative cursor-pointer rounded-md' : '') +
-                ' ' +
-                (selectMode && selectedIds?.has(m.id)
-                  ? 'bg-emerald-500/10 ring-1 ring-emerald-500/40'
-                  : '')
-              }
-              onClick={selectMode && onToggleSelect ? () => onToggleSelect(m.id) : undefined}
-            >
-              <MessageBubble
-                msg={m}
-                group={group}
-                nameMap={nameMap}
-                mentionIndex={mentionIndex}
-                onOpenTask={onOpenTask}
-                onTasksChanged={onTasksChanged}
-                onOpenChat={onOpenChat}
-                // Suppress per-bubble actions while in select mode — the
-                // whole row becomes a toggle target instead, and the
-                // SelectionBar owns the batch actions.
-                onReply={selectMode ? undefined : onReply}
-                onReact={selectMode ? undefined : onReact}
-                onForward={selectMode ? undefined : onForward}
-                onStar={selectMode ? undefined : onStar}
-                onEdit={selectMode ? undefined : onEdit}
-                onInfo={selectMode ? undefined : onInfo}
-                onSelect={selectMode || !onToggleSelect ? undefined : (msg) => onToggleSelect(msg.id)}
-                onOpenImage={selectMode ? undefined : onOpenImage}
-                onJumpToMessage={selectMode ? undefined : onJumpToMessage}
-                selfDigits={selfDigits}
-                firstInGroup={firstInGroup}
-                highlighted={highlightId === m.id}
-                highlightQuery={highlightQuery}
-              />
-              {selectMode && (
+      {groups.map(({ day, rows }) => (
+        <section key={day}>
+          {/* Sticky day pill — anchors to the top of this section in the
+              scroll container, so as the user scrolls the date drifts:
+              the current day stays at the top of the viewport until the
+              next day's section pushes it out. WA's exact behaviour.
+              pointer-events-none so it never steals clicks from bubbles
+              passing under it. */}
+          <div className="pointer-events-none sticky top-0 z-10 my-3 flex justify-center">
+            <span className="rounded-full bg-neutral-800/95 px-3 py-1 text-[11px] text-neutral-400 shadow shadow-black/40 backdrop-blur-sm">
+              {day}
+            </span>
+          </div>
+          {rows.map(({ msg: m, firstInGroup }, i) => (
+            <div key={m.id + m.timestamp} data-msg-id={m.id}>
+              {unreadDivider && unreadDivider.beforeId === m.id && (
+                // Horizontal "N unread messages" line, drawn just before the
+                // first unread incoming message. Emerald so it pops against
+                // the neutral thread without competing with day separators.
+                // data-unread-divider lets the thread's layout-effect find
+                // it for the once-per-chat-open auto-scroll.
                 <div
-                  aria-hidden="true"
-                  className={
-                    'pointer-events-none absolute inset-y-0 flex items-center px-2 ' +
-                    (m.is_from_me ? 'right-0' : 'left-0')
-                  }
+                  data-unread-divider="true"
+                  className="my-3 flex items-center gap-3 text-[11px] font-medium text-emerald-300/80"
                 >
-                  <span
-                    className={
-                      'flex h-5 w-5 items-center justify-center rounded-full border text-[10px] transition ' +
-                      (selectedIds?.has(m.id)
-                        ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
-                        : 'border-neutral-600 bg-neutral-900/70 text-transparent')
-                    }
-                  >
-                    ✓
+                  <div className="h-px flex-1 bg-emerald-500/30" />
+                  <span className="uppercase tracking-wider">
+                    {unreadDivider.count} unread {unreadDivider.count === 1 ? 'message' : 'messages'}
                   </span>
+                  <div className="h-px flex-1 bg-emerald-500/30" />
                 </div>
               )}
+              <div
+                className={
+                  // First row in the day section gets no top margin — the
+                  // sticky pill above already provides the gap. Subsequent
+                  // rows follow the cluster rule: firstInGroup → mt-2,
+                  // continuation → tighter mt-0.5.
+                  (i === 0 ? '' : firstInGroup ? 'mt-2' : 'mt-0.5') +
+                  ' ' +
+                  (selectMode ? 'relative cursor-pointer rounded-md' : '') +
+                  ' ' +
+                  (selectMode && selectedIds?.has(m.id)
+                    ? 'bg-emerald-500/10 ring-1 ring-emerald-500/40'
+                    : '')
+                }
+                onClick={selectMode && onToggleSelect ? () => onToggleSelect(m.id) : undefined}
+              >
+                <MessageBubble
+                  msg={m}
+                  group={group}
+                  nameMap={nameMap}
+                  mentionIndex={mentionIndex}
+                  onOpenTask={onOpenTask}
+                  onTasksChanged={onTasksChanged}
+                  onOpenChat={onOpenChat}
+                  // Suppress per-bubble actions while in select mode — the
+                  // whole row becomes a toggle target instead, and the
+                  // SelectionBar owns the batch actions.
+                  onReply={selectMode ? undefined : onReply}
+                  onReact={selectMode ? undefined : onReact}
+                  onForward={selectMode ? undefined : onForward}
+                  onStar={selectMode ? undefined : onStar}
+                  onEdit={selectMode ? undefined : onEdit}
+                  onInfo={selectMode ? undefined : onInfo}
+                  onSelect={selectMode || !onToggleSelect ? undefined : (msg) => onToggleSelect(msg.id)}
+                  onOpenImage={selectMode ? undefined : onOpenImage}
+                  onJumpToMessage={selectMode ? undefined : onJumpToMessage}
+                  selfDigits={selfDigits}
+                  firstInGroup={firstInGroup}
+                  highlighted={highlightId === m.id}
+                  highlightQuery={highlightQuery}
+                />
+                {selectMode && (
+                  <div
+                    aria-hidden="true"
+                    className={
+                      'pointer-events-none absolute inset-y-0 flex items-center px-2 ' +
+                      (m.is_from_me ? 'right-0' : 'left-0')
+                    }
+                  >
+                    <span
+                      className={
+                        'flex h-5 w-5 items-center justify-center rounded-full border text-[10px] transition ' +
+                        (selectedIds?.has(m.id)
+                          ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
+                          : 'border-neutral-600 bg-neutral-900/70 text-transparent')
+                      }
+                    >
+                      ✓
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )
-      })}
+          ))}
+        </section>
+      ))}
     </div>
   )
 }
