@@ -683,9 +683,24 @@ export function MessageThread({
         <button
           onClick={() => setShowDashboard(true)}
           title="See everything about this chat"
-          className="transition hover:opacity-80"
+          className="relative transition hover:opacity-80"
         >
           <ChatAvatar jid={jid} title={title} group={group} size={36} />
+          {/* Small emerald dot in the avatar's bottom-right when the peer
+              is currently online (DMs only — groups have no single
+              presence). The subtitle still reads "online" / "typing…" /
+              "last seen X"; this is just the at-a-glance avatar cue WA
+              shows on its chat header. Ringed in the header background
+              colour so it pops against any photo. */}
+          {presence?.status === 'available' &&
+            presence.updated_at &&
+            Math.floor(Date.now() / 1000) - presence.updated_at < 90 && (
+              <span
+                aria-hidden="true"
+                title="Online"
+                className="pointer-events-none absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-neutral-950"
+              />
+            )}
         </button>
         <div className="min-w-0 flex-1">
           {/* The chat title is now clickable — mirrors WA's "tap the name
