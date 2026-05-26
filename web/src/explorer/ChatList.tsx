@@ -4,6 +4,8 @@ import { chatListTime, chatTitle, isGroup, previewText } from './format'
 import { ChatAvatar } from './ChatAvatar'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { useDrafts } from '../hooks/useDrafts'
+import { useChatWallpaper } from '../hooks/useChatWallpaper'
+import { WallpaperPicker } from './WallpaperPicker'
 
 // ChatList shows the time-ordered list of chats. Search is handled by the
 // global SearchBar in the top bar — there's no per-list filter anymore.
@@ -37,6 +39,9 @@ export function ChatList({
   // When set, shows the mute-duration picker (8h / 1 week / Always).
   // WhatsApp asks the same three options every time you mute.
   const [muting, setMuting] = useState<{ jid: string; title: string } | null>(null)
+  // When set, shows the wallpaper picker for this chat. Per-chat tints
+  // are localStorage-only (browser-scoped) — the bridge never sees them.
+  const [wallpapering, setWallpapering] = useState<{ jid: string; title: string } | null>(null)
   // 'normal' shows non-archived chats + an 'Archived (N)' header at the top
   // when there is anything archived; 'archived' shows the archived-only view
   // with a back affordance. Mirrors WhatsApp's Archived screen exactly.
@@ -335,6 +340,7 @@ export function ChatList({
               onChanged,
               onRequestAddToCircle: (jid, title) => setPicking({ jid, title }),
               onRequestMute: (jid, title) => setMuting({ jid, title }),
+              onRequestWallpaper: (jid, title) => setWallpapering({ jid, title }),
             },
           )}
           onClose={() => setMenu(null)}
@@ -363,7 +369,37 @@ export function ChatList({
           onClose={() => setMuting(null)}
         />
       )}
+      {wallpapering && (
+        <WallpaperPickerForChat
+          jid={wallpapering.jid}
+          title={wallpapering.title}
+          onClose={() => setWallpapering(null)}
+        />
+      )}
     </div>
+  )
+}
+
+// WallpaperPickerForChat thinly wraps WallpaperPicker so the picker's
+// state can come from the per-chat useChatWallpaper hook without the
+// ChatList itself binding to every chat's wallpaper for every row.
+function WallpaperPickerForChat({
+  jid,
+  title,
+  onClose,
+}: {
+  jid: string
+  title: string
+  onClose: () => void
+}) {
+  const { color, setColor } = useChatWallpaper(jid)
+  return (
+    <WallpaperPicker
+      active={color}
+      title={title}
+      onPick={setColor}
+      onClose={onClose}
+    />
   )
 }
 
@@ -718,6 +754,7 @@ function buildChatMenu(
     onChanged: () => void
     onRequestAddToCircle: (jid: string, title: string) => void
     onRequestMute: (jid: string, title: string) => void
+    onRequestWallpaper: (jid: string, title: string) => void
   },
 ): MenuItem[] {
   if (!chat) return []
@@ -757,6 +794,11 @@ function buildChatMenu(
       onClick: () => act(chat.is_archived ? 'unarchive' : 'archive'),
     },
     { divider: true },
+    {
+      label: 'Wallpaper…',
+      icon: '🎨',
+      onClick: () => cb.onRequestWallpaper(jid, title),
+    },
     {
       label: 'Circles…',
       icon: '⭕',

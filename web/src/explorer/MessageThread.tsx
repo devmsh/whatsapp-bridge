@@ -21,6 +21,7 @@ import { EmojiPicker } from './EmojiPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
 import { SharedMediaModal } from './SharedMediaModal'
+import { useChatWallpaper } from '../hooks/useChatWallpaper'
 
 const PAGE = 100
 
@@ -191,6 +192,12 @@ export function MessageThread({
   // header line. Resolved to display names via nameMap.
   const groupTyping = useGroupTyping(group ? jid : null)
   const groupTypingLine = group ? formatGroupTyping(groupTyping, nameMap) : ''
+  // Per-chat wallpaper tint, picked from the chat-row context menu's
+  // "Wallpaper…" item. Empty string = the default look (no tint).
+  // Updates live across tabs via the storage / custom event the hook
+  // subscribes to internally.
+  const { color: wallpaper } = useChatWallpaper(jid)
+
   // For group headers, fall back to a "N members" subtitle when nobody is
   // typing — same shorthand WA uses, and a more useful default than the
   // literal "Group". We re-use the bridge's groupParticipants endpoint
@@ -788,9 +795,11 @@ export function MessageThread({
 
       {/* Scroll wrapper: stays `relative` so the floating ↓ FAB + the drop
           overlay anchor to it (and don't scroll out of view) while the inner
-          div handles all the actual scrolling. */}
+          div handles all the actual scrolling. Inline background carries the
+          per-chat wallpaper tint (cycle 37); empty when no wallpaper picked. */}
       <div
         className="relative min-h-0 flex-1"
+        style={wallpaper ? { backgroundColor: wallpaper } : undefined}
         // Drag-and-drop: any file dropped onto the thread becomes the
         // composer's next attachment (same staging path as paperclip /
         // paste from loop #7). We count enter/leave depth so dragging
