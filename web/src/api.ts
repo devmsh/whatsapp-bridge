@@ -838,7 +838,15 @@ export const api = {
   send: (
     jid: string,
     message: string,
-    opts?: { mediaPath?: string; mentionedJIDs?: string[]; viewOnce?: boolean },
+    opts?: {
+      mediaPath?: string
+      mentionedJIDs?: string[]
+      viewOnce?: boolean
+      /** When true, a .webp attachment is sent as a WA sticker (no caption,
+       *  no compression) instead of a plain image. Bridge's /send already
+       *  handles the wire-shape switch. */
+      sticker?: boolean
+    },
   ) =>
     postBody<{ success: boolean; message_id: string; timestamp: number }>('/api/v2/send', {
       jid,
@@ -846,6 +854,7 @@ export const api = {
       media_path: opts?.mediaPath,
       mentioned_jids: opts?.mentionedJIDs,
       view_once: opts?.viewOnce,
+      sticker: opts?.sticker,
     }),
   // groupParticipants returns the full participant list of a group — used by
   // the composer's @-picker to suggest who you might be tagging.

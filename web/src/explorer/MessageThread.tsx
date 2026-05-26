@@ -1366,6 +1366,11 @@ function Composer({
   // gets view_once: true and the recipient sees the cycle-79 badge.
   // Resets to false whenever the user removes / replaces the attachment.
   const [viewOnce, setViewOnce] = useState(false)
+  // When true and the current attachment is a .webp image, /send gets
+  // sticker: true and the recipient sees it as a sticker — no compression,
+  // no caption framing, just the raw WA sticker bubble. Only legal on
+  // image/webp; the toggle hides itself otherwise.
+  const [sendAsSticker, setSendAsSticker] = useState(false)
   // Voice-recording state. Tapping the mic button asks for mic permission,
   // opens a MediaRecorder, and swaps the composer for a thin recording bar
   // (mic dot + mm:ss timer + ✕ cancel + ➤ send). On send we wrap the chunks
@@ -1815,6 +1820,8 @@ function Composer({
       // envelope yet (separate handler), and a half-applied view-once is
       // worse than none.
       const wantViewOnce = !!mediaPath && viewOnce && !replyTo
+      const wantSticker = !!mediaPath && sendAsSticker && !replyTo &&
+        attachment?.type === 'image/webp'
       const res = replyTo
         ? await api.reply(jid, replyTo.id, body, {
             mediaPath,
@@ -1824,6 +1831,7 @@ function Composer({
             mediaPath,
             mentionedJIDs: mentionedJIDs.length > 0 ? mentionedJIDs : undefined,
             viewOnce: wantViewOnce ? true : undefined,
+            sticker: wantSticker ? true : undefined,
           })
       // Echo locally so the bubble lands instantly. For media we don't have
       // the server's permanent path yet, but the caption + a placeholder
@@ -1859,6 +1867,7 @@ function Composer({
       setText('')
       setAttachment(null)
       setViewOnce(false) // back to default for the next attachment
+      setSendAsSticker(false)
       // The text-change effect already removes empty drafts, but be explicit
       // here so the key disappears synchronously with the successful send —
       // no chance of a stale draft surviving a fast chat-switch. Notify the
@@ -2148,9 +2157,12 @@ function Composer({
               previewURL={previewURL}
               viewOnce={viewOnce}
               onToggleViewOnce={() => setViewOnce((v) => !v)}
+              sendAsSticker={sendAsSticker}
+              onToggleSticker={() => setSendAsSticker((v) => !v)}
               onClear={() => {
                 setAttachment(null)
                 setViewOnce(false) // reset alongside the file
+                setSendAsSticker(false)
               }}
             />
           )}
@@ -2606,6 +2618,8 @@ function AttachmentPreview({
   previewURL,
   viewOnce,
   onToggleViewOnce,
+  sendAsSticker,
+  onToggleSticker,
   onClear,
 }: {
   file: File
@@ -2615,6 +2629,11 @@ function AttachmentPreview({
    *  for plain documents (WA doesn't support view-once on those). */
   viewOnce: boolean
   onToggleViewOnce: () => void
+  /** When true the parent will send this attachment as a WA sticker
+   *  instead of a plain image. Only meaningful for .webp — the toggle
+   *  hides itself for everything else. */
+  sendAsSticker: boolean
+  onToggleSticker: () => void
   onClear: () => void
 }) {
   const sizeStr =
@@ -2626,6 +2645,7 @@ function AttachmentPreview({
   const isImage = file.type.startsWith('image/')
   const isVideo = file.type.startsWith('video/')
   const isAudio = file.type.startsWith('audio/')
+  const isWebp = file.type === 'image/webp'
   const viewOnceEligible = isImage || isVideo || isAudio
   return (
     <div className="mb-2 flex items-center gap-3 rounded-lg bg-neutral-900 p-2 text-xs">
@@ -2642,6 +2662,33 @@ function AttachmentPreview({
         <div className="truncate text-neutral-200">{file.name || 'Attachment'}</div>
         <div className="text-neutral-500">{sizeStr}</div>
       </div>
+      {/* Send-as-sticker toggle — eligible only for .webp (WA stickers
+          are always WebP). Active state matches the sticker palette. */}
+      {isWebp && (
+        <button
+          onClick={onToggleSticker}
+          title={
+            sendAsSticker
+              ? 'Sending as sticker — tap to send as plain image'
+              : 'Send as sticker — no compression, no caption framing'
+          }
+          aria-label="Toggle send-as-sticker"
+          className={
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ' +
+            (sendAsSticker
+              ? 'bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
+              : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200')
+          }
+        >
+          {/* Smiling-face / sticker glyph */}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+            <line x1="9" y1="9" x2="9.01" y2="9" />
+            <line x1="15" y1="9" x2="15.01" y2="9" />
+          </svg>
+        </button>
+      )}
       {/* View-once toggle — eligible for photo / video / voice only.
           Active state is rose so it visually matches the receive-side
           "🔥 View once" badge in MessageBubble. */}
