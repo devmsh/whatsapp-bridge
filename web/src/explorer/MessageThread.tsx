@@ -167,6 +167,11 @@ export function MessageThread({
   // bridge re-fetches the chat list and unread_count starts climbing again
   // (or drops to 0 because we marked-read). Cleared on every chat switch.
   const initialUnreadRef = useRef<number>(0)
+  // One-shot guard so the unread-divider auto-scroll only fires once per
+  // chat open. Otherwise every subsequent live-message append would yank
+  // the user back to the divider — they want to follow the conversation
+  // forward, not relive the unread batch every tick.
+  const scrolledToDividerRef = useRef<boolean>(false)
 
   const chat = chats.find((c) => c.jid === jid)
   const title = chat ? chatTitle(chat, nameMap) : '+' + jidUser(jid)
@@ -225,6 +230,9 @@ export function MessageThread({
     // be loading (chat undefined → 0), in which case no divider — same as
     // WA when there's nothing unread.
     initialUnreadRef.current = chats.find((c) => c.jid === jid)?.unread_count ?? 0
+    // Reset the once-per-chat unread-divider auto-scroll guard so the new
+    // chat gets its own shot at landing on its divider.
+    scrolledToDividerRef.current = false
   }, [jid])
 
   // Find the boundary where the "X unread messages" divider goes. We walk
@@ -298,10 +306,31 @@ export function MessageThread({
     }
   }, [liveMsg, jid])
 
-  // Keep the view pinned to the newest message after loads/appends.
+  // Keep the view pinned to the newest message after loads/appends —
+  // EXCEPT on the very first paint of a chat with unread messages, where
+  // we'd rather land on the unread divider (so the user sees the first
+  // unread reply at the top of the viewport, exactly like WA). The
+  // scrolledToDividerRef guard makes it once-per-chat-open: every later
+  // live append falls through to the normal pin-to-bottom path.
   useLayoutEffect(() => {
     const el = scrollRef.current
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
+    if (!el) return
+    if (
+      !scrolledToDividerRef.current &&
+      initialUnreadRef.current > 0 &&
+      messages.length > 0
+    ) {
+      const divider = el.querySelector('[data-unread-divider]') as HTMLElement | null
+      if (divider) {
+        scrolledToDividerRef.current = true
+        // Don't keep snapping back to the bottom on subsequent renders.
+        stickToBottom.current = false
+        setAtBottom(false)
+        divider.scrollIntoView({ block: 'start', behavior: 'auto' })
+        return
+      }
+    }
+    if (stickToBottom.current) el.scrollTop = el.scrollHeight
   }, [messages, loading])
 
   function onScroll() {
@@ -2508,7 +2537,12 @@ function Timeline({
               // Horizontal "N unread messages" line, drawn just before the
               // first unread incoming message. Emerald so it pops against
               // the neutral thread without competing with day separators.
-              <div className="my-3 flex items-center gap-3 text-[11px] font-medium text-emerald-300/80">
+              // data-unread-divider lets the thread's layout-effect find
+              // it for the once-per-chat-open auto-scroll.
+              <div
+                data-unread-divider="true"
+                className="my-3 flex items-center gap-3 text-[11px] font-medium text-emerald-300/80"
+              >
                 <div className="h-px flex-1 bg-emerald-500/30" />
                 <span className="uppercase tracking-wider">
                   {unreadDivider.count} unread {unreadDivider.count === 1 ? 'message' : 'messages'}

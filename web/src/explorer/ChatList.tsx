@@ -50,6 +50,10 @@ export function ChatList({
 
   // Split into archived + non-archived once so we don't re-filter on every
   // render, and the counter in the 'Archived (N)' header is cheap.
+  // Within the normal bucket, pinned chats sort to the top (sub-sorted by
+  // last_message_at), then unpinned by last_message_at — same ordering
+  // WA's own chat list uses. The bridge's GET /chats doesn't promise a
+  // pinned-first order, so we do it client-side.
   const { archivedRows, normalRows } = useMemo(() => {
     const archivedRows: { chat: Chat; title: string }[] = []
     const normalRows: { chat: Chat; title: string }[] = []
@@ -58,6 +62,12 @@ export function ChatList({
       if (c.is_archived) archivedRows.push(row)
       else normalRows.push(row)
     }
+    normalRows.sort((a, b) => {
+      const ap = a.chat.is_pinned ? 1 : 0
+      const bp = b.chat.is_pinned ? 1 : 0
+      if (ap !== bp) return bp - ap
+      return (b.chat.last_message_at || 0) - (a.chat.last_message_at || 0)
+    })
     return { archivedRows, normalRows }
   }, [chats, nameMap])
 
