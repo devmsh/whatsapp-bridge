@@ -35,6 +35,7 @@ import { CallsPanel } from './CallsPanel'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
 import { ShortcutsHelp } from './ShortcutsHelp'
+import { NewChatModal } from './NewChatModal'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls'
 
@@ -62,6 +63,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [liveMsg, setLiveMsg] = useState<Message | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showCompose, setShowCompose] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
@@ -366,6 +368,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
+      {showCompose && (
+        <NewChatModal
+          contacts={contacts}
+          groups={groups}
+          onPick={(jid) => openChat(jid)}
+          onClose={() => setShowCompose(false)}
+        />
+      )}
       {showProfiling && <ProfilingStatusModal onClose={() => setShowProfiling(false)} />}
       {showUnlock && (
         <HiddenLockModal
@@ -436,6 +446,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           </div>
           <div className="flex items-center gap-1">
             <HiddenBadge onClick={() => setShowUnlock(true)} />
+            <IconButton title="New chat" onClick={() => setShowCompose(true)}>
+              ✏️
+            </IconButton>
             <IconButton title="Starred messages" onClick={() => setShowStarred(true)}>
               ⭐
             </IconButton>
