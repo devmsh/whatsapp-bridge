@@ -41,6 +41,12 @@ export function ChatList({
   // when there is anything archived; 'archived' shows the archived-only view
   // with a back affordance. Mirrors WhatsApp's Archived screen exactly.
   const [view, setView] = useState<'normal' | 'archived'>('normal')
+  // WA's recent filter pills at the top of the chat list: All / Unread /
+  // Groups / @Mentions. Each is a cheap predicate over the chat row — no
+  // backend filter, no fetch — so toggling is instant. Only meaningful in
+  // the normal view; archived stays unfiltered.
+  type Filter = 'all' | 'unread' | 'groups' | 'mentions'
+  const [filter, setFilter] = useState<Filter>('all')
 
   // Split into archived + non-archived once so we don't re-filter on every
   // render, and the counter in the 'Archived (N)' header is cheap.
@@ -55,7 +61,34 @@ export function ChatList({
     return { archivedRows, normalRows }
   }, [chats, nameMap])
 
-  const rows = view === 'archived' ? archivedRows : normalRows
+  // Counts per filter on the normal list — drives both the filter pills'
+  // optional badge and the rows that actually render. Computed once per
+  // chats refresh so the pills don't flicker.
+  const filterCounts = useMemo(() => {
+    let unread = 0
+    let groups = 0
+    let mentions = 0
+    for (const r of normalRows) {
+      if ((r.chat.unread_count || 0) > 0) unread++
+      if (isGroup(r.chat.jid)) groups++
+      if ((r.chat.unread_mentions || 0) > 0) mentions++
+    }
+    return { unread, groups, mentions }
+  }, [normalRows])
+
+  // Apply the active filter to normalRows. We deliberately don't touch
+  // archivedRows — WA's archived view is its own world, always unfiltered.
+  const filteredNormalRows = useMemo(() => {
+    if (filter === 'all') return normalRows
+    return normalRows.filter((r) => {
+      if (filter === 'unread') return (r.chat.unread_count || 0) > 0
+      if (filter === 'groups') return isGroup(r.chat.jid)
+      if (filter === 'mentions') return (r.chat.unread_mentions || 0) > 0
+      return true
+    })
+  }, [normalRows, filter])
+
+  const rows = view === 'archived' ? archivedRows : filteredNormalRows
 
   // If the user exhausts the archived view (e.g. unarchives the last one),
   // bounce back to the normal list so they're not stranded on an empty screen.
@@ -65,6 +98,23 @@ export function ChatList({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* Filter pills — only in normal view (archived has its own affordance). */}
+      {view === 'normal' && (
+        <div className="flex shrink-0 items-center gap-1.5 border-b border-neutral-800 px-3 py-2 overflow-x-auto">
+          <FilterPill id="all" current={filter} onPick={setFilter}>All</FilterPill>
+          <FilterPill id="unread" current={filter} onPick={setFilter} count={filterCounts.unread}>
+            Unread
+          </FilterPill>
+          <FilterPill id="groups" current={filter} onPick={setFilter} count={filterCounts.groups}>
+            Groups
+          </FilterPill>
+          {filterCounts.mentions > 0 && (
+            <FilterPill id="mentions" current={filter} onPick={setFilter} count={filterCounts.mentions}>
+              @ Mentions
+            </FilterPill>
+          )}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {/* Archived-view header: takes the place of the first chat row, with
             a back arrow that returns to the normal list. Same height + paint
@@ -111,7 +161,19 @@ export function ChatList({
           </button>
         )}
 
-        {rows.length === 0 && <div className="p-4 text-center text-xs text-neutral-600">No chats</div>}
+        {rows.length === 0 && (
+          <div className="p-6 text-center text-xs text-neutral-600">
+            {view === 'archived'
+              ? 'No archived chats'
+              : filter === 'unread'
+                ? 'All caught up 🎉'
+                : filter === 'groups'
+                  ? 'No groups'
+                  : filter === 'mentions'
+                    ? 'No unread mentions'
+                    : 'No chats'}
+          </div>
+        )}
         {rows.map(({ chat, title }) => (
           <button
             key={chat.jid}
@@ -256,6 +318,48 @@ export function ChatList({
         />
       )}
     </div>
+  )
+}
+
+// FilterPill is one of the small chip buttons in the chat-list filter row.
+// Active = emerald, others = neutral; an optional count badge mirrors WA's
+// own "Unread · 3" / "Groups · 12" look.
+function FilterPill<T extends string>({
+  id,
+  current,
+  onPick,
+  count,
+  children,
+}: {
+  id: T
+  current: T
+  onPick: (id: T) => void
+  count?: number
+  children: React.ReactNode
+}) {
+  const active = current === id
+  return (
+    <button
+      onClick={() => onPick(id)}
+      className={
+        'flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition ' +
+        (active
+          ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40'
+          : 'bg-neutral-800/70 text-neutral-300 hover:bg-neutral-700/70')
+      }
+    >
+      <span>{children}</span>
+      {count !== undefined && count > 0 && (
+        <span
+          className={
+            'tabular-nums text-[10px] ' +
+            (active ? 'text-emerald-300' : 'text-neutral-400')
+          }
+        >
+          {count}
+        </span>
+      )}
+    </button>
   )
 }
 
