@@ -1334,6 +1334,23 @@ function Composer({
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }
 
+  // Auto-focus the composer when the user opens a new chat. WA's
+  // desktop client does the same — letting the user start typing
+  // immediately without an extra click. Skipped in edit mode (the
+  // edit effect handles focus itself with the original body's
+  // text + caret position) and when there's a pending draft fill
+  // (the initialText effect will focus after it places the cursor).
+  useEffect(() => {
+    if (editingMsg) return
+    if (initialText) return
+    // Defer past the layout-effect that pins the thread to bottom so
+    // focus doesn't compete with scroll.
+    requestAnimationFrame(() => {
+      taRef.current?.focus()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jid])
+
   // Apply a draft from a "Nudge" / "Reply in origin" action exactly once.
   // We don't overwrite user-typed text: only fill when the field is empty.
   useEffect(() => {

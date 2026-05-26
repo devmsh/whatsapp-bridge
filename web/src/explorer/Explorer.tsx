@@ -321,6 +321,39 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // another tab without focusing this one — same affordance as WA Web.
   useUnreadBadge(chats)
 
+  // Persist the last-opened chat across reloads so a browser refresh /
+  // crash re-restores the user's spot. localStorage on selected change;
+  // mount-time replay below. We deliberately don't track scroll position
+  // — MessageThread pins to bottom or the unread divider, which is the
+  // sensible landing each time anyway.
+  useEffect(() => {
+    try {
+      if (selected) localStorage.setItem('wa.last-chat-jid', selected)
+      else localStorage.removeItem('wa.last-chat-jid')
+    } catch {}
+  }, [selected])
+
+  // Mount-time replay: once we have a chats snapshot (so openChat can
+  // route case-1), reopen the last chat. Guarded so the replay only
+  // fires once per page load and never overrides a manually-selected
+  // chat (e.g., the user clicked a different row before chats loaded).
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current) return
+    if (chats.length === 0) return
+    if (selected) {
+      restoredRef.current = true
+      return
+    }
+    try {
+      const last = localStorage.getItem('wa.last-chat-jid')
+      if (last) {
+        restoredRef.current = true
+        openChat(last)
+      }
+    } catch {}
+  }, [chats, selected, openChat])
+
   // Global keyboard shortcuts:
   //   ⌘/Ctrl + K  → focus + select the universal search bar (Slack/Linear/Notion convention)
   //   ⌘/Ctrl + /  → open the shortcuts help overlay (every workspace app's "?" gesture)
