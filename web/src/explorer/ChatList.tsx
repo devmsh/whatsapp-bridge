@@ -59,7 +59,14 @@ export function ChatList({
     const normalRows: { chat: Chat; title: string }[] = []
     for (const c of chats) {
       const row = { chat: c, title: chatTitle(c, nameMap) }
-      if (c.is_archived) archivedRows.push(row)
+      // Hidden chats must never leak into the archived view, even if
+      // their archived flag is also set — the hidden vault is its own
+      // world and "Archived (N)" should stay anonymous-safe. Route them
+      // to the normal list instead so private-mode users can still find
+      // them (via the HiddenBadge); they're just never visible to a
+      // bystander tapping "Archived".
+      if (c.is_hidden) normalRows.push(row)
+      else if (c.is_archived) archivedRows.push(row)
       else normalRows.push(row)
     }
     normalRows.sort((a, b) => {
