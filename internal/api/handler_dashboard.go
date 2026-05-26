@@ -16,6 +16,11 @@ type dashContact struct {
 	Phone          string       `json:"phone,omitempty"`
 	BusinessName   string       `json:"business_name,omitempty"`
 	IsBusiness     bool         `json:"is_business,omitempty"`
+	// VerifiedName is set on businesses that passed WA's official
+	// verification — the green-check accounts. When non-empty the client
+	// renders a "✓ Verified" badge in the hero card. Empty (the common
+	// case) on personal accounts and on unverified businesses.
+	VerifiedName   string       `json:"verified_name,omitempty"`
 	Profile        *db.Profile  `json:"profile"`
 	Tags           []db.Tag     `json:"tags"`
 	Circles        []db.Circle  `json:"circles"`
@@ -74,8 +79,9 @@ func (s *Server) handleContactDashboard(w http.ResponseWriter, r *http.Request, 
 		COALESCE(NULLIF(name,''), NULLIF(push_name,''), NULLIF(business_name,''), ''),
 		COALESCE(phone,''),
 		COALESCE(business_name,''),
-		is_business
-		FROM contacts WHERE jid = ?`, jid).Scan(&d.Name, &d.Phone, &d.BusinessName, &d.IsBusiness)
+		is_business,
+		COALESCE(verified_name,'')
+		FROM contacts WHERE jid = ?`, jid).Scan(&d.Name, &d.Phone, &d.BusinessName, &d.IsBusiness, &d.VerifiedName)
 	if d.Name == "" {
 		d.Name = jidUser(jid)
 	}

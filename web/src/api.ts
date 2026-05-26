@@ -589,6 +589,10 @@ export interface DashContact {
   phone?: string
   business_name?: string
   is_business?: boolean
+  /** WA-verified business name. Non-empty only on accounts that have
+   *  passed WhatsApp's official business verification (the green check
+   *  mark). Drives the "✓ Verified" hero badge in Contact info. */
+  verified_name?: string
   profile: EntityProfile | null
   tags: Tag[]
   circles: Circle[]

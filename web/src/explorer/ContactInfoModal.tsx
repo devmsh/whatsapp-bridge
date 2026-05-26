@@ -128,12 +128,24 @@ export function ContactInfoModal({
             <div dir="auto" className="text-base font-semibold text-neutral-100">
               {name}
             </div>
-            {data?.is_business && (
+            {data?.is_business && !data?.verified_name && (
               <span
                 title="WhatsApp Business account"
                 className="rounded-full bg-sky-500/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-sky-200"
               >
                 Business
+              </span>
+            )}
+            {data?.verified_name && (
+              <span
+                title={`Verified business — ${data.verified_name}`}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300"
+              >
+                {/* Filled green-check shield, WA's signature verified glyph. */}
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true">
+                  <path d="M12 2 4 5v6c0 4.97 3.582 9.418 8 11 4.418-1.582 8-6.03 8-11V5l-8-3zm-1 14.41-3.41-3.41 1.41-1.41 2 2 5.59-5.58 1.41 1.41-7 7z" />
+                </svg>
+                Verified
               </span>
             )}
             {blocked && (
