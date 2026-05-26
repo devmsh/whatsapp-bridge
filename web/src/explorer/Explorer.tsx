@@ -226,7 +226,38 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       return
     }
 
-    // Fallthrough: unknown JID we can't route to.
+    // Fallthrough A — looks like a phone-style DM JID we've never chatted
+    // with (NewChatModal's "Start chat with +XXX" shortcut, or a deep
+    // link). Stub it into extraChats so MessageThread can render an
+    // empty thread with the composer; the first send will land in the
+    // real chats table and the row will graduate to the sidebar list.
+    const phoneMatch = jid.match(/^(\d{6,15})@s\.whatsapp\.net$/)
+    if (phoneMatch) {
+      setExtraChats((prev) =>
+        prev[jid]
+          ? prev
+          : {
+              ...prev,
+              [jid]: {
+                jid,
+                name: '+' + phoneMatch[1],
+                chat_type: 'dm',
+                last_message_at: 0,
+                unread_count: 0,
+                is_archived: false,
+                is_pinned: false,
+                is_muted: false,
+              },
+            },
+      )
+      setRecoOpen(false)
+      setSelectedTask(null)
+      setTab('chats')
+      setSelected(jid)
+      return
+    }
+
+    // Fallthrough B: still unknown — we genuinely can't route here.
     alert('This chat is locked or not available.')
   }, [contacts, extraChats])
 

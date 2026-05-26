@@ -48,10 +48,38 @@ export function NewChatModal({
   // ordering because that's the WA convention; both are independently
   // sorted alphabetically. Hidden contacts are excluded so the picker
   // never lets a curious user discover them by name.
+  //
+  // When the query looks like a raw phone number (digits, optional +) we
+  // ALSO surface a synthetic "Start chat with +XXX" row at the top so
+  // the user can reach a JID that isn't in their contacts yet — same
+  // gesture WA mobile uses when you type a number into search.
   const matches = useMemo(() => {
-    type Row = { kind: 'contact' | 'group'; jid: string; title: string; subtitle: string }
+    type Row = {
+      kind: 'contact' | 'group' | 'phone'
+      jid: string
+      title: string
+      subtitle: string
+    }
     const needle = q.trim().toLowerCase()
     const out: Row[] = []
+    // Phone shortcut — sits above contacts so a typed number always has a
+    // one-click path even when contacts happen to share digits.
+    const phoneMatch = q.trim().match(/^\+?(\d{6,15})$/)
+    if (phoneMatch) {
+      const digits = phoneMatch[1]
+      const jid = digits + '@s.whatsapp.net'
+      // Only add the shortcut if no existing contact already matches this
+      // number — otherwise we'd duplicate that contact's row.
+      const alreadyKnown = contacts.some((c) => c.phone === digits || c.jid === jid)
+      if (!alreadyKnown) {
+        out.push({
+          kind: 'phone',
+          jid,
+          title: 'Start chat with +' + digits,
+          subtitle: 'Not in your contacts',
+        })
+      }
+    }
     const contactRows: Row[] = []
     for (const c of contacts) {
       if (c.is_hidden) continue
@@ -68,8 +96,7 @@ export function NewChatModal({
     }
     groupRows.sort((a, b) => a.title.localeCompare(b.title))
     // Cap to keep the modal snappy even with thousands of contacts.
-    return [...contactRows, ...groupRows].slice(0, 200)
-    void out
+    return [...out, ...contactRows, ...groupRows].slice(0, 200)
   }, [contacts, groups, q])
 
   return (
