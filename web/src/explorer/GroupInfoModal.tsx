@@ -3,6 +3,7 @@ import { api, type GroupParticipant } from '../api'
 import { ChatAvatar } from './ChatAvatar'
 import { DisappearingSection } from './DisappearingSection'
 import { GroupAdminSection } from './GroupAdminSection'
+import { AddMembersModal } from './AddMembersModal'
 
 // GroupInfoModal mirrors WA's "Group info" — a focused panel showing the
 // group's avatar, name, member count, and the participant list with
@@ -32,6 +33,10 @@ export function GroupInfoModal({
 }) {
   const [participants, setParticipants] = useState<GroupParticipant[] | null>(null)
   const [error, setError] = useState('')
+  // When true, the AddMembersModal is open over this one. Closes via Esc,
+  // outside-click, or after a successful add (which also triggers a
+  // participant-list refresh).
+  const [adding, setAdding] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -114,6 +119,25 @@ export function GroupInfoModal({
         <GroupAdminSection jid={jid} />
 
         <div className="flex-1 overflow-y-auto py-1">
+          {/* "+ Add participants" row — admin-only on the server (whatsmeow
+              rejects non-admin "add" calls). We don't gate on the client
+              yet (selfDevice isn't threaded in), so anyone can tap and
+              the modal will show the error inline if it bounces. */}
+          <button
+            onClick={() => setAdding(true)}
+            className="flex w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-neutral-800/60"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M19 8v6" />
+                <path d="M22 11h-6" />
+              </svg>
+            </span>
+            <span className="text-sm font-medium text-emerald-300">Add participants</span>
+          </button>
+
           {error && (
             <div className="p-4 text-center text-xs text-red-400">{error}</div>
           )}
@@ -140,6 +164,29 @@ export function GroupInfoModal({
           ))}
         </div>
       </div>
+
+      {adding && (
+        <AddMembersModal
+          groupJID={jid}
+          existingJIDs={
+            // Build the exclusion set from both .jid AND .lid forms so a
+            // dual-identity contact isn't offered as "addable" just because
+            // their phone JID differs from their lid.
+            new Set(
+              (participants || []).flatMap((p) =>
+                p.lid ? [p.jid, p.lid] : [p.jid],
+              ),
+            )
+          }
+          onClose={() => setAdding(false)}
+          onAdded={() => {
+            // Refetch so the new members show in the list with correct
+            // sort order and admin badges. The AddMembersModal also closes
+            // itself on success.
+            api.groupParticipants(jid).then(setParticipants).catch(() => {})
+          }}
+        />
+      )}
     </div>
   )
 }
