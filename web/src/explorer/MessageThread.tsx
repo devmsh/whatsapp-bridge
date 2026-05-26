@@ -22,6 +22,7 @@ import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
+import { ContactInfoModal } from './ContactInfoModal'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
 
 const PAGE = 100
@@ -105,6 +106,10 @@ export function MessageThread({
   // tab equivalent: hero avatar + member count + sorted participant list
   // with admin badges. Clicking a member opens a DM with them.
   const [groupInfoOpen, setGroupInfoOpen] = useState(false)
+  // Contact info modal open/closed (DMs only). The DM-side equivalent of
+  // GroupInfo — focused hero + tags + activity, plus a footer link to
+  // the heavier Dashboard view.
+  const [contactInfoOpen, setContactInfoOpen] = useState(false)
   // IDs of messages the user has selected for batch actions. Non-empty
   // means "select mode" is on; bubbles then show a checkbox overlay
   // and clicking a bubble toggles its selection instead of acting on it.
@@ -252,6 +257,7 @@ export function MessageThread({
     setInfoMsg(null)
     setMediaGalleryOpen(false)
     setGroupInfoOpen(false)
+    setContactInfoOpen(false)
     setSelectedIds(new Set())
     setBatchForward(null)
     setSearchOpen(false)
@@ -639,9 +645,9 @@ export function MessageThread({
               Dashboard (which also opens from the avatar — a wider tap
               target for the same destination). */}
           <button
-            onClick={() => (group ? setGroupInfoOpen(true) : setShowDashboard(true))}
+            onClick={() => (group ? setGroupInfoOpen(true) : setContactInfoOpen(true))}
             dir="auto"
-            title={group ? 'Group members + admins' : 'See everything about this chat'}
+            title={group ? 'Group members + admins' : 'Contact info'}
             className="block w-full truncate text-start text-sm font-semibold transition hover:opacity-80"
           >
             {title}
@@ -1044,6 +1050,18 @@ export function MessageThread({
           nameMap={nameMap}
           onClose={() => setGroupInfoOpen(false)}
           onOpenChat={(j) => onOpenChat?.(j) ?? onOpenChatTasks(j)}
+        />
+      )}
+
+      {contactInfoOpen && !group && (
+        <ContactInfoModal
+          jid={jid}
+          title={title}
+          onClose={() => setContactInfoOpen(false)}
+          onOpenDashboard={() => {
+            setContactInfoOpen(false)
+            setShowDashboard(true)
+          }}
         />
       )}
 
