@@ -115,6 +115,10 @@ export function MessageThread({
   // tab equivalent: hero avatar + member count + sorted participant list
   // with admin badges. Clicking a member opens a DM with them.
   const [groupInfoOpen, setGroupInfoOpen] = useState(false)
+  // Date-jump open/closed. Clicking the 📅 button in the chat header
+  // pops a native date input; picking a date scrolls to the first
+  // message on/after that day in the loaded window.
+  const [dateJumpOpen, setDateJumpOpen] = useState(false)
   // Contact info modal open/closed (DMs only). The DM-side equivalent of
   // GroupInfo — focused hero + tags + activity, plus a footer link to
   // the heavier Dashboard view.
@@ -267,6 +271,7 @@ export function MessageThread({
     setMediaGalleryOpen(false)
     setGroupInfoOpen(false)
     setContactInfoOpen(false)
+    setDateJumpOpen(false)
     setSelectedIds(new Set())
     setBatchForward(null)
     setSearchOpen(false)
@@ -589,6 +594,22 @@ export function MessageThread({
     }
   }
 
+  // jumpToDate scrolls to the first message on (or after) the picked
+  // calendar day. We can't auto-load earlier pages — if the chosen day
+  // is before the loaded window, surface a tiny alert telling the user
+  // to widen with "Load earlier". Returns true on success.
+  function jumpToDate(yyyymmdd: string): boolean {
+    if (!yyyymmdd || messages.length === 0) return false
+    // yyyymmdd is local time "YYYY-MM-DD" from <input type=date>.
+    const [y, m, d] = yyyymmdd.split('-').map((n) => parseInt(n, 10))
+    if (!y || !m || !d) return false
+    const startMs = new Date(y, m - 1, d, 0, 0, 0, 0).getTime()
+    const target = messages.find((msg) => msg.timestamp * 1000 >= startMs)
+    if (!target) return false
+    jumpToMessage(target.id)
+    return true
+  }
+
   // Honor a parent-driven jump request (universal search → message hit).
   // Wait until the messages window contains the target, then call
   // jumpToMessage + notify the parent so the same id doesn't keep firing
@@ -821,6 +842,11 @@ export function MessageThread({
             </svg>
           </button>
         )}
+        <DateJumpButton
+          open={dateJumpOpen}
+          setOpen={setDateJumpOpen}
+          onJump={jumpToDate}
+        />
         <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
       </header>
 
@@ -2293,6 +2319,133 @@ function MentionPicker({
       })}
     </div>
   )
+}
+
+// DateJumpButton is the 📅 chip in the chat header that lets the user
+// jump directly to a calendar date in the thread. Click → small popover
+// with a native <input type=date> (no third-party datepicker, no library
+// hit). Pick a date + Jump → onJump(yyyy-mm-dd) — MessageThread's
+// jumpToDate finds the first message on or after that day in the loaded
+// window and fires the existing scroll-and-flash. A "Not found" hint
+// appears when the date is outside the loaded window so the user knows
+// they need to "Load earlier" first.
+function DateJumpButton({
+  open,
+  setOpen,
+  onJump,
+}: {
+  open: boolean
+  setOpen: (v: boolean) => void
+  onJump: (yyyymmdd: string) => boolean
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [notFound, setNotFound] = useState(false)
+  const [picked, setPicked] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    setNotFound(false)
+    requestAnimationFrame(() => inputRef.current?.focus())
+    function onDown(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, setOpen])
+
+  function tryJump() {
+    if (!picked) return
+    const ok = onJump(picked)
+    if (ok) {
+      setOpen(false)
+      setPicked('')
+    } else {
+      setNotFound(true)
+    }
+  }
+
+  // Cap the picker at today — no point jumping to a future date.
+  const today = new Date()
+  const maxIso = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`
+
+  return (
+    <div ref={wrapRef} className="relative shrink-0">
+      <button
+        onClick={() => setOpen(!open)}
+        title="Jump to date"
+        aria-label="Jump to date"
+        className={
+          'flex h-8 w-8 items-center justify-center rounded-lg border transition ' +
+          (open
+            ? 'border-emerald-600/60 bg-emerald-500/15 text-emerald-300'
+            : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
+        }
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <line x1="16" y1="2" x2="16" y2="6" />
+          <line x1="8" y1="2" x2="8" y2="6" />
+          <line x1="3" y1="10" x2="21" y2="10" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-2xl shadow-black/60">
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500">
+            Jump to date
+          </div>
+          <input
+            ref={inputRef}
+            type="date"
+            max={maxIso}
+            value={picked}
+            onChange={(e) => {
+              setPicked(e.target.value)
+              setNotFound(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                tryJump()
+              }
+            }}
+            className="w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+          />
+          {notFound && (
+            <div className="mt-2 text-[11px] text-amber-300/90">
+              No messages from that date in the loaded window — try "Load earlier" first.
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <button
+              onClick={() => setOpen(false)}
+              className="rounded px-2 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={tryJump}
+              disabled={!picked}
+              className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-medium text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Jump
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function pad2(n: number): string {
+  return n < 10 ? '0' + n : String(n)
 }
 
 // SelectionBar sits between the chat header and the message thread while
