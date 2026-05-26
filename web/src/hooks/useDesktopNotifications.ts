@@ -24,6 +24,7 @@ import { chatTitle, isGroup, senderTitle } from '../explorer/format'
 const ENABLED_KEY = 'wa.notifications.enabled'
 const SOUND_KEY = 'wa.notifications.sound'
 const DISMISSED_KEY = 'wa.notifications.banner-dismissed'
+const DND_UNTIL_KEY = 'wa.notifications.dnd-until'
 
 export type Permission = 'default' | 'granted' | 'denied' | 'unsupported'
 
@@ -44,6 +45,11 @@ export function useDesktopNotifications({
   const [permission, setPermission] = useState<Permission>(currentPermission)
   const [enabled, setEnabledState] = useState<boolean>(() => readEnabled())
   const [dismissed, setDismissed] = useState<boolean>(() => readDismissed())
+  // DND end time in epoch seconds. 0 = off (default). When > Date.now()/1000
+  // both visual notifications and the audio ding are suppressed. Re-evaluated
+  // on every fire() so a timer ticking past the deadline silently restores
+  // notifications without any explicit re-render.
+  const [dndUntil, setDndUntilState] = useState<number>(() => readDndUntil())
 
   // Keep refs in sync so the SSE callback (created outside React's commit
   // phase) always sees the latest values without re-binding.
@@ -78,10 +84,23 @@ export function useDesktopNotifications({
     try { localStorage.setItem(DISMISSED_KEY, 'true') } catch {}
   }, [])
 
+  // Set DND end time (epoch seconds). 0 = off. The hook tick at the bottom
+  // of this file polls the deadline so the badge clears the moment time
+  // ticks past it, without needing the caller to refresh.
+  const setDndUntil = useCallback((endTs: number) => {
+    setDndUntilState(endTs)
+    try {
+      if (endTs > 0) localStorage.setItem(DND_UNTIL_KEY, String(endTs))
+      else localStorage.removeItem(DND_UNTIL_KEY)
+    } catch {}
+  }, [])
+
   const fire = useCallback((m: Message) => {
     if (typeof Notification === 'undefined') return
     if (Notification.permission !== 'granted') return
     if (!readEnabled()) return // re-read in case another tab toggled
+    // Do Not Disturb: silent until the deadline passes.
+    if (Math.floor(Date.now() / 1000) < readDndUntil()) return
     // Own messages: silent. You already know.
     if (m.is_from_me) return
     // Muted: silent. Same as WA.
@@ -130,10 +149,23 @@ export function useDesktopNotifications({
     function onStorage(e: StorageEvent) {
       if (e.key === ENABLED_KEY) setEnabledState(readEnabled())
       if (e.key === DISMISSED_KEY) setDismissed(readDismissed())
+      if (e.key === DND_UNTIL_KEY) setDndUntilState(readDndUntil())
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
+
+  // Tick once a minute so the badge clears when the DND deadline passes
+  // (and the chrome around it reflects the new state). Cheap; we only run
+  // it while dndUntil > 0 so dormant sessions don't pay.
+  useEffect(() => {
+    if (dndUntil <= 0) return
+    const id = window.setInterval(() => {
+      const now = Math.floor(Date.now() / 1000)
+      if (now >= dndUntil) setDndUntil(0)
+    }, 30_000)
+    return () => window.clearInterval(id)
+  }, [dndUntil, setDndUntil])
 
   return {
     permission,
@@ -142,7 +174,22 @@ export function useDesktopNotifications({
     request,
     dismissed,
     dismissBanner,
+    dndUntil,
+    setDndUntil,
     fire,
+  }
+}
+
+function readDndUntil(): number {
+  try {
+    const v = localStorage.getItem(DND_UNTIL_KEY)
+    const n = v ? parseInt(v, 10) : 0
+    if (!isFinite(n) || n <= 0) return 0
+    // Clamp out values that have already expired so callers don't see
+    // a stale "DND on" badge after sleeping past the deadline.
+    return n > Math.floor(Date.now() / 1000) ? n : 0
+  } catch {
+    return 0
   }
 }
 

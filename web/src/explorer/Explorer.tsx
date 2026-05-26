@@ -64,6 +64,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showSettings, setShowSettings] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
+  const [dndOpen, setDndOpen] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
@@ -449,6 +450,13 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             <IconButton title="New chat" onClick={() => setShowCompose(true)}>
               ✏️
             </IconButton>
+            <DndButton
+              dndUntil={notifications.dndUntil}
+              setDndUntil={notifications.setDndUntil}
+              open={dndOpen}
+              setOpen={setDndOpen}
+            />
+
             <IconButton title="Starred messages" onClick={() => setShowStarred(true)}>
               ⭐
             </IconButton>
@@ -724,6 +732,101 @@ function IconButton({
     >
       {children}
     </button>
+  )
+}
+
+// DndButton is the 🌙 Do Not Disturb toggle in the sidebar header. Tap to
+// open a small popover of duration choices (1h / 8h / Until tomorrow);
+// pick one and notifications + the audio ding both go silent until the
+// deadline. While DND is on the icon swaps to amber + the title shows
+// the time it ends so the user knows what they've committed to. Tapping
+// it again while active turns DND off immediately.
+function DndButton({
+  dndUntil,
+  setDndUntil,
+  open,
+  setOpen,
+}: {
+  dndUntil: number
+  setDndUntil: (ts: number) => void
+  open: boolean
+  setOpen: (v: boolean) => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, setOpen])
+
+  const active = dndUntil > 0 && dndUntil > Math.floor(Date.now() / 1000)
+  const title = active
+    ? `Do Not Disturb · until ${new Date(dndUntil * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — tap to turn off`
+    : 'Do Not Disturb'
+
+  function set(hours: number) {
+    if (hours <= 0) {
+      setDndUntil(0)
+    } else {
+      const end = Math.floor(Date.now() / 1000) + Math.round(hours * 3600)
+      setDndUntil(end)
+    }
+    setOpen(false)
+  }
+
+  // "Until tomorrow" = end of today (23:59:59 local). If the user picks it
+  // late at night they probably mean "until I wake up tomorrow" — close
+  // enough; we'd need an explicit wake-time UI to do better.
+  function untilTomorrow() {
+    const d = new Date()
+    d.setHours(23, 59, 59, 999)
+    setDndUntil(Math.floor(d.getTime() / 1000))
+    setOpen(false)
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        title={title}
+        onClick={() => {
+          // Toggle off in one click if already active; otherwise open the
+          // duration picker so the user sets a deadline.
+          if (active) set(0)
+          else setOpen(!open)
+        }}
+        className={
+          'flex h-8 w-8 items-center justify-center rounded-lg transition ' +
+          (active
+            ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+            : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100')
+        }
+      >
+        🌙
+      </button>
+      {open && !active && (
+        <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-xl border border-neutral-700 bg-neutral-900 py-1 text-sm shadow-2xl shadow-black/60">
+          <button onClick={() => set(1)} className="block w-full px-3 py-1.5 text-left text-neutral-200 transition hover:bg-neutral-800">
+            For 1 hour
+          </button>
+          <button onClick={() => set(8)} className="block w-full px-3 py-1.5 text-left text-neutral-200 transition hover:bg-neutral-800">
+            For 8 hours
+          </button>
+          <button onClick={untilTomorrow} className="block w-full px-3 py-1.5 text-left text-neutral-200 transition hover:bg-neutral-800">
+            Until tomorrow
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
