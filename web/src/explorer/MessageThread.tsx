@@ -633,9 +633,19 @@ export function MessageThread({
           <ChatAvatar jid={jid} title={title} group={group} size={36} />
         </button>
         <div className="min-w-0 flex-1">
-          <div dir="auto" className="truncate text-sm font-semibold">
+          {/* The chat title is now clickable — mirrors WA's "tap the name
+              to see who" gesture. For groups it opens the focused Group
+              info modal (cycle 38); for DMs it opens the existing
+              Dashboard (which also opens from the avatar — a wider tap
+              target for the same destination). */}
+          <button
+            onClick={() => (group ? setGroupInfoOpen(true) : setShowDashboard(true))}
+            dir="auto"
+            title={group ? 'Group members + admins' : 'See everything about this chat'}
+            className="block w-full truncate text-start text-sm font-semibold transition hover:opacity-80"
+          >
             {title}
-          </div>
+          </button>
           <div
             className={
               'truncate text-xs ' +
