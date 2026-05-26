@@ -244,7 +244,29 @@ export function MessageBubble({
           </div>
         )}
 
-        {msg.is_forwarded && <div className="mb-1 text-[11px] italic text-neutral-400">↪ Forwarded</div>}
+        {msg.is_forwarded && (() => {
+          // WA shows "Forwarded many times" once a message has been forwarded
+          // ≥4 hops (the official misinformation cue). We mirror the threshold
+          // and the double-arrow visual change. Plain "Forwarded" otherwise.
+          const manyHops = (msg.forward_score ?? 0) >= 4
+          return (
+            <div
+              className={
+                'mb-1 inline-flex items-center gap-1 text-[11px] italic ' +
+                (manyHops ? 'text-amber-300' : 'text-neutral-400')
+              }
+              title={
+                manyHops
+                  ? 'This was forwarded many times — its original source may be far from here.'
+                  : 'Forwarded'
+              }
+            >
+              {/* Double-arrow for many-hops, single for plain. */}
+              <span aria-hidden="true">{manyHops ? '↪↪' : '↪'}</span>
+              {manyHops ? 'Forwarded many times' : 'Forwarded'}
+            </div>
+          )
+        })()}
 
         {msg.reply_to_content && (() => {
           // Resolve the quoted message's sender for the label above the

@@ -166,6 +166,11 @@ export interface Message {
   is_deleted?: boolean
   is_edit?: boolean
   is_forwarded?: boolean
+  // Hop count for forwarded messages. WA's misinformation-warning surface
+  // bumps the "Forwarded" chip to "Forwarded many times" once this hits 4
+  // (or higher) — i.e. the message has been forwarded through 4+ hops since
+  // it was originally composed. Absent / 0 for non-forwarded messages.
+  forward_score?: number
   // True when WA flagged this message with the ephemeral bit — i.e. it was
   // sent inside a chat with disappearing-messages on. Cosmetic only on the
   // client (WA mobile shows a small clock badge under the bubble).
