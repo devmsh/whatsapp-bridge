@@ -55,7 +55,7 @@ export function ChatList({
   // Groups / @Mentions. Each is a cheap predicate over the chat row — no
   // backend filter, no fetch — so toggling is instant. Only meaningful in
   // the normal view; archived stays unfiltered.
-  type Filter = 'all' | 'unread' | 'groups' | 'mentions'
+  type Filter = 'all' | 'unread' | 'groups' | 'mentions' | 'drafts'
   const [filter, setFilter] = useState<Filter>('all')
 
   // Split into archived + non-archived once so we don't re-filter on every
@@ -95,13 +95,15 @@ export function ChatList({
     let unread = 0
     let groups = 0
     let mentions = 0
+    let draftCount = 0
     for (const r of normalRows) {
       if ((r.chat.unread_count || 0) > 0) unread++
       if (isGroup(r.chat.jid)) groups++
       if ((r.chat.unread_mentions || 0) > 0) mentions++
+      if (drafts.has(r.chat.jid)) draftCount++
     }
-    return { unread, groups, mentions }
-  }, [normalRows])
+    return { unread, groups, mentions, drafts: draftCount }
+  }, [normalRows, drafts])
 
   // Apply the active filter to normalRows. We deliberately don't touch
   // archivedRows — WA's archived view is its own world, always unfiltered.
@@ -111,9 +113,10 @@ export function ChatList({
       if (filter === 'unread') return (r.chat.unread_count || 0) > 0
       if (filter === 'groups') return isGroup(r.chat.jid)
       if (filter === 'mentions') return (r.chat.unread_mentions || 0) > 0
+      if (filter === 'drafts') return drafts.has(r.chat.jid)
       return true
     })
-  }, [normalRows, filter])
+  }, [normalRows, filter, drafts])
 
   const rows = view === 'archived' ? archivedRows : filteredNormalRows
 
@@ -155,6 +158,15 @@ export function ChatList({
           {filterCounts.mentions > 0 && (
             <FilterPill id="mentions" current={filter} onPick={setFilter} count={filterCounts.mentions}>
               @ Mentions
+            </FilterPill>
+          )}
+          {/* Drafts pill — only when there's at least one half-written
+              message. Surfaces the "I started typing in some chat but
+              never sent it" backlog so it doesn't get buried. Same red
+              accent as the "Draft: …" per-row label uses. */}
+          {filterCounts.drafts > 0 && (
+            <FilterPill id="drafts" current={filter} onPick={setFilter} count={filterCounts.drafts}>
+              Drafts
             </FilterPill>
           )}
           {/* Mark-all-read sits at the right edge of the filter row and
@@ -227,7 +239,9 @@ export function ChatList({
                   ? 'No groups'
                   : filter === 'mentions'
                     ? 'No unread mentions'
-                    : 'No chats'}
+                    : filter === 'drafts'
+                      ? 'No drafts'
+                      : 'No chats'}
           </div>
         )}
         {rows.map(({ chat, title }) => (
