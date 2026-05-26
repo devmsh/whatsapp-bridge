@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Message } from '../api'
 import { ChatAvatar } from './ChatAvatar'
+import { StatusViewer } from './StatusViewer'
 
 // StatusUpdatesPanel is the WA "Status" tab in modal form. WA mobile groups
 // the last 24h of contacts' status updates by sender — one row per person
@@ -15,6 +16,13 @@ export function StatusUpdatesPanel({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState<Message[] | null>(null)
   const [error, setError] = useState('')
   const [showOlder, setShowOlder] = useState(false)
+  // When set, opens the per-sender story-viewer overlay with their updates
+  // sorted oldest → newest. Closing the viewer reopens this panel.
+  const [viewing, setViewing] = useState<{
+    sender: string
+    name: string
+    updates: Message[]
+  } | null>(null)
 
   useEffect(() => {
     api
@@ -40,7 +48,9 @@ export function StatusUpdatesPanel({ onClose }: { onClose: () => void }) {
     sender: string
     name: string
     latest: Message
-    count: number
+    /** Every update from this sender in the current view (oldest first),
+     *  so opening the viewer can play through them in order. */
+    all: Message[]
   }
   const grouped = useMemo<StatusRow[]>(() => {
     if (!messages) return []
@@ -56,14 +66,19 @@ export function StatusUpdatesPanel({ onClose }: { onClose: () => void }) {
           sender,
           name: m.sender_name || m.push_name || '+' + (sender.split('@')[0] || '').split(':')[0],
           latest: m,
-          count: 1,
+          all: [m],
         })
       } else {
-        existing.count++
+        existing.all.push(m)
         if (m.timestamp > existing.latest.timestamp) existing.latest = m
       }
     }
-    return [...bySender.values()].sort((a, b) => b.latest.timestamp - a.latest.timestamp)
+    // Sort each sender's updates oldest→newest so the viewer plays them in
+    // posting order (latest comes last, like a flipbook).
+    const rows = [...bySender.values()]
+    for (const r of rows) r.all.sort((a, b) => a.timestamp - b.timestamp)
+    rows.sort((a, b) => b.latest.timestamp - a.latest.timestamp)
+    return rows
   }, [messages, showOlder])
 
   return (
@@ -113,9 +128,12 @@ export function StatusUpdatesPanel({ onClose }: { onClose: () => void }) {
             </div>
           )}
           {grouped.map((row) => (
-            <div
+            <button
               key={row.sender}
-              className="flex items-start gap-3 border-b border-neutral-900 px-4 py-3"
+              onClick={() =>
+                setViewing({ sender: row.sender, name: row.name, updates: row.all })
+              }
+              className="flex w-full items-start gap-3 border-b border-neutral-900 px-4 py-3 text-left transition hover:bg-neutral-800/50"
             >
               {/* Emerald ring around the avatar marks "has a recent status",
                   matching WA mobile's exact convention. */}
@@ -138,10 +156,10 @@ export function StatusUpdatesPanel({ onClose }: { onClose: () => void }) {
                     '(no preview)'}
                 </div>
                 <div className="mt-0.5 text-[10px] text-neutral-600">
-                  {row.count} update{row.count === 1 ? '' : 's'}
+                  {row.all.length} update{row.all.length === 1 ? '' : 's'}
                 </div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -157,6 +175,15 @@ export function StatusUpdatesPanel({ onClose }: { onClose: () => void }) {
           </button>
         </footer>
       </div>
+
+      {viewing && (
+        <StatusViewer
+          sender={viewing.sender}
+          senderName={viewing.name}
+          updates={viewing.updates}
+          onClose={() => setViewing(null)}
+        />
+      )}
     </div>
   )
 }
