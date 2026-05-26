@@ -3833,38 +3833,107 @@ function SystemPill({
   event: ChatEvent
   nameMap: Map<string, string>
 }) {
-  let label = ''
-  if (event.event_type === 'ephemeral_setting') {
-    let timer = 0
-    try {
-      const parsed = JSON.parse(event.data || '{}')
-      timer = Number(parsed.timer) || 0
-    } catch {}
-    const actor = event.actor_jid
-      ? nameMap.get(event.actor_jid) || ''
-      : ''
-    const who = actor
-      ? actor.split(/\s+/)[0]
-      : 'Someone'
-    label = timer === 0
-      ? `${who} turned disappearing messages off`
-      : `${who} set disappearing messages to ${formatDisappearing(timer)}`
-  } else {
-    // Generic fallback so future event types still render readably.
-    label = event.event_type.replace(/_/g, ' ')
+  // Resolve actor name (the user who performed the action) and a names()
+  // helper that turns a list of JIDs from event.data into a comma-joined
+  // display string. Both fall back to the bare phone digits when nameMap
+  // has nothing — readable, never blank.
+  const actor = event.actor_jid
+    ? (nameMap.get(event.actor_jid) || '+' + (event.actor_jid.split('@')[0] || '').split(':')[0])
+    : 'Someone'
+  const who = actor.split(/\s+/)[0]
+  function names(jids: string[] | undefined): string {
+    if (!jids || jids.length === 0) return 'someone'
+    const labels = jids.map(
+      (j) => (nameMap.get(j) || '+' + (j.split('@')[0] || '').split(':')[0]).split(/\s+/)[0],
+    )
+    if (labels.length === 1) return labels[0]
+    if (labels.length === 2) return `${labels[0]} and ${labels[1]}`
+    return `${labels[0]} and ${labels.length - 1} others`
   }
+  let data: Record<string, unknown> = {}
+  try {
+    data = JSON.parse(event.data || '{}')
+  } catch {}
+
+  // Map each known event_type → human label. Unknown types degrade to the
+  // generic "event_type with underscores stripped" fallback so a bridge
+  // version that ships new types still renders readably.
+  let label = ''
+  let tone: 'amber' | 'neutral' | 'emerald' = 'neutral'
+  switch (event.event_type) {
+    case 'ephemeral_setting':
+    case 'group_ephemeral_change': {
+      const timer = Number(data.timer) || 0
+      label = timer === 0
+        ? `${who} turned disappearing messages off`
+        : `${who} set disappearing messages to ${formatDisappearing(timer)}`
+      tone = 'amber'
+      break
+    }
+    case 'group_name_change':
+      label = `${who} changed the group name to "${String(data.name || '')}"`
+      tone = 'neutral'
+      break
+    case 'group_topic_change':
+      label = `${who} changed the group description`
+      tone = 'neutral'
+      break
+    case 'group_locked_change':
+      label = data.is_locked
+        ? `${who} locked group info — only admins can edit it now`
+        : `${who} unlocked group info — anyone can edit it`
+      tone = 'neutral'
+      break
+    case 'group_announce_change':
+      label = data.is_announce
+        ? `${who} made this an announcement group — only admins can send messages`
+        : `${who} turned off announcement mode — anyone can send`
+      tone = 'neutral'
+      break
+    case 'group_join':
+      label = `${who} added ${names(data.jids as string[] | undefined)}`
+      tone = 'emerald'
+      break
+    case 'group_leave':
+      label = `${names(data.jids as string[] | undefined)} left`
+      tone = 'neutral'
+      break
+    case 'group_promote':
+      label = `${who} made ${names(data.jids as string[] | undefined)} an admin`
+      tone = 'emerald'
+      break
+    case 'group_demote':
+      label = `${who} dismissed ${names(data.jids as string[] | undefined)} as admin`
+      tone = 'neutral'
+      break
+    default:
+      label = event.event_type.replace(/_/g, ' ')
+  }
+
   const ts = new Date(event.timestamp * 1000)
   const hh = ts.getHours().toString().padStart(2, '0')
   const mm = ts.getMinutes().toString().padStart(2, '0')
+  const palette = {
+    amber: 'bg-amber-500/10 text-amber-200',
+    neutral: 'bg-neutral-800/80 text-neutral-300',
+    emerald: 'bg-emerald-500/10 text-emerald-200',
+  }[tone]
+  const dotPalette = {
+    amber: 'text-amber-300/60',
+    neutral: 'text-neutral-500',
+    emerald: 'text-emerald-300/60',
+  }[tone]
   return (
     <div className="my-2 flex justify-center">
-      <span className="inline-flex max-w-[80%] items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-center text-[11px] text-amber-200">
-        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
-        </svg>
+      <span className={`inline-flex max-w-[80%] items-center gap-1.5 rounded-md px-2.5 py-1 text-center text-[11px] ${palette}`}>
+        {tone === 'amber' && (
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+        )}
         {label}
-        <span className="text-amber-300/60">· {hh}:{mm}</span>
+        <span className={dotPalette}>· {hh}:{mm}</span>
       </span>
     </div>
   )
