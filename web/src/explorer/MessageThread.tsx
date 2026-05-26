@@ -1532,6 +1532,42 @@ function Composer({
     })
   }
 
+  // wrapSelection takes a WA markup marker (*, _, ~, `) and wraps the
+  // textarea's current selection in it — what the keyboard shortcuts
+  // below cast to. With no selection it inserts the pair and parks the
+  // caret between them so the next keystrokes fill the body. Persists
+  // the draft on the same path the onChange handler uses so a Cmd+B
+  // mid-typing doesn't silently break draft survival across chat switches.
+  function wrapSelection(marker: string) {
+    const el = taRef.current
+    if (!el) return
+    const start = el.selectionStart ?? text.length
+    const end = el.selectionEnd ?? text.length
+    const before = text.slice(0, start)
+    const selection = text.slice(start, end)
+    const after = text.slice(end)
+    const next = before + marker + selection + marker + after
+    setText(next)
+    if (!editingMsg) {
+      try {
+        if (next.trim()) localStorage.setItem(draftKey(jid), next)
+        else localStorage.removeItem(draftKey(jid))
+        window.dispatchEvent(new CustomEvent('wa.draft-changed'))
+      } catch {}
+    }
+    requestAnimationFrame(() => {
+      const el2 = taRef.current
+      if (!el2) return
+      el2.focus()
+      // Selection → caret lands right after the closing marker (so the
+      // user can keep typing past the wrap). No selection → between the
+      // markers so the next keystrokes fill the body.
+      const caret = selection.length > 0 ? end + marker.length * 2 : start + marker.length
+      el2.setSelectionRange(caret, caret)
+      resize()
+    })
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // While the @-picker is open, arrow keys / Enter / Tab / Esc target the
     // picker — never the textarea. Otherwise Enter sends, Shift+Enter is a
@@ -1557,6 +1593,19 @@ function Composer({
         setMention(null)
         return
       }
+    }
+    // WA-style markup shortcuts on plain ⌘/⌃ + letter. The composer
+    // re-uses the same markers RichText already understands (cycle 4):
+    //   ⌘B → *bold*    ⌘I → _italic_
+    //   ⌘⇧X → ~strike~ ⌘E → `monospace`   (Cmd+E mirrors Slack's choice)
+    // We intercept before browser defaults — Cmd+B in a textarea is a
+    // no-op anyway since plain textareas have no rich formatting.
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      const k = e.key.toLowerCase()
+      if (!e.shiftKey && k === 'b') { e.preventDefault(); wrapSelection('*'); return }
+      if (!e.shiftKey && k === 'i') { e.preventDefault(); wrapSelection('_'); return }
+      if (!e.shiftKey && k === 'e') { e.preventDefault(); wrapSelection('`'); return }
+      if (e.shiftKey && k === 'x')  { e.preventDefault(); wrapSelection('~'); return }
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
