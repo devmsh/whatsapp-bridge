@@ -1129,7 +1129,9 @@ function DndButton({
             : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100')
         }
       >
-        🌙
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
       </button>
       {open && !active && (
         <div className="absolute right-0 top-full z-40 mt-1 w-44 rounded-xl border border-neutral-700 bg-neutral-900 py-1 text-sm shadow-2xl shadow-black/60">
