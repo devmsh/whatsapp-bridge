@@ -21,7 +21,7 @@ import { EmojiPicker } from './EmojiPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
 import { ScheduleSendModal } from './ScheduleSendModal'
-import { useScheduledMessages } from '../hooks/useScheduledMessages'
+import { useScheduledMessages, type ScheduledMessage } from '../hooks/useScheduledMessages'
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
 import { ContactInfoModal } from './ContactInfoModal'
@@ -702,6 +702,11 @@ export function MessageThread({
   // the room) so the check is DM-only.
   const { blocked: blockedSet } = useBlocklist()
   const isBlocked = isContact && blockedSet.has(jid)
+  // Scheduled-messages chip: count of pending scheduled messages for this
+  // chat (read live from the same localStorage queue Composer writes to).
+  // Click opens the management popover with Cancel / Send-now per row.
+  const scheduledForChat = useScheduledMessages().forJID(jid)
+  const [showScheduledPopover, setShowScheduledPopover] = useState(false)
 
   return (
     <div className="flex h-full flex-col">
@@ -778,6 +783,34 @@ export function MessageThread({
                 </svg>
                 {formatDisappearing(chat.disappearing_timer || 0)}
               </button>
+            )}
+            {/* Scheduled-messages chip — same row as the disappearing chip.
+                Shows when this chat has at least one pending scheduled
+                message; click toggles the management popover below the
+                header. Indigo so it doesn't collide with the amber clock
+                that means "self-destruct timer" and the emerald that means
+                "typing". */}
+            {scheduledForChat.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowScheduledPopover((v) => !v)}
+                  title={`${scheduledForChat.length} scheduled message${scheduledForChat.length === 1 ? '' : 's'} — tap to manage`}
+                  className="flex shrink-0 items-center gap-0.5 rounded-full bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 transition hover:bg-indigo-500/25"
+                >
+                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7v5l3 2" />
+                  </svg>
+                  {scheduledForChat.length} scheduled
+                </button>
+                {showScheduledPopover && (
+                  <ScheduledPopover
+                    jid={jid}
+                    items={scheduledForChat}
+                    onClose={() => setShowScheduledPopover(false)}
+                  />
+                )}
+              </div>
             )}
           </div>
           {isContact && (contactTags[jid]?.length ?? 0) > 0 && (
@@ -2260,6 +2293,131 @@ function Composer({
 // WA's exact pattern: the textarea disappears, the bar shrinks, and the
 // only thing you can do from this chat is unblock. Tap Unblock → instant
 // flip; the composer comes back the moment useBlocklist refetches.
+// ScheduledPopover lists this chat's pending scheduled messages with a
+// per-row Cancel + "Send now" action. Anchored under the header chip; uses
+// a fixed-inset click-away catcher to dismiss when the user taps elsewhere.
+//
+// Each row shows the message body (truncated), media-attached marker, when
+// it will fire (relative + absolute), and the two action buttons. Empty
+// queue is impossible (we don't render the chip in that case), so no empty
+// state.
+function ScheduledPopover({
+  jid,
+  items,
+  onClose,
+}: {
+  jid: string
+  items: ScheduledMessage[]
+  onClose: () => void
+}) {
+  const { cancel } = useScheduledMessages()
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  async function sendNow(m: ScheduledMessage) {
+    if (busyId) return
+    setBusyId(m.id)
+    try {
+      await api.send(m.jid, m.text, {
+        mediaPath: m.media_path,
+        mentionedJIDs: m.mentioned_jids,
+      })
+      cancel(m.id)
+    } catch (e) {
+      window.alert('Send failed: ' + (e instanceof Error ? e.message : 'unknown error'))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return (
+    <>
+      {/* Click-away catcher — fires onClose if the user clicks outside the
+          popover but doesn't intercept the popover's own clicks. */}
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-30"
+        aria-hidden="true"
+      />
+      <div className="absolute right-0 top-full z-40 mt-1 w-80 max-w-[92vw] overflow-hidden rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60">
+        <div className="border-b border-neutral-800 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+          Scheduled in this chat
+        </div>
+        <ul className="max-h-80 overflow-y-auto">
+          {items.map((m) => {
+            const when = new Date(m.scheduled_at * 1000)
+            const inSec = m.scheduled_at - Math.floor(Date.now() / 1000)
+            const rel = relativeWhen(inSec)
+            const isBusy = busyId === m.id
+            const preview = m.text || (m.media_path ? '[media]' : '(empty)')
+            return (
+              <li key={m.id} className="border-b border-neutral-900 last:border-b-0">
+                <div className="px-3 py-2">
+                  <div dir="auto" className="line-clamp-2 text-sm text-neutral-100">
+                    {preview}
+                    {m.media_path && (
+                      <span className="ml-1 rounded bg-neutral-800 px-1 py-0.5 text-[10px] uppercase tracking-wider text-neutral-400">
+                        media
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 flex items-baseline justify-between text-[11px] text-neutral-500">
+                    <span>{fmtAbsoluteWhen(when)} · {rel}</span>
+                  </div>
+                  <div className="mt-1.5 flex justify-end gap-2">
+                    <button
+                      onClick={() => cancel(m.id)}
+                      disabled={isBusy}
+                      className="rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-300 transition hover:bg-neutral-800 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => void sendNow(m)}
+                      disabled={isBusy}
+                      className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                    >
+                      {isBusy ? 'Sending…' : 'Send now'}
+                    </button>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+        {void jid}
+      </div>
+    </>
+  )
+}
+
+// relativeWhen — short "in 2h", "in 14m", "in 3d", "now" / "overdue" string
+// for the popover. Negative values render as "overdue" so the user can see
+// failed-retry entries even after their original time has passed.
+function relativeWhen(sec: number): string {
+  if (sec < 0) return 'overdue'
+  if (sec < 60) return 'in <1m'
+  if (sec < 3600) return `in ${Math.round(sec / 60)}m`
+  if (sec < 86400) return `in ${Math.round(sec / 3600)}h`
+  return `in ${Math.round(sec / 86400)}d`
+}
+
+// fmtAbsoluteWhen — the same shorthand the schedule modal uses for presets
+// ("Today 18:42" / "Tomorrow 09:00" / "Wed 03 09:00"), used here for the
+// popover's secondary line.
+function fmtAbsoluteWhen(d: Date): string {
+  const now = new Date()
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+  const tomorrow = new Date()
+  tomorrow.setDate(now.getDate() + 1)
+  const hh = d.getHours().toString().padStart(2, '0')
+  const mm = d.getMinutes().toString().padStart(2, '0')
+  const time = `${hh}:${mm}`
+  if (sameDay(d, now)) return `Today ${time}`
+  if (sameDay(d, tomorrow)) return `Tomorrow ${time}`
+  return `${d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short' })} ${time}`
+}
+
 function BlockedComposerBanner({ jid, title }: { jid: string; title: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
