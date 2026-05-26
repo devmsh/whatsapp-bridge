@@ -1994,10 +1994,25 @@ function Composer({
                 rows={1}
                 value={text}
                 onChange={(e) => {
-                  const v = e.target.value
+                  let v = e.target.value
+                  let caret = e.target.selectionStart ?? v.length
+                  // Slack/Discord-style emoji shortcodes: :fire: → 🔥.
+                  // Runs only when the new value contains a ':' so the
+                  // common typing path stays a no-op. When a replacement
+                  // fires we re-anchor the caret to the natural "just
+                  // past the emoji" position.
+                  const sub = applyEmojiShortcodes(v, caret)
+                  if (sub) {
+                    v = sub.next
+                    caret = sub.caret
+                    requestAnimationFrame(() => {
+                      const el = taRef.current
+                      if (el) el.setSelectionRange(caret, caret)
+                    })
+                  }
                   setText(v)
                   resize()
-                  updateMentionContext(v, e.target.selectionStart)
+                  updateMentionContext(v, caret)
                   // Persist per-chat draft on every keystroke (skipped while
                   // editing — see the draft persistence note above). The
                   // custom event lets the chat list's "Draft: …" indicator
@@ -2257,6 +2272,67 @@ function formatLastSeen(ts: number): string {
 // has to touch this line.
 function draftKey(jid: string): string {
   return `wa.draft.${jid}`
+}
+
+// EMOJI_SHORTCODES — Slack / Discord style auto-replace. Type `:fire:`
+// → 🔥. Keep the map short and unambiguous; users who want the full
+// picker go to the smiley button (cycle 8). Add to this list as users
+// request — keys are matched case-insensitive, the closing colon
+// gates the replace so a partial `:smi` doesn't fire mid-type.
+const EMOJI_SHORTCODES: Record<string, string> = {
+  smile: '😊', grin: '😄', joy: '😂', laughing: '😆', wink: '😉',
+  heart: '❤️', hearts: '💕', broken_heart: '💔',
+  thumbsup: '👍', '+1': '👍', thumbsdown: '👎', '-1': '👎',
+  ok: '👌', wave: '👋', pray: '🙏', clap: '👏', muscle: '💪',
+  fire: '🔥', tada: '🎉', eyes: '👀', check: '✅', cross: '❌',
+  warn: '⚠️', warning: '⚠️', rocket: '🚀', thinking: '🤔',
+  '100': '💯', star: '⭐', idea: '💡', sparkles: '✨', point_up: '☝️',
+  sob: '😭', cry: '😢', smirk: '😏', shrug: '🤷', mind_blown: '🤯',
+  party: '🥳', cool: '😎', sunglasses: '😎', sleep: '😴',
+  shipit: '🚢', bug: '🐛', boom: '💥', sweat: '😅', salt: '🧂',
+  coffee: '☕️', beer: '🍺', pizza: '🍕', cake: '🎂',
+}
+
+// applyEmojiShortcodes scans the text for `:word:` tokens that match the
+// map and rewrites them in place. Returns the new text + the caret offset
+// adjustment so the textarea's caret can be re-anchored where the user
+// expects (just past the most-recent replacement). Returns null when
+// nothing changed — caller skips the setState round-trip.
+function applyEmojiShortcodes(
+  text: string,
+  caret: number,
+): { next: string; caret: number } | null {
+  if (!text.includes(':')) return null
+  let out = ''
+  let i = 0
+  let newCaret = caret
+  let changed = false
+  const re = /:([+-]?\w+):/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const key = m[1].toLowerCase()
+    const emoji = EMOJI_SHORTCODES[key]
+    if (!emoji) continue
+    // Flush text up to the match.
+    out += text.slice(i, m.index)
+    out += emoji
+    const removed = m[0].length
+    const added = emoji.length
+    // Adjust caret: if the original caret was past the end of this
+    // match, shift it by the size delta. If it was inside, snap it to
+    // just past the emoji (the natural place to continue typing).
+    const matchEnd = m.index + removed
+    if (caret >= matchEnd) {
+      newCaret += added - removed
+    } else if (caret > m.index) {
+      newCaret = out.length
+    }
+    i = matchEnd
+    changed = true
+  }
+  if (!changed) return null
+  out += text.slice(i)
+  return { next: out, caret: newCaret }
 }
 
 // guessMediaKind maps a browser File's MIME type to the same media_type the
