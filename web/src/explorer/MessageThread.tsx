@@ -191,6 +191,23 @@ export function MessageThread({
   // header line. Resolved to display names via nameMap.
   const groupTyping = useGroupTyping(group ? jid : null)
   const groupTypingLine = group ? formatGroupTyping(groupTyping, nameMap) : ''
+  // For group headers, fall back to a "N members" subtitle when nobody is
+  // typing — same shorthand WA uses, and a more useful default than the
+  // literal "Group". We re-use the bridge's groupParticipants endpoint
+  // (already cached server-side; the composer's @-picker hits it too for
+  // groups, so a refresh costs ~one extra request).
+  const [memberCount, setMemberCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (!group) {
+      setMemberCount(null)
+      return
+    }
+    let cancelled = false
+    api.groupParticipants(jid).then((p) => {
+      if (!cancelled) setMemberCount(p.length)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [group, jid])
 
   // Load when the chat or page size changes.
   useEffect(() => {
@@ -617,7 +634,10 @@ export function MessageThread({
             }
           >
             {group
-              ? groupTypingLine || 'Group'
+              ? groupTypingLine ||
+                (memberCount !== null
+                  ? `${memberCount} ${memberCount === 1 ? 'member' : 'members'}`
+                  : 'Group')
               : presenceLine || jid.replace('@s.whatsapp.net', '')}
           </div>
           {isContact && (contactTags[jid]?.length ?? 0) > 0 && (
