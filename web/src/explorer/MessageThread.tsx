@@ -674,20 +674,18 @@ export function MessageThread({
             <path d="m21 21-4.3-4.3" />
           </svg>
         </button>
-        {lightboxImages.length > 0 && (
-          <button
-            onClick={() => setMediaGalleryOpen(true)}
-            title="Media — see every photo in this chat"
-            aria-label="Open shared media gallery"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="M21 15l-5-5L5 21" />
-            </svg>
-          </button>
-        )}
+        <button
+          onClick={() => setMediaGalleryOpen(true)}
+          title="Media, links, docs in this chat"
+          aria-label="Open shared media, links, and docs"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="9" cy="9" r="2" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
+        </button>
         <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
       </header>
 
@@ -923,7 +921,9 @@ export function MessageThread({
       {mediaGalleryOpen && (
         <SharedMediaModal
           title={title}
+          messages={messages}
           images={lightboxImages}
+          nameMap={nameMap}
           onClose={() => setMediaGalleryOpen(false)}
           onOpenIndex={(i) => {
             setMediaGalleryOpen(false)
