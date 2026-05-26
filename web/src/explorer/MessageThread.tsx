@@ -1656,6 +1656,7 @@ function Composer({
         <RecordingBar
           seconds={recSeconds}
           uploading={uploading || sending}
+          stream={recStreamRef.current}
           onCancel={() => stopRecording(true)}
           onSend={() => stopRecording(false)}
         />
@@ -2290,17 +2291,22 @@ function SearchBar({
 
 // RecordingBar takes over the composer footer while a voice note is being
 // recorded. Mirrors WhatsApp's recording UX in a desktop-friendly form: a
-// pulsing red dot, a mm:ss timer that ticks every second, a ✕ to discard
-// and a green ➤ to stop + send. Press Esc anywhere to discard, matching
-// the rest of the composer's cancel-with-escape muscle memory.
+// pulsing red dot, a mm:ss timer that ticks every second, a live waveform
+// of the mic input, a ✕ to discard and a green ➤ to stop + send. Press
+// Esc anywhere to discard, matching the rest of the composer's
+// cancel-with-escape muscle memory.
 function RecordingBar({
   seconds,
   uploading,
+  stream,
   onCancel,
   onSend,
 }: {
   seconds: number
   uploading: boolean
+  /** Live MediaStream from the recorder — drives the waveform. Null while
+   *  the recorder is briefly starting up; canvas just stays empty then. */
+  stream: MediaStream | null
   onCancel: () => void
   onSend: () => void
 }) {
@@ -2328,18 +2334,20 @@ function RecordingBar({
           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
         </svg>
       </button>
-      <div className="flex flex-1 items-center gap-2 text-sm text-neutral-200">
+      <div className="flex flex-1 items-center gap-3 text-sm text-neutral-200">
         {/* Pulsing red dot — same affordance WA uses to say "live mic". */}
-        <span className="relative inline-flex h-3 w-3">
+        <span className="relative inline-flex h-3 w-3 shrink-0">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60" />
           <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
         </span>
-        <span className="font-mono tabular-nums">
+        <span className="shrink-0 font-mono tabular-nums">
           {mm}:{ss}
         </span>
-        <span className="text-xs text-neutral-500">
-          {uploading ? 'Sending…' : 'Recording'}
-        </span>
+        {uploading ? (
+          <span className="text-xs text-neutral-500">Sending…</span>
+        ) : (
+          <RecordingWaveform stream={stream} />
+        )}
       </div>
       <button
         onClick={onSend}
@@ -2352,6 +2360,66 @@ function RecordingBar({
       </button>
     </div>
   )
+}
+
+// RecordingWaveform draws a live frequency-bar visualisation of the mic
+// stream — the WA recording UX cue. Uses the Web Audio API's AnalyserNode
+// on the MediaStream and renders 32 bars per frame onto a canvas. The
+// canvas auto-resizes to fit its flex slot (devicePixelRatio aware so it
+// stays sharp on retina). Bars are red to match the recording state's
+// colour language; idle / silent input collapses to a thin baseline so
+// the user knows the mic is live even before they speak.
+function RecordingWaveform({ stream }: { stream: MediaStream | null }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    if (!stream || !canvasRef.current) return
+    // Some browsers prefix AudioContext; the spread keeps strict-mode happy.
+    const AC: typeof AudioContext =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    const ac = new AC()
+    const source = ac.createMediaStreamSource(stream)
+    const analyser = ac.createAnalyser()
+    analyser.fftSize = 64
+    analyser.smoothingTimeConstant = 0.6
+    source.connect(analyser)
+    const data = new Uint8Array(analyser.frequencyBinCount) // 32 bins
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    let raf = 0
+    function draw() {
+      analyser.getByteFrequencyData(data)
+      const dpr = window.devicePixelRatio || 1
+      const w = canvas.clientWidth
+      const h = canvas.clientHeight
+      if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+        canvas.width = Math.floor(w * dpr)
+        canvas.height = Math.floor(h * dpr)
+      }
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx!.clearRect(0, 0, w, h)
+      const bars = data.length
+      const gap = 2
+      const barW = Math.max(1, (w - gap * (bars - 1)) / bars)
+      ctx!.fillStyle = 'rgba(248, 113, 113, 0.85)'
+      for (let i = 0; i < bars; i++) {
+        const v = data[i] / 255
+        const bh = Math.max(2, v * h * 0.9)
+        const x = i * (barW + gap)
+        const y = (h - bh) / 2
+        ctx!.fillRect(x, y, barW, bh)
+      }
+      raf = requestAnimationFrame(draw)
+    }
+    draw()
+    return () => {
+      cancelAnimationFrame(raf)
+      // close() is async on some browsers but we don't need its promise.
+      try { ac.close() } catch {}
+    }
+  }, [stream])
+  return <canvas ref={canvasRef} className="h-6 flex-1" aria-hidden="true" />
 }
 
 // ScrollToBottomFab is the small floating ↓ button WhatsApp pops at the
