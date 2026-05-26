@@ -22,6 +22,7 @@ import { chatTitle, isGroup, senderTitle } from '../explorer/format'
 //     the user has lots of chats; a ping on a different one is the
 //     whole point of notifications.
 const ENABLED_KEY = 'wa.notifications.enabled'
+const SOUND_KEY = 'wa.notifications.sound'
 const DISMISSED_KEY = 'wa.notifications.banner-dismissed'
 
 export type Permission = 'default' | 'granted' | 'denied' | 'unsupported'
@@ -100,8 +101,6 @@ export function useDesktopNotifications({
     const body = previewBody(m, groupChat ? sender : undefined)
     const icon = '/api/v2/avatars/' + encodeURIComponent(m.chat_jid)
     try {
-      // tag dedupes — a flurry of messages from the same chat collapses
-      // to one notification instead of stacking the OS tray.
       const n = new Notification(title, {
         body,
         icon,
@@ -116,6 +115,13 @@ export function useDesktopNotifications({
       }
     } catch {
       // Some browsers throw if too many notifications stack — fail silent.
+    }
+    // Soft ding when the window is hidden (the user can't see the
+    // notification flash on-screen, so an audio cue helps). When the
+    // window is visible we stay silent — the OS notification itself is
+    // enough, and audio while you're already at the keyboard is jarring.
+    if (readSound() && typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      playDing()
     }
   }, [])
 
@@ -151,6 +157,55 @@ function readEnabled(): boolean {
     return v === null ? true : v === 'true'
   } catch {
     return true
+  }
+}
+
+function readSound(): boolean {
+  try {
+    const v = localStorage.getItem(SOUND_KEY)
+    return v === null ? true : v === 'true'
+  } catch {
+    return true
+  }
+}
+
+// playDing synthesises a brief two-tone chime via WebAudio — no asset to
+// ship, no autoplay block (we're already past a user-gesture by the time
+// permission was granted, and modern browsers allow synthesis-only nodes).
+// Soft, short envelope so it never overlaps with itself in busy chats.
+let _audioCtx: AudioContext | null = null
+function playDing() {
+  if (typeof window === 'undefined') return
+  try {
+    const AC: typeof AudioContext =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    if (!_audioCtx) _audioCtx = new AC()
+    const ac = _audioCtx
+    const now = ac.currentTime
+    // Two notes ~ a perfect fifth (E5 → B5) — the WA "delivered" feel.
+    const notes = [
+      { freq: 659.25, start: 0, dur: 0.18 }, // E5
+      { freq: 987.77, start: 0.07, dur: 0.18 }, // B5
+    ]
+    for (const n of notes) {
+      const osc = ac.createOscillator()
+      const gain = ac.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = n.freq
+      osc.connect(gain)
+      gain.connect(ac.destination)
+      // Quick attack + exponential decay → a pleasant short ping with no
+      // pops at start/end.
+      gain.gain.setValueAtTime(0, now + n.start)
+      gain.gain.linearRampToValueAtTime(0.18, now + n.start + 0.01)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur)
+      osc.start(now + n.start)
+      osc.stop(now + n.start + n.dur)
+    }
+  } catch {
+    // If the browser blocks audio creation (Safari pre-gesture, etc.),
+    // we just skip the ding — the visual notification is enough.
   }
 }
 
