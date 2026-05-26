@@ -34,6 +34,7 @@ export function MessageBubble({
   firstInGroup = true,
   highlighted = false,
   highlightQuery,
+  senderIsAdmin = false,
 }: {
   msg: Message
   group: boolean
@@ -92,6 +93,12 @@ export function MessageBubble({
    *  string in an amber <mark> so the user sees exactly where the search
    *  hit lives inside the bubble. */
   highlightQuery?: string
+  /** True when the bubble's sender is a group admin / owner — paints
+   *  a small "admin" pill next to the colored sender name so the
+   *  reader can spot leadership in busy threads. Only relevant in
+   *  groups (DMs have no admin concept); MessageThread only sets it
+   *  for groups via the adminJids set it fetches with participants. */
+  senderIsAdmin?: boolean
 }) {
   const mine = msg.is_from_me
   const sender =
@@ -199,29 +206,42 @@ export function MessageBubble({
           // "person color" so speakers stay visually distinct in busy groups.
           // Clickable when the thread provided an onOpenChat handler: tap
           // the name → start / open a DM with that participant, same
-          // gesture WA's mobile + desktop clients use.
-          onOpenChat ? (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onOpenChat(msg.sender)
-              }}
-              dir="auto"
-              title={`Open DM with ${sender}`}
-              className="mb-1 text-xs font-semibold transition hover:underline"
-              style={{ color: senderColor(msg.sender) }}
-            >
-              {sender}
-            </button>
-          ) : (
-            <div
-              dir="auto"
-              className="mb-1 text-xs font-semibold"
-              style={{ color: senderColor(msg.sender) }}
-            >
-              {sender}
-            </div>
-          )
+          // gesture WA's mobile + desktop clients use. The optional
+          // "admin" pill (cycle 54) sits next to the name when the
+          // sender holds group-admin / owner privileges.
+          <div className="mb-1 flex items-center gap-1.5">
+            {onOpenChat ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onOpenChat(msg.sender)
+                }}
+                dir="auto"
+                title={`Open DM with ${sender}`}
+                className="text-xs font-semibold transition hover:underline"
+                style={{ color: senderColor(msg.sender) }}
+              >
+                {sender}
+              </button>
+            ) : (
+              <span
+                dir="auto"
+                className="text-xs font-semibold"
+                style={{ color: senderColor(msg.sender) }}
+              >
+                {sender}
+              </span>
+            )}
+            {senderIsAdmin && (
+              <span
+                title="Group admin"
+                aria-label="Group admin"
+                className="rounded-full bg-emerald-500/15 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-wider text-emerald-300"
+              >
+                admin
+              </span>
+            )}
+          </div>
         )}
 
         {msg.is_forwarded && <div className="mb-1 text-[11px] italic text-neutral-400">↪ Forwarded</div>}

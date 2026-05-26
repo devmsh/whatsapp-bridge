@@ -226,15 +226,32 @@ export function MessageThread({
   // literal "Group". We re-use the bridge's groupParticipants endpoint
   // (already cached server-side; the composer's @-picker hits it too for
   // groups, so a refresh costs ~one extra request).
+  //
+  // The same fetch also fills adminJids — the set of participant JIDs
+  // that hold admin / owner privileges in this group. Pass down to
+  // bubbles so each one can paint a small "admin" badge next to the
+  // sender name, useful in busy groups for "did the founder say this?".
   const [memberCount, setMemberCount] = useState<number | null>(null)
+  const [adminJids, setAdminJids] = useState<Set<string> | null>(null)
   useEffect(() => {
     if (!group) {
       setMemberCount(null)
+      setAdminJids(null)
       return
     }
     let cancelled = false
     api.groupParticipants(jid).then((p) => {
-      if (!cancelled) setMemberCount(p.length)
+      if (cancelled) return
+      setMemberCount(p.length)
+      const set = new Set<string>()
+      for (const m of p) {
+        if (!(m.is_admin || m.is_super_admin)) continue
+        // Cover all the JID shapes a sender can arrive as on the wire.
+        if (m.jid) set.add(m.jid)
+        if (m.lid) set.add(m.lid + '@lid')
+        if (m.phone) set.add(m.phone + '@s.whatsapp.net')
+      }
+      setAdminJids(set)
     }).catch(() => {})
     return () => { cancelled = true }
   }, [group, jid])
@@ -982,6 +999,7 @@ export function MessageThread({
                 selectMode={selectMode}
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
+                adminJids={adminJids}
               />
             </>
           )}
@@ -3039,6 +3057,7 @@ function Timeline({
   selectMode,
   selectedIds,
   onToggleSelect,
+  adminJids,
 }: {
   messages: Message[]
   group: boolean
@@ -3079,6 +3098,10 @@ function Timeline({
   selectMode?: boolean
   selectedIds?: Set<string>
   onToggleSelect?: (id: string) => void
+  /** Sender JIDs (in any of the wire forms) that hold group admin /
+   *  owner privileges. The bubble paints a small "admin" pill next to
+   *  the colored sender name when its sender is in this set. */
+  adminJids?: Set<string> | null
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -3188,6 +3211,7 @@ function Timeline({
                   firstInGroup={firstInGroup}
                   highlighted={highlightId === m.id}
                   highlightQuery={highlightQuery}
+                  senderIsAdmin={!!adminJids?.has(m.sender)}
                 />
                 {selectMode && (
                   <div
