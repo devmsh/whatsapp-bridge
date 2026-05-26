@@ -75,6 +75,15 @@ export interface ChatEvent {
   timestamp: number
 }
 
+// RecentSticker is one row in the composer's sticker tray — a bridge
+// path + MIME + when it was last seen. Path is store-relative (e.g.
+// "store/stickers/abc.webp"); mediaURL() turns it into a real URL.
+export interface RecentSticker {
+  path: string
+  mime: string
+  timestamp: number
+}
+
 // Newsletter mirrors the bridge's db.Newsletter row — one WA "channel"
 // the user follows. JID ends in @newsletter; VerificationState is
 // "VERIFIED" on the green-check ones, "" otherwise.
@@ -1422,6 +1431,15 @@ export const api = {
       '/api/v2/send-location',
       { jid, latitude: lat, longitude: lng, name, address },
     ),
+  // recentStickers returns the most-recent unique sticker paths the bridge
+  // has stored — drives the composer's sticker tray. Each row is a
+  // bridge-relative path the tray can render with mediaURL() and pipe
+  // straight back into /send with sticker:true to re-send.
+  recentStickers: async (limit = 60): Promise<RecentSticker[]> => {
+    const res = await fetch('/api/v2/stickers/recent?limit=' + limit)
+    if (!res.ok) return []
+    return res.json()
+  },
   // newsletters returns every WA "channel" (newsletter) the current user
   // follows. Each row carries the verification badge (VERIFIED accounts get
   // a green check), subscriber count, and the user's role (admin/subscriber).

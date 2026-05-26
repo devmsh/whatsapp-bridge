@@ -73,6 +73,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/send", s.handleSend)
 	s.mux.HandleFunc("/api/v2/send-location", s.handleSendLocation)
 	s.mux.HandleFunc("/api/v2/send-contact", s.handleSendContact)
+	// Recent stickers list — dedup of every sticker the bridge has seen,
+	// newest-first. The composer's sticker tray feeds off this.
+	s.mux.HandleFunc("/api/v2/stickers/recent", s.handleRecentStickers)
 	s.mux.HandleFunc("/api/v2/reply", s.handleReply)
 	s.mux.HandleFunc("/api/v2/react", s.handleReact)
 	s.mux.HandleFunc("/api/v2/tts-send", s.handleTTSSend)

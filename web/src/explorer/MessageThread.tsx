@@ -23,6 +23,7 @@ import { PollComposer } from './PollComposer'
 import { ScheduleSendModal } from './ScheduleSendModal'
 import { SendLocationModal } from './SendLocationModal'
 import { SendContactModal } from './SendContactModal'
+import { StickerTray } from './StickerTray'
 import { useScheduledMessages, type ScheduledMessage } from '../hooks/useScheduledMessages'
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
@@ -1396,6 +1397,12 @@ function Composer({
   // of the composer; click toggles, click-outside / Esc closes (handled
   // inside EmojiPicker so the textarea keeps its own keydown wiring clean).
   const [emojiOpen, setEmojiOpen] = useState(false)
+  // Sticker-tray popover toggle. Picks a server-path sticker from
+  // /api/v2/stickers/recent and fires api.send with sticker:true.
+  const [stickerTrayOpen, setStickerTrayOpen] = useState(false)
+  // In-flight flag while a sticker send is firing. Hides the picker on
+  // success; on failure surfaces an inline error.
+  const [stickerSending, setStickerSending] = useState(false)
   // Poll-create modal open/closed. Opens via the bar-chart icon in the
   // composer footer; the modal handles the rest (question + options + send).
   // Lives here in Composer so it can reuse jid + onSent without re-plumbing.
@@ -2245,6 +2252,72 @@ function Composer({
                   onPick={insertEmoji}
                   onClose={() => setEmojiOpen(false)}
                 />
+              )}
+            </div>
+            {/* Sticker tray — sibling of the emoji button. Click → pop a
+                "Recents" grid; pick → fires api.send(jid, '', {
+                mediaPath, sticker:true }). No upload step: bridge paths
+                are reused as-is. Disabled while a previous sticker send
+                is in flight to avoid double-fires. */}
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setStickerTrayOpen((v) => !v)}
+                disabled={!!editingMsg || stickerSending}
+                title={editingMsg ? 'Stickers are disabled while editing' : 'Stickers'}
+                aria-label="Stickers"
+                aria-expanded={stickerTrayOpen}
+                className={
+                  'flex h-10 w-10 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-40 ' +
+                  (stickerTrayOpen
+                    ? 'bg-neutral-800 text-violet-300'
+                    : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200')
+                }
+              >
+                {/* Square-with-smile — recognisable "sticker" sigil */}
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9z" />
+                  <path d="M21 15h-4a2 2 0 0 0-2 2v4" />
+                  <path d="M8 11s1 1.5 4 1.5S16 11 16 11" />
+                </svg>
+              </button>
+              {stickerTrayOpen && (
+                <div className="absolute bottom-12 left-0 z-30">
+                  <StickerTray
+                    jid={jid}
+                    onClose={() => setStickerTrayOpen(false)}
+                    onPick={async (path) => {
+                      if (stickerSending) return
+                      setStickerSending(true)
+                      try {
+                        const res = await api.send(jid, '', {
+                          mediaPath: path,
+                          sticker: true,
+                        })
+                        const echoed: Message = {
+                          id: res.message_id,
+                          chat_jid: jid,
+                          sender: '',
+                          sender_name: '',
+                          push_name: '',
+                          content: '',
+                          timestamp: res.timestamp,
+                          is_from_me: true,
+                          is_group: group,
+                          message_type: 'media',
+                          media_type: 'sticker',
+                          media_path: path,
+                          media_mime: 'image/webp',
+                        }
+                        onSent(echoed)
+                        setStickerTrayOpen(false)
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : 'Sticker send failed')
+                      } finally {
+                        setStickerSending(false)
+                      }
+                    }}
+                  />
+                </div>
               )}
             </div>
             <button
