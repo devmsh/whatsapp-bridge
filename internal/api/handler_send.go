@@ -169,6 +169,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		Sticker       bool     `json:"sticker,omitempty"`         // true = send .webp as sticker; default = image
 		PTT           bool     `json:"ptt,omitempty"`             // true = send audio as voice note (push-to-talk)
 		MentionedJIDs []string `json:"mentioned_jids,omitempty"`  // JIDs to ping (filled into ContextInfo.MentionedJID)
+		ViewOnce      bool     `json:"view_once,omitempty"`       // true = wrap photo / video / voice in WA's view-once envelope
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")
@@ -231,6 +232,36 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		msg.Conversation = proto.String(req.Message)
+	}
+
+	// View-once wrapping. WA's "🔥 send once" gesture is two-pronged:
+	//   1) set ViewOnce=true on the inner ImageMessage / VideoMessage /
+	//      AudioMessage — receivers use it to render the "View once" badge
+	//      and to refuse to forward / save the media.
+	//   2) wrap the whole *Message inside FutureProofMessage and stuff it
+	//      into Message.ViewOnceMessageV2 — that envelope is what triggers
+	//      WA's server-side single-view enforcement.
+	// Only meaningful when there's actually a photo / video / voice note
+	// attached; text-only "view once" is a no-op upstream so we skip the
+	// envelope to keep wire shape clean.
+	if req.ViewOnce && req.MediaPath != "" {
+		hadMedia := false
+		switch {
+		case msg.ImageMessage != nil:
+			msg.ImageMessage.ViewOnce = proto.Bool(true)
+			hadMedia = true
+		case msg.VideoMessage != nil:
+			msg.VideoMessage.ViewOnce = proto.Bool(true)
+			hadMedia = true
+		case msg.AudioMessage != nil:
+			msg.AudioMessage.ViewOnce = proto.Bool(true)
+			hadMedia = true
+		}
+		if hadMedia {
+			msg = &waE2E.Message{
+				ViewOnceMessageV2: &waE2E.FutureProofMessage{Message: msg},
+			}
+		}
 	}
 
 	resp, err := wa.SendMessage(context.Background(), recipientJID, msg)

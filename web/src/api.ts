@@ -801,13 +801,14 @@ export const api = {
   send: (
     jid: string,
     message: string,
-    opts?: { mediaPath?: string; mentionedJIDs?: string[] },
+    opts?: { mediaPath?: string; mentionedJIDs?: string[]; viewOnce?: boolean },
   ) =>
     postBody<{ success: boolean; message_id: string; timestamp: number }>('/api/v2/send', {
       jid,
       message,
       media_path: opts?.mediaPath,
       mentioned_jids: opts?.mentionedJIDs,
+      view_once: opts?.viewOnce,
     }),
   // groupParticipants returns the full participant list of a group — used by
   // the composer's @-picker to suggest who you might be tagging.

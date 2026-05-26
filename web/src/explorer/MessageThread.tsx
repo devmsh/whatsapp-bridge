@@ -1340,6 +1340,10 @@ function Composer({
   // upload it, then either api.send or api.reply with the returned path.
   const [attachment, setAttachment] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
+  // When true and the current attachment is photo / video / voice, /send
+  // gets view_once: true and the recipient sees the cycle-79 badge.
+  // Resets to false whenever the user removes / replaces the attachment.
+  const [viewOnce, setViewOnce] = useState(false)
   // Voice-recording state. Tapping the mic button asks for mic permission,
   // opens a MediaRecorder, and swaps the composer for a thin recording bar
   // (mic dot + mm:ss timer + ✕ cancel + ➤ send). On send we wrap the chunks
@@ -1782,13 +1786,23 @@ function Composer({
       //   media          → /send with media_path
       //   text           → /send
       const mentionedJIDs = collectMentionedJIDs()
-      const opts =
-        mediaPath || mentionedJIDs.length > 0
-          ? { mediaPath, mentionedJIDs: mentionedJIDs.length > 0 ? mentionedJIDs : undefined }
-          : undefined
+      // view_once only meaningful with a real attachment — propagating it
+      // on a text-only send is a no-op upstream but adds wire noise. We
+      // also skip it on replies for now: WA tolerates view-once on the
+      // wrapping message but the bridge's /reply path doesn't carry the
+      // envelope yet (separate handler), and a half-applied view-once is
+      // worse than none.
+      const wantViewOnce = !!mediaPath && viewOnce && !replyTo
       const res = replyTo
-        ? await api.reply(jid, replyTo.id, body, opts)
-        : await api.send(jid, body, opts)
+        ? await api.reply(jid, replyTo.id, body, {
+            mediaPath,
+            mentionedJIDs: mentionedJIDs.length > 0 ? mentionedJIDs : undefined,
+          })
+        : await api.send(jid, body, {
+            mediaPath,
+            mentionedJIDs: mentionedJIDs.length > 0 ? mentionedJIDs : undefined,
+            viewOnce: wantViewOnce ? true : undefined,
+          })
       // Echo locally so the bubble lands instantly. For media we don't have
       // the server's permanent path yet, but the caption + a placeholder
       // media_type is enough to render a "Photo" / "Video" / "Document" chip
@@ -1822,6 +1836,7 @@ function Composer({
       onClearReply?.()
       setText('')
       setAttachment(null)
+      setViewOnce(false) // back to default for the next attachment
       // The text-change effect already removes empty drafts, but be explicit
       // here so the key disappears synchronously with the successful send —
       // no chance of a stale draft surviving a fast chat-switch. Notify the
@@ -2109,7 +2124,12 @@ function Composer({
             <AttachmentPreview
               file={attachment}
               previewURL={previewURL}
-              onClear={() => setAttachment(null)}
+              viewOnce={viewOnce}
+              onToggleViewOnce={() => setViewOnce((v) => !v)}
+              onClear={() => {
+                setAttachment(null)
+                setViewOnce(false) // reset alongside the file
+              }}
             />
           )}
           <input
@@ -2562,10 +2582,17 @@ function BlockedComposerBanner({ jid, title }: { jid: string; title: string }) {
 function AttachmentPreview({
   file,
   previewURL,
+  viewOnce,
+  onToggleViewOnce,
   onClear,
 }: {
   file: File
   previewURL: string
+  /** When true the parent will send this attachment as WA view-once.
+   *  Only meaningful for image / video / audio — the toggle hides itself
+   *  for plain documents (WA doesn't support view-once on those). */
+  viewOnce: boolean
+  onToggleViewOnce: () => void
   onClear: () => void
 }) {
   const sizeStr =
@@ -2576,6 +2603,8 @@ function AttachmentPreview({
         : `${(file.size / (1024 * 1024)).toFixed(1)} MB`
   const isImage = file.type.startsWith('image/')
   const isVideo = file.type.startsWith('video/')
+  const isAudio = file.type.startsWith('audio/')
+  const viewOnceEligible = isImage || isVideo || isAudio
   return (
     <div className="mb-2 flex items-center gap-3 rounded-lg bg-neutral-900 p-2 text-xs">
       {isImage && previewURL ? (
@@ -2591,6 +2620,30 @@ function AttachmentPreview({
         <div className="truncate text-neutral-200">{file.name || 'Attachment'}</div>
         <div className="text-neutral-500">{sizeStr}</div>
       </div>
+      {/* View-once toggle — eligible for photo / video / voice only.
+          Active state is rose so it visually matches the receive-side
+          "🔥 View once" badge in MessageBubble. */}
+      {viewOnceEligible && (
+        <button
+          onClick={onToggleViewOnce}
+          title={
+            viewOnce
+              ? 'Sending as view-once — tap to make permanent'
+              : 'Send as view-once — recipient can open it just once'
+          }
+          aria-label="Toggle view-once"
+          className={
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ' +
+            (viewOnce
+              ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
+              : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200')
+          }
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+            <path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14a8 8 0 0 0 16 0c0-4.16-2-7.88-6.5-13.33z" />
+          </svg>
+        </button>
+      )}
       <button
         onClick={onClear}
         title="Remove attachment"
