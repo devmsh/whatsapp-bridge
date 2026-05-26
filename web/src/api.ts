@@ -728,6 +728,18 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // groupInviteLink returns the chat.whatsapp.com URL anyone with this group's
+  // invite code can use to join. When `reset` is true the bridge asks
+  // whatsmeow to revoke the old code and mint a new one — the previous link
+  // immediately stops working, matching WA's "Reset link" action.
+  // Admin-only on most groups; non-admins get a 500 from the bridge here.
+  groupInviteLink: async (jid: string, reset = false): Promise<string> => {
+    const q = reset ? '?reset=true' : ''
+    const res = await fetch(`/api/v2/groups/${encodeURIComponent(jid)}/invite${q}`)
+    if (!res.ok) throw new Error('Failed to load invite link')
+    const body = (await res.json()) as { link?: string }
+    return body.link || ''
+  },
   // upload posts a single file as multipart/form-data, the bridge writes it
   // under <MediaDir>/uploads/<yyyymm>/, and returns an absolute path that
   // /send and /reply can consume in media_path.
