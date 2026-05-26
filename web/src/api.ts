@@ -1262,6 +1262,25 @@ export const api = {
       if (!r.ok) throw new Error('Failed to set disappearing timer')
       return r.json() as Promise<{ success: boolean }>
     }),
+  // selfAbout reads / writes the current user's "About" line — the short bio
+  // (e.g. "Available", "At work, ping me later") shown under your name in
+  // profile cards. Bridge resolves it via GetUserInfo against the connected
+  // device's own JID.
+  selfAbout: async (): Promise<string> => {
+    const res = await fetch('/api/v2/status/about')
+    if (!res.ok) return ''
+    const body = (await res.json()) as { text?: string }
+    return body.text || ''
+  },
+  setSelfAbout: (text: string) =>
+    fetch('/api/v2/status/about', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).then((r) => {
+      if (!r.ok) throw new Error('Failed to save About')
+      return r.json() as Promise<{ success: boolean }>
+    }),
   // privacy returns the user's current privacy settings — exactly what WA's
   // "Settings → Privacy" panel shows. Whatsmeow's `PrivacySettings` struct
   // is serialised with PascalCase fields, so we expose the same shape here.
