@@ -49,6 +49,9 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
           <Group title="Anywhere">
             <Row keys={['⌘', 'K']}>Focus the universal search at the top</Row>
             <Row keys={['⌘', '/']}>Open this shortcuts panel</Row>
+            <Row keys={['⌘', '⇧', ']']} or={['⌘', '⇧', '[']}>
+              Cycle to the next / previous chat
+            </Row>
           </Group>
 
           <Group title="In a chat">

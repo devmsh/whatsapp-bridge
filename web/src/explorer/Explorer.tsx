@@ -355,8 +355,10 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   }, [chats, selected, openChat])
 
   // Global keyboard shortcuts:
-  //   ⌘/Ctrl + K  → focus + select the universal search bar (Slack/Linear/Notion convention)
-  //   ⌘/Ctrl + /  → open the shortcuts help overlay (every workspace app's "?" gesture)
+  //   ⌘/Ctrl + K          → focus + select the universal search bar
+  //   ⌘/Ctrl + /          → open the shortcuts help overlay
+  //   ⌘/Ctrl + ⇧ + ]      → next chat in the visible list (WA Web mapping)
+  //   ⌘/Ctrl + ⇧ + [      → previous chat in the visible list
   // Cmd+F is handled in MessageThread for in-chat find.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -379,10 +381,50 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         setShowShortcuts((v) => !v)
         return
       }
+      // Cycle chats with ⌘⇧] (next) / ⌘⇧[ (prev). Some keyboard layouts
+      // report these as ']' / '[' on key (Shift is already required by
+      // the matchers above); others swap to '}' / '{' with Shift held.
+      // Accept both.
+      if (e.shiftKey && (k === ']' || k === '}')) {
+        e.preventDefault()
+        cycleChat(1)
+        return
+      }
+      if (e.shiftKey && (k === '[' || k === '{')) {
+        e.preventDefault()
+        cycleChat(-1)
+        return
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // cycleChat moves the selection to the next or previous chat in the
+  // visible normal-mode list. Skips archived + hidden (just like the
+  // sidebar) and applies the same pinned-first, recency-second sort
+  // ChatList uses, so the keyboard cycle matches what the user sees.
+  function cycleChat(direction: -1 | 1) {
+    const list = chatsRef.current
+      .filter((c) => !c.is_archived && !c.is_hidden)
+      .sort((a, b) => {
+        const ap = a.is_pinned ? 1 : 0
+        const bp = b.is_pinned ? 1 : 0
+        if (ap !== bp) return bp - ap
+        return (b.last_message_at || 0) - (a.last_message_at || 0)
+      })
+    if (list.length === 0) return
+    const cur = selectedRef.current
+    const i = cur ? list.findIndex((c) => c.jid === cur) : -1
+    // From "no chat open" go to first (next) / last (prev) so the
+    // shortcut always lands somewhere.
+    const next =
+      i < 0
+        ? direction === 1 ? list[0] : list[list.length - 1]
+        : list[(i + direction + list.length) % list.length]
+    if (next) openChat(next.jid)
+  }
 
   // Desktop notifications for live incoming messages. Gating, preview
   // formatting, permission + opt-out state all live inside the hook; we
