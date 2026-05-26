@@ -113,6 +113,23 @@ export function ChatList({
     if (view === 'archived' && archivedRows.length === 0) setView('normal')
   }, [view, archivedRows.length])
 
+  // "Mark all read" handler — fires chatAction('read') for every chat in
+  // the normal list with unread > 0, sequentially. WA exposes the same
+  // bulk action via its chat-list overflow menu. We deliberately scope to
+  // the current normal list (not archived, not hidden) so a stray
+  // "Mark all" never silently touches a hidden chat. Optimistic refresh
+  // via onChanged once at the end so the badge clears in one flash.
+  async function markAllRead() {
+    const targets = normalRows
+      .map((r) => r.chat)
+      .filter((c) => (c.unread_count || 0) > 0)
+    if (targets.length === 0) return
+    for (const c of targets) {
+      try { await api.chatAction(c.jid, 'read') } catch {}
+    }
+    onChanged()
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Filter pills — only in normal view (archived has its own affordance). */}
@@ -129,6 +146,18 @@ export function ChatList({
             <FilterPill id="mentions" current={filter} onPick={setFilter} count={filterCounts.mentions}>
               @ Mentions
             </FilterPill>
+          )}
+          {/* Mark-all-read sits at the right edge of the filter row and
+              only appears when there's something to clear, so the row
+              doesn't carry a dangling action in calm times. */}
+          {filterCounts.unread > 0 && (
+            <button
+              onClick={markAllRead}
+              title="Mark every chat as read"
+              className="ml-auto shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium text-emerald-300 transition hover:bg-emerald-500/15"
+            >
+              ✓ Mark all read
+            </button>
           )}
         </div>
       )}
