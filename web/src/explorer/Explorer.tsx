@@ -34,6 +34,7 @@ import { StarredPanel } from './StarredPanel'
 import { CallsPanel } from './CallsPanel'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
+import { ShortcutsHelp } from './ShortcutsHelp'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls'
 
@@ -60,6 +61,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [liveMsg, setLiveMsg] = useState<Message | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
@@ -280,19 +282,30 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // another tab without focusing this one — same affordance as WA Web.
   useUnreadBadge(chats)
 
-  // Global keyboard shortcut: Cmd/Ctrl+K focuses + selects the universal
-  // search bar at the top of the sidebar. Same convention every modern
-  // workspace app (Slack, Linear, Notion) uses; familiar to power users.
+  // Global keyboard shortcuts:
+  //   ⌘/Ctrl + K  → focus + select the universal search bar (Slack/Linear/Notion convention)
+  //   ⌘/Ctrl + /  → open the shortcuts help overlay (every workspace app's "?" gesture)
   // Cmd+F is handled in MessageThread for in-chat find.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return
+      const k = e.key.toLowerCase()
+      if (!e.shiftKey && k === 'k') {
         e.preventDefault()
         const el = document.getElementById('wa-universal-search') as HTMLInputElement | null
         if (el) {
           el.focus()
           el.select()
         }
+        return
+      }
+      // The "?" character literally produced is typically e.key === '/' (the
+      // unmodified key on US layouts) — we want this on Cmd+/ regardless of
+      // whether Shift is held, so both ⌘/ and ⌘? open the panel.
+      if (k === '/') {
+        e.preventDefault()
+        setShowShortcuts((v) => !v)
+        return
       }
     }
     window.addEventListener('keydown', onKey)
@@ -352,6 +365,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   return (
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
+      {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {showProfiling && <ProfilingStatusModal onClose={() => setShowProfiling(false)} />}
       {showUnlock && (
         <HiddenLockModal
