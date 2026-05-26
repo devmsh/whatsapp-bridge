@@ -137,7 +137,15 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     }
     loadAll()
     window.addEventListener('wa.unlock-changed', loadAll)
-    return () => window.removeEventListener('wa.unlock-changed', loadAll)
+    // 'wa.chats-changed' is dispatched by any mutation that doesn't already
+    // have a refresh path of its own (e.g. DisappearingSection). It's cheap
+    // — the full chats load is ~50 ms locally — and keeps every consumer of
+    // the chats prop honest without each one wiring its own onChanged.
+    window.addEventListener('wa.chats-changed', loadAll)
+    return () => {
+      window.removeEventListener('wa.unlock-changed', loadAll)
+      window.removeEventListener('wa.chats-changed', loadAll)
+    }
   }, [])
 
   const reloadCircles = useCallback(() => {

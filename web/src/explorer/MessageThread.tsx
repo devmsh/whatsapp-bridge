@@ -733,22 +733,43 @@ export function MessageThread({
           >
             {title}
           </button>
-          <div
-            className={
-              'truncate text-xs ' +
-              // Highlight typing in emerald (same accent as own bubbles) so
-              // 'typing…' actually pops the way it does in official WA.
-              ((group ? groupTypingLine : presenceLine === 'typing…')
-                ? 'text-emerald-400'
-                : 'text-neutral-500')
-            }
-          >
-            {group
-              ? groupTypingLine ||
-                (memberCount !== null
-                  ? `${memberCount} ${memberCount === 1 ? 'member' : 'members'}`
-                  : 'Group')
-              : presenceLine || jid.replace('@s.whatsapp.net', '')}
+          <div className="flex items-center gap-1.5 truncate text-xs">
+            <span
+              className={
+                'truncate ' +
+                // Highlight typing in emerald (same accent as own bubbles) so
+                // 'typing…' actually pops the way it does in official WA.
+                ((group ? groupTypingLine : presenceLine === 'typing…')
+                  ? 'text-emerald-400'
+                  : 'text-neutral-500')
+              }
+            >
+              {group
+                ? groupTypingLine ||
+                  (memberCount !== null
+                    ? `${memberCount} ${memberCount === 1 ? 'member' : 'members'}`
+                    : 'Group')
+                : presenceLine || jid.replace('@s.whatsapp.net', '')}
+            </span>
+            {/* Disappearing-messages chip: small clock + the active timer
+                ("24h" / "7d" / "90d"). Mirrors WA mobile's header indicator
+                — there's no other passive surface telling you the chat is
+                on a self-destruct timer, and that absence has bitten people
+                forever. Hidden when the timer is off. Click jumps into the
+                info modal where the picker lives. */}
+            {chat && (chat.disappearing_timer ?? 0) > 0 && (
+              <button
+                onClick={() => (group ? setGroupInfoOpen(true) : setContactInfoOpen(true))}
+                title={`Messages disappear after ${formatDisappearing(chat.disappearing_timer || 0)} — tap to change`}
+                className="flex shrink-0 items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 transition hover:bg-amber-500/25"
+              >
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+                {formatDisappearing(chat.disappearing_timer || 0)}
+              </button>
+            )}
           </div>
           {isContact && (contactTags[jid]?.length ?? 0) > 0 && (
             <div className="mt-1">
@@ -2276,6 +2297,18 @@ function useGroupTyping(jid: string | null): string[] {
 //   3+       → "Several people are typing…"  (matches official WA cap)
 //
 // Returns '' when nobody is typing, so the caller can fall back to "Group".
+// formatDisappearing turns a disappearing-messages timer (seconds) into the
+// short label the header chip and tooltips share. WA only allows three live
+// values, so this is fast-path; anything else degrades to "Nd" so the chip
+// still says something useful if the bridge ever expands the set.
+function formatDisappearing(sec: number): string {
+  if (sec === 86400) return '24h'
+  if (sec === 604800) return '7d'
+  if (sec === 7776000) return '90d'
+  if (sec >= 86400) return `${Math.round(sec / 86400)}d`
+  return `${Math.round(sec / 3600)}h`
+}
+
 function formatGroupTyping(jids: string[], nameMap: Map<string, string>): string {
   if (jids.length === 0) return ''
   // Resolve to first names (split on whitespace so "Mohammed Shurrab" → "Mohammed")

@@ -59,6 +59,13 @@ export function DisappearingSection({
     setError('')
     try {
       await api.chatDisappearing(jid, next)
+      // Tell the rest of the app: the chats prop everyone else reads is now
+      // stale for at least this row. Explorer listens and refetches /chats
+      // so the header clock chip in MessageThread updates without the user
+      // having to reopen the chat.
+      window.dispatchEvent(
+        new CustomEvent('wa.chats-changed', { detail: { jid, disappearing_timer: next } }),
+      )
       setOpen(false)
     } catch (e) {
       setTimer(prev)
