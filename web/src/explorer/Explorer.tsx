@@ -25,6 +25,7 @@ import { MediaSettings } from '../Settings'
 import { PrivacySettings } from './PrivacySettings'
 import { SelfProfile } from './SelfProfile'
 import { StatusUpdatesPanel } from './StatusUpdatesPanel'
+import { NewslettersPanel } from './NewslettersPanel'
 import { ProfilingStatusModal } from './ProfilingStatus'
 import { BriefingModal } from './BriefingView'
 import { SearchBar } from './Search'
@@ -69,6 +70,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showPrivacy, setShowPrivacy] = useState(false)
   const [showSelfProfile, setShowSelfProfile] = useState(false)
   const [showStatuses, setShowStatuses] = useState(false)
+  const [showNewsletters, setShowNewsletters] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
   const [dndOpen, setDndOpen] = useState(false)
@@ -508,6 +510,12 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       {showPrivacy && <PrivacySettings onClose={() => setShowPrivacy(false)} />}
       {showSelfProfile && <SelfProfile device={device} onClose={() => setShowSelfProfile(false)} />}
       {showStatuses && <StatusUpdatesPanel onClose={() => setShowStatuses(false)} />}
+      {showNewsletters && (
+        <NewslettersPanel
+          onClose={() => setShowNewsletters(false)}
+          onOpenChat={(j) => openChat(j)}
+        />
+      )}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {showCompose && (
         <NewChatModal
@@ -603,6 +611,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             </IconButton>
             <IconButton title="Status updates" onClick={() => setShowStatuses(true)}>
               📸
+            </IconButton>
+            <IconButton title="Channels" onClick={() => setShowNewsletters(true)}>
+              📡
             </IconButton>
             <IconButton title="Today’s briefing" onClick={() => setShowBriefing(true)}>
               📊

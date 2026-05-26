@@ -75,6 +75,25 @@ export interface ChatEvent {
   timestamp: number
 }
 
+// Newsletter mirrors the bridge's db.Newsletter row — one WA "channel"
+// the user follows. JID ends in @newsletter; VerificationState is
+// "VERIFIED" on the green-check ones, "" otherwise.
+export interface Newsletter {
+  jid: string
+  name: string
+  description?: string
+  subscriber_count: number
+  verification_state?: string
+  picture_id?: string
+  picture_url?: string
+  invite_code?: string
+  role?: string
+  muted?: string
+  state?: string
+  creation_time?: number
+  updated_at: number
+}
+
 // LinkedDevice is one row in the WA Settings → Linked devices list — a
 // JID with the bare booleans the UI needs to render a "this is the
 // primary phone" / "this is the current session" badge.
@@ -1394,6 +1413,25 @@ export const api = {
       '/api/v2/send-location',
       { jid, latitude: lat, longitude: lng, name, address },
     ),
+  // newsletters returns every WA "channel" (newsletter) the current user
+  // follows. Each row carries the verification badge (VERIFIED accounts get
+  // a green check), subscriber count, and the user's role (admin/subscriber).
+  newsletters: async (): Promise<Newsletter[]> => {
+    const res = await fetch('/api/v2/newsletters')
+    if (!res.ok) return []
+    return res.json()
+  },
+  // newsletterFollow / newsletterUnfollow add or drop a subscription. The
+  // bridge wires both to whatsmeow's Follow / UnfollowNewsletter, then
+  // updates the local mirror so the list reflects state immediately.
+  newsletterFollow: (jid: string) =>
+    postBody<{ success: boolean }>(`/api/v2/newsletters/${encodeURIComponent(jid)}/follow`, {}),
+  newsletterUnfollow: (jid: string) =>
+    postBody<{ success: boolean }>(`/api/v2/newsletters/${encodeURIComponent(jid)}/unfollow`, {}),
+  // newsletterMute toggles do-not-disturb on one channel — same shape as
+  // chat mute but lives on the newsletter handler.
+  newsletterMute: (jid: string, mute: boolean) =>
+    postBody<{ success: boolean }>(`/api/v2/newsletters/${encodeURIComponent(jid)}/mute`, { mute }),
   // linkedDevices returns every device JID currently paired to this account
   // (WA Settings → Linked devices). Resolved upstream via GetUserInfo.
   // Includes a `current` JID so the UI can flag which row is *this* session.
