@@ -56,6 +56,36 @@ func (t *typingState) Clear(chatJID, sender string) {
 	}
 }
 
+// Snapshot returns the full set of chats with at least one fresh typer:
+//   chatJID -> []senderJID
+// Stale entries (older than typingFreshSec) are GC'd inline, same as Typers.
+// Used by the chat-list "typing…" preview — the client polls this once per
+// tick instead of per-row, so N visible chats cost one request.
+func (t *typingState) Snapshot() map[string][]string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cutoff := time.Now().Unix() - typingFreshSec
+	out := make(map[string][]string, len(t.m))
+	for chat, inner := range t.m {
+		live := make([]string, 0, len(inner))
+		for sender, ts := range inner {
+			if ts >= cutoff {
+				live = append(live, sender)
+			} else {
+				delete(inner, sender)
+			}
+		}
+		if len(inner) == 0 {
+			delete(t.m, chat)
+			continue
+		}
+		if len(live) > 0 {
+			out[chat] = live
+		}
+	}
+	return out
+}
+
 // Typers returns the senders currently typing in chatJID — beacons fresher
 // than typingFreshSec. Stale entries are GC'd inline so the map can't grow
 // unbounded across long-running sessions.

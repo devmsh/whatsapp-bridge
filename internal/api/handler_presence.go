@@ -89,6 +89,41 @@ func (s *Server) handlePresenceSubscribe(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, map[string]bool{"success": true})
 }
 
+// handleTypingSnapshot returns every chat that currently has at least one
+// fresh 'composing' beacon — group typing cache + DM presence rows where
+// status='composing' within the freshness window. The chat list polls this
+// once every few seconds to render WA's "typing…" preview without N+1.
+//
+// Shape:
+//   { "chats": { "<chatJID>": ["<senderJID>", ...], ... } }
+//
+// For DMs the sender list is just [chatJID] (the peer themselves) — kept
+// uniform with groups so the client treats both the same way.
+func (s *Server) handleTypingSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	out := map[string][]string{}
+	// Groups: in-memory beacons.
+	for chat, typers := range s.client.Typing.Snapshot() {
+		out[chat] = typers
+	}
+	// DMs: presence_cache rows where the peer is actively composing. Same
+	// 10s freshness as the in-memory cache so both surfaces age out together.
+	if composers, err := s.store.ActiveComposers(10); err == nil {
+		for _, jid := range composers {
+			// Don't clobber a group entry that happens to share the JID
+			// (shouldn't be possible — DMs and groups have different
+			// suffixes — but defensive).
+			if _, exists := out[jid]; !exists {
+				out[jid] = []string{jid}
+			}
+		}
+	}
+	jsonOK(w, map[string]any{"chats": out})
+}
+
 func (s *Server) handlePresenceGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)

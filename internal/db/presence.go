@@ -30,3 +30,24 @@ func (s *Store) GetPresence(jid string) (*PresenceEntry, error) {
 	}
 	return p, nil
 }
+
+// ActiveComposers returns every DM contact whose last presence beacon was
+// 'composing' within freshSec. Used by the chat-list "typing…" preview so a
+// single request covers every visible DM row at once.
+func (s *Store) ActiveComposers(freshSec int64) ([]string, error) {
+	cutoff := time.Now().Unix() - freshSec
+	rows, err := s.DB.Query(`SELECT jid FROM presence_cache WHERE status = 'composing' AND updated_at >= ?`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var j string
+		if err := rows.Scan(&j); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}

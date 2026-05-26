@@ -33,6 +33,11 @@ export function ChatList({
   // `wa.draft-changed` on every keystroke / send so the "Draft: …" pill on
   // matching rows updates immediately as the user types or sends. Map<jid, text>.
   const drafts = useDrafts()
+  // Map<chatJID, senderJID[]> of every chat the bridge currently sees a fresh
+  // 'composing' beacon for. Drives the WA-style "typing…" preview that
+  // replaces the last-message line. One poll per tick covers every visible
+  // row (groups + DMs combined) — see /api/v2/typing on the bridge.
+  const typing = useTypingSnapshot()
   const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
   // When set, shows the circle-membership picker for this chat.
   const [picking, setPicking] = useState<{ jid: string; title: string } | null>(null)
@@ -259,6 +264,16 @@ export function ChatList({
                     <span className="font-medium text-red-400">Draft: </span>
                     <span className="text-neutral-400">{drafts.get(chat.jid)}</span>
                   </span>
+                ) : typing.has(chat.jid) ? (
+                  // Live typing beacon — peer (DM) or one+ participants
+                  // (group) are composing right now. WA replaces the
+                  // last-message line with this in emerald so it pops at a
+                  // glance. Group rows name the typer when we have a single
+                  // one, mirroring the header line — falls back to a generic
+                  // "typing…" for DMs and multi-typer groups.
+                  <span className="truncate font-medium text-emerald-400">
+                    {typingPreview(chat.jid, typing.get(chat.jid) || [], nameMap)}
+                  </span>
                 ) : (
                   <span className="truncate">
                     {chat.last_message
@@ -378,6 +393,77 @@ export function ChatList({
       )}
     </div>
   )
+}
+
+// useTypingSnapshot polls /api/v2/typing every 3 s and returns a Map of
+// chatJID -> senderJIDs. One request covers every visible chat row, so the
+// list can render WA's "typing…" preview without N+1 polling. The bridge's
+// caches age beacons out after ~10 s without a refresh, so the snapshot
+// naturally stops mentioning a chat the moment the peer pauses.
+//
+// Polling stays at 3 s regardless of list size — typing is the kind of
+// signal users notice fast, and the request is a single tiny in-memory
+// + indexed-DB lookup on the bridge.
+function useTypingSnapshot(): Map<string, string[]> {
+  const [snap, setSnap] = useState<Map<string, string[]>>(() => new Map())
+  useEffect(() => {
+    let cancelled = false
+    async function tick() {
+      const obj = await api.typingSnapshot().catch(() => ({}) as Record<string, string[]>)
+      if (cancelled) return
+      // Only swap when the shape actually changed — avoids re-rendering
+      // every row every 3 s when nobody's typing (the common case).
+      setSnap((prev) => {
+        const next = new Map(Object.entries(obj))
+        if (mapEqual(prev, next)) return prev
+        return next
+      })
+    }
+    void tick()
+    const h = setInterval(tick, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(h)
+    }
+  }, [])
+  return snap
+}
+
+// mapEqual: shallow set-equality for the typing snapshot. Same JIDs typing
+// in the same chats is treated as unchanged, even if the array order or
+// reference differs — server returns map iteration order, which isn't
+// stable across calls.
+function mapEqual(a: Map<string, string[]>, b: Map<string, string[]>): boolean {
+  if (a.size !== b.size) return false
+  for (const [k, v] of a) {
+    const w = b.get(k)
+    if (!w) return false
+    if (w.length !== v.length) return false
+    // Both lists tend to be 1–3 entries, so sort + compare is fine.
+    const av = [...v].sort()
+    const bv = [...w].sort()
+    for (let i = 0; i < av.length; i++) if (av[i] !== bv[i]) return false
+  }
+  return true
+}
+
+// typingPreview turns the chat-list row label for an active typing beacon.
+// Mirrors the chat-header rules in a compressed form so the row stays
+// scannable:
+//
+//   DM (group=false)        → "typing…"
+//   Group, 1 typer          → "Sarah is typing…"
+//   Group, 2+ typers        → "Sarah +1 is typing…" / "+N is typing…"
+//
+// nameMap resolves a JID to a display name; falls back to the bare phone
+// when unknown so the row is never "@lid:1234" garbage.
+function typingPreview(chatJID: string, typers: string[], nameMap: Map<string, string>): string {
+  if (!isGroup(chatJID)) return 'typing…'
+  if (typers.length === 0) return 'typing…'
+  const first = nameMap.get(typers[0]) || ('+' + (typers[0].split('@')[0] || '').split(':')[0])
+  const firstName = first.split(/\s+/)[0]
+  if (typers.length === 1) return `${firstName} is typing…`
+  return `${firstName} +${typers.length - 1} is typing…`
 }
 
 // WallpaperPickerForChat thinly wraps WallpaperPicker so the picker's

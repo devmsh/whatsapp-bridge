@@ -778,6 +778,15 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // typingSnapshot returns every chat with at least one fresh 'composing'
+  // beacon — groups + DMs in one response, keyed by chat JID. Used by the
+  // chat list to render "typing…" previews without per-row polling.
+  typingSnapshot: async (): Promise<Record<string, string[]>> => {
+    const res = await fetch('/api/v2/typing')
+    if (!res.ok) return {}
+    const body = (await res.json()) as { chats?: Record<string, string[]> }
+    return body.chats || {}
+  },
   // calls returns the most recent call events the bridge has seen, newest
   // first. limit caps the row count (default 100 server-side). One real
   // call shows up as several rows (offer/accept/terminate/...); the UI
