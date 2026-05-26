@@ -777,6 +777,24 @@ export const api = {
     const body = (await res.json()) as { link?: string }
     return body.link || ''
   },
+  // groupParticipantsUpdate adds, removes, promotes, or demotes participants
+  // in one group. WhatsApp's underlying call is batched, so the bridge accepts
+  // a list of JIDs and one action — pass [jid] for the per-row WA gestures
+  // (promote / demote / remove from the group info member row).
+  //
+  // Non-admin callers are rejected upstream by whatsmeow; we surface the
+  // error so the caller knows nothing changed. On success the returned set
+  // shape (`{success: true}`) means every JID applied — partial successes
+  // would come back as bridge errors via 5xx.
+  groupParticipantsUpdate: (
+    jid: string,
+    jids: string[],
+    action: 'add' | 'remove' | 'promote' | 'demote',
+  ) =>
+    postBody<{ success: boolean }>(
+      `/api/v2/groups/${encodeURIComponent(jid)}/participants`,
+      { jids, action },
+    ),
   // groupGet returns the full group row + participants from the bridge —
   // /api/v2/groups/{jid}. Used by the admin settings section to read the
   // current Announce / Locked / Disappearing state so the pills show what's

@@ -119,35 +119,24 @@ export function GroupInfoModal({
           {!error && participants === null && (
             <div className="p-6 text-center text-xs text-neutral-600">Loading members…</div>
           )}
-          {sorted.map((p) => {
-            const name = nameOf(p, nameMap)
-            const phone = p.phone ? '+' + p.phone : ''
-            return (
-              <button
-                key={p.jid}
-                onClick={() => {
-                  onOpenChat(p.jid)
-                  onClose()
-                }}
-                className="flex w-full items-center gap-3 px-4 py-2 text-left transition hover:bg-neutral-800/60"
-              >
-                <ChatAvatar jid={p.jid} title={name} size={36} />
-                <div className="min-w-0 flex-1">
-                  <div dir="auto" className="truncate text-sm text-neutral-100">
-                    {name}
-                  </div>
-                  {phone && phone !== name && (
-                    <div className="truncate text-[11px] text-neutral-500">{phone}</div>
-                  )}
-                </div>
-                {(p.is_admin || p.is_super_admin) && (
-                  <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">
-                    {p.is_super_admin ? 'Owner' : 'Admin'}
-                  </span>
-                )}
-              </button>
-            )
-          })}
+          {sorted.map((p) => (
+            <ParticipantRow
+              key={p.jid}
+              groupJID={jid}
+              participant={p}
+              displayName={nameOf(p, nameMap)}
+              onOpenChat={(j) => {
+                onOpenChat(j)
+                onClose()
+              }}
+              onChanged={() => {
+                // Refetch the member list — promote/demote flips the badge,
+                // remove drops the row entirely. Cheaper than maintaining a
+                // local override map.
+                api.groupParticipants(jid).then(setParticipants).catch(() => {})
+              }}
+            />
+          ))}
         </div>
       </div>
     </div>
@@ -160,6 +149,154 @@ function nameOf(p: GroupParticipant, nameMap: Map<string, string>): string {
     nameMap.get(p.jid) ||
     (p.phone ? '+' + p.phone : '') ||
     '+' + (p.jid.split('@')[0] || '').replace(/:.*/, '')
+  )
+}
+
+// ParticipantRow renders one member of the group with the WA-style admin
+// menu — kebab on the right opens Promote / Demote / Remove, action runs
+// against the bridge, parent refetches the list on success.
+//
+// Visibility rules mirror WA:
+//   - Owner (is_super_admin): no menu — the owner can't be touched.
+//   - Admin: menu shows Demote + Remove.
+//   - Plain member: menu shows Promote + Remove.
+//
+// The whole row is also clickable (avatar + name area) — opens a DM with
+// that participant, exactly the cycle-38 gesture. We don't nest a button
+// inside a button (invalid HTML) — left half is a button, right half is a
+// kebab button + admin pill in a flex row.
+function ParticipantRow({
+  groupJID,
+  participant: p,
+  displayName,
+  onOpenChat,
+  onChanged,
+}: {
+  groupJID: string
+  participant: GroupParticipant
+  displayName: string
+  onOpenChat: (jid: string) => void
+  onChanged: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const phone = p.phone ? '+' + p.phone : ''
+
+  async function run(action: 'promote' | 'demote' | 'remove') {
+    if (busy) return
+    if (action === 'remove') {
+      const ok = window.confirm(
+        `Remove ${displayName} from this group?\n\nThey'll stop seeing new messages immediately. You can add them back later if you have their number.`,
+      )
+      if (!ok) return
+    }
+    setBusy(true)
+    setOpen(false)
+    try {
+      await api.groupParticipantsUpdate(groupJID, [p.jid], action)
+      onChanged()
+    } catch (e) {
+      window.alert(
+        `Couldn't ${action} ${displayName}: ${e instanceof Error ? e.message : 'unknown error'}\n\nOnly group admins can manage members.`,
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Owner is untouchable.
+  const showMenu = !p.is_super_admin
+
+  return (
+    <div className="group relative flex w-full items-center gap-3 px-4 py-2 transition hover:bg-neutral-800/60">
+      <button
+        onClick={() => onOpenChat(p.jid)}
+        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        title="Open a DM with this contact"
+      >
+        <ChatAvatar jid={p.jid} title={displayName} size={36} />
+        <div className="min-w-0 flex-1">
+          <div dir="auto" className="truncate text-sm text-neutral-100">
+            {displayName}
+          </div>
+          {phone && phone !== displayName && (
+            <div className="truncate text-[11px] text-neutral-500">{phone}</div>
+          )}
+        </div>
+      </button>
+      {(p.is_admin || p.is_super_admin) && (
+        <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wider text-emerald-300">
+          {p.is_super_admin ? 'Owner' : 'Admin'}
+        </span>
+      )}
+      {showMenu && (
+        <div className="relative">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            disabled={busy}
+            title="Manage member"
+            aria-label="Manage member"
+            className={
+              'flex h-7 w-7 items-center justify-center rounded text-neutral-400 transition hover:bg-neutral-700 hover:text-neutral-200 disabled:opacity-50 ' +
+              // Always visible when busy or menu open; otherwise reveal on
+              // row hover. Same affordance pattern as the bubble action
+              // cluster — silent in the background, easy to find.
+              (busy || open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')
+            }
+          >
+            {/* Vertical 3-dot kebab */}
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <circle cx="12" cy="5" r="1.5" />
+              <circle cx="12" cy="12" r="1.5" />
+              <circle cx="12" cy="19" r="1.5" />
+            </svg>
+          </button>
+          {open && (
+            <>
+              {/* Click-away catcher: stops the menu staying open when the
+                  user clicks somewhere else in the modal. */}
+              <div
+                onClick={() => setOpen(false)}
+                className="fixed inset-0 z-30"
+                aria-hidden="true"
+              />
+              <div className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60">
+                {p.is_admin ? (
+                  <MenuItem onClick={() => run('demote')}>Dismiss as admin</MenuItem>
+                ) : (
+                  <MenuItem onClick={() => run('promote')}>Make group admin</MenuItem>
+                )}
+                <MenuItem destructive onClick={() => run('remove')}>
+                  Remove from group
+                </MenuItem>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MenuItem({
+  children,
+  destructive = false,
+  onClick,
+}: {
+  children: React.ReactNode
+  destructive?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        'block w-full px-3 py-2 text-left text-xs transition hover:bg-neutral-800 ' +
+        (destructive ? 'text-red-300' : 'text-neutral-200')
+      }
+    >
+      {children}
+    </button>
   )
 }
 
