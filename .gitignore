@@ -17,3 +17,8 @@ web/node_modules/
 web/tsconfig.tsbuildinfo
 agent/node_modules/
 /internal/mcp/whatsapp-bridge-v2
+.gstack/
+
+# Claude: commit shared project settings, ignore only local/runtime files
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
