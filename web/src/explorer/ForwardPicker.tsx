@@ -6,22 +6,29 @@ import { chatTitle, isGroup, isStatus } from './format'
 // ForwardPicker is the multi-select share sheet WhatsApp opens when you tap
 // "Forward" on a message. It shows the chat list (most-recent first), a
 // search filter, and a checkbox per row. Selecting one or more targets and
-// clicking "Forward" fires /api/v2/forward once per target.
+// clicking "Forward" fires /api/v2/forward once per target × message —
+// the picker accepts either a single `msg` (per-bubble Forward action) or
+// an array `msgs` (multi-select Forward), and fans out to N×M calls.
 //
 // Failure handling is partial-success: we send to each target sequentially
 // and report 'sent N · failed M'. A failed target doesn't roll the others
 // back — official WA behaves the same way.
 export function ForwardPicker({
   msg,
+  msgs,
   chats,
   nameMap,
   onClose,
 }: {
-  msg: Message
+  msg?: Message
+  msgs?: Message[]
   chats: Chat[]
   nameMap: Map<string, string>
   onClose: () => void
 }) {
+  // Single-msg callers (per-bubble Forward) still hit msg; multi-select
+  // callers pass msgs. Normalise so the rest of the picker is array-shaped.
+  const messages: Message[] = msgs && msgs.length > 0 ? msgs : msg ? [msg] : []
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sending, setSending] = useState(false)
@@ -66,19 +73,22 @@ export function ForwardPicker({
   }
 
   async function send() {
-    if (selected.size === 0 || sending) return
+    if (selected.size === 0 || sending || messages.length === 0) return
     setSending(true)
     setStatus('')
     let ok = 0
     let fail = 0
-    // Sequential so a stuck target doesn't pile up parallel sends. The
-    // typical multi-forward is 2–5 chats — sub-second total.
+    // Sequential so a stuck target doesn't pile up parallel sends. For
+    // multi-select the count is targets × messages — still typically a
+    // small number, sub-second total.
     for (const toJID of selected) {
-      try {
-        await api.forward(msg.chat_jid, msg.id, toJID)
-        ok++
-      } catch {
-        fail++
+      for (const m of messages) {
+        try {
+          await api.forward(m.chat_jid, m.id, toJID)
+          ok++
+        } catch {
+          fail++
+        }
       }
     }
     setSending(false)
@@ -163,7 +173,15 @@ export function ForwardPicker({
 
         <div className="flex items-center justify-between border-t border-neutral-800 px-4 py-3">
           <div className="text-xs text-neutral-500">
-            {status || (selected.size > 0 ? `${selected.size} selected` : 'Pick one or more chats')}
+            {status || (
+              selected.size > 0
+                ? messages.length > 1
+                  ? `${messages.length} messages → ${selected.size} chats`
+                  : `${selected.size} selected`
+                : messages.length > 1
+                  ? `Forward ${messages.length} messages — pick one or more chats`
+                  : 'Pick one or more chats'
+            )}
           </div>
           <div className="flex gap-2">
             <button
@@ -174,7 +192,7 @@ export function ForwardPicker({
             </button>
             <button
               onClick={send}
-              disabled={selected.size === 0 || sending}
+              disabled={selected.size === 0 || sending || messages.length === 0}
               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {sending ? 'Sending…' : `Forward${selected.size > 1 ? ` (${selected.size})` : ''}`}

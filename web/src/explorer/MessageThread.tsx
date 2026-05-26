@@ -94,6 +94,13 @@ export function MessageThread({
   // null = closed. The own-message whose delivery receipts the user wants
   // to inspect via the "Info" action. Opens MessageInfo modal.
   const [infoMsg, setInfoMsg] = useState<Message | null>(null)
+  // IDs of messages the user has selected for batch actions. Non-empty
+  // means "select mode" is on; bubbles then show a checkbox overlay
+  // and clicking a bubble toggles its selection instead of acting on it.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // null = closed. When set, ForwardPicker opens in multi-message mode
+  // with these messages pre-loaded for the batch forward action.
+  const [batchForward, setBatchForward] = useState<Message[] | null>(null)
   // Whether a file is currently being dragged over the thread area — drives
   // the "Drop to send" overlay. Drag enter/leave events fire on every child
   // so we count them to avoid flicker.
@@ -204,6 +211,8 @@ export function MessageThread({
     setLightboxIdx(null)
     setForwardMsg(null)
     setInfoMsg(null)
+    setSelectedIds(new Set())
+    setBatchForward(null)
     setSearchOpen(false)
     setSearchQuery('')
     setSearchIdx(0)
@@ -386,6 +395,20 @@ export function MessageThread({
     setReplyTo(null)
     setEditingMsg(target)
   }
+
+  // Toggle a message's inclusion in the selection set. Adds when missing,
+  // removes when present; an empty set exits select-mode automatically
+  // (the SelectionBar render gates on size > 0).
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectMode = selectedIds.size > 0
 
   // Jump to a specific message in the thread (used when the user clicks a
   // quoted-reply preview to find the original). Reuses the same data-msg-id
@@ -577,6 +600,22 @@ export function MessageThread({
         />
       )}
 
+      {selectMode && (
+        <SelectionBar
+          count={selectedIds.size}
+          onCancel={() => setSelectedIds(new Set())}
+          onForward={() => {
+            // Preserve thread order — selectedIds is a Set with no ordering.
+            // Map back to messages in the same order they appear in the
+            // thread so the forwarded sequence reads correctly on the
+            // receiving end.
+            const picked = messages.filter((m) => selectedIds.has(m.id))
+            if (picked.length === 0) return
+            setBatchForward(picked)
+          }}
+        />
+      )}
+
       {/* Scroll wrapper: stays `relative` so the floating ↓ FAB + the drop
           overlay anchor to it (and don't scroll out of view) while the inner
           div handles all the actual scrolling. */}
@@ -654,6 +693,9 @@ export function MessageThread({
                 highlightId={flashId || activeMatchId}
                 unreadDivider={unreadDivider}
                 highlightQuery={searchOpen ? searchQuery : ''}
+                selectMode={selectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={toggleSelect}
               />
             </>
           )}
@@ -775,6 +817,21 @@ export function MessageThread({
           chats={chats}
           nameMap={nameMap}
           onClose={() => setForwardMsg(null)}
+        />
+      )}
+
+      {batchForward && (
+        <ForwardPicker
+          msgs={batchForward}
+          chats={chats}
+          nameMap={nameMap}
+          onClose={() => {
+            setBatchForward(null)
+            // After forwarding, exit select mode — the user's done with
+            // this batch. WA matches this behaviour: a sent forward closes
+            // selection.
+            setSelectedIds(new Set())
+          }}
         />
       )}
 
@@ -1906,6 +1963,58 @@ function MentionPicker({
   )
 }
 
+// SelectionBar sits between the chat header and the message thread while
+// multi-select is on. Mirrors WA's top action bar in selection mode: a
+// count, batch actions (just Forward for v1; delete/star follow-up), and
+// a ✕ to cancel. Esc also cancels — installed in MessageThread's reset
+// effect by clearing selectedIds.
+function SelectionBar({
+  count,
+  onCancel,
+  onForward,
+}: {
+  count: number
+  onCancel: () => void
+  onForward: () => void
+}) {
+  // Esc cancels selection. Lives in the bar (not the thread) so it
+  // unmounts as soon as the user leaves select mode.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+  return (
+    <div className="flex items-center gap-3 border-b border-neutral-800 bg-emerald-500/10 px-4 py-2">
+      <button
+        onClick={onCancel}
+        title="Cancel selection (Esc)"
+        aria-label="Cancel selection"
+        className="flex h-7 w-7 items-center justify-center rounded text-neutral-300 transition hover:bg-emerald-500/15 hover:text-neutral-100"
+      >
+        ✕
+      </button>
+      <div className="flex-1 text-sm font-medium text-emerald-200 tabular-nums">
+        {count} selected
+      </div>
+      <button
+        onClick={onForward}
+        title="Forward selected messages"
+        aria-label="Forward selected messages"
+        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-emerald-500"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="15 17 20 12 15 7" />
+          <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+        </svg>
+        Forward
+      </button>
+    </div>
+  )
+}
+
 // SearchBar is the slim find-in-chat strip that drops in between the chat
 // header and the message list when the user clicks the magnifying glass.
 // Mirrors the keyboard ergonomics of WA's own search bar: typing filters
@@ -2228,6 +2337,9 @@ function Timeline({
   highlightId,
   unreadDivider,
   highlightQuery,
+  selectMode,
+  selectedIds,
+  onToggleSelect,
 }: {
   messages: Message[]
   group: boolean
@@ -2259,6 +2371,12 @@ function Timeline({
    *  string with an amber <mark> so search hits are visible inside the
    *  bubble, not just by a ring around it. Empty / undefined = no-op. */
   highlightQuery?: string
+  /** Multi-select state. selectMode = true when the user has at least one
+   *  bubble selected (drives the checkbox overlay + click-to-toggle on
+   *  every bubble row). onToggleSelect adds/removes from the set. */
+  selectMode?: boolean
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -2300,7 +2418,18 @@ function Timeline({
                 <div className="h-px flex-1 bg-emerald-500/30" />
               </div>
             )}
-            <div className={sep ? '' : firstInGroup ? 'mt-2' : 'mt-0.5'}>
+            <div
+              className={
+                (sep ? '' : firstInGroup ? 'mt-2' : 'mt-0.5') +
+                ' ' +
+                (selectMode ? 'relative cursor-pointer rounded-md' : '') +
+                ' ' +
+                (selectMode && selectedIds?.has(m.id)
+                  ? 'bg-emerald-500/10 ring-1 ring-emerald-500/40'
+                  : '')
+              }
+              onClick={selectMode && onToggleSelect ? () => onToggleSelect(m.id) : undefined}
+            >
               <MessageBubble
                 msg={m}
                 group={group}
@@ -2309,19 +2438,43 @@ function Timeline({
                 onOpenTask={onOpenTask}
                 onTasksChanged={onTasksChanged}
                 onOpenChat={onOpenChat}
-                onReply={onReply}
-                onReact={onReact}
-                onForward={onForward}
-                onStar={onStar}
-                onEdit={onEdit}
-                onInfo={onInfo}
-                onOpenImage={onOpenImage}
-                onJumpToMessage={onJumpToMessage}
+                // Suppress per-bubble actions while in select mode — the
+                // whole row becomes a toggle target instead, and the
+                // SelectionBar owns the batch actions.
+                onReply={selectMode ? undefined : onReply}
+                onReact={selectMode ? undefined : onReact}
+                onForward={selectMode ? undefined : onForward}
+                onStar={selectMode ? undefined : onStar}
+                onEdit={selectMode ? undefined : onEdit}
+                onInfo={selectMode ? undefined : onInfo}
+                onSelect={selectMode || !onToggleSelect ? undefined : (msg) => onToggleSelect(msg.id)}
+                onOpenImage={selectMode ? undefined : onOpenImage}
+                onJumpToMessage={selectMode ? undefined : onJumpToMessage}
                 selfDigits={selfDigits}
                 firstInGroup={firstInGroup}
                 highlighted={highlightId === m.id}
                 highlightQuery={highlightQuery}
               />
+              {selectMode && (
+                <div
+                  aria-hidden="true"
+                  className={
+                    'pointer-events-none absolute inset-y-0 flex items-center px-2 ' +
+                    (m.is_from_me ? 'right-0' : 'left-0')
+                  }
+                >
+                  <span
+                    className={
+                      'flex h-5 w-5 items-center justify-center rounded-full border text-[10px] transition ' +
+                      (selectedIds?.has(m.id)
+                        ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
+                        : 'border-neutral-600 bg-neutral-900/70 text-transparent')
+                    }
+                  >
+                    ✓
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )
