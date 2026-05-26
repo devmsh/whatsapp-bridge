@@ -594,10 +594,19 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          {/* Header cluster — 11 actions don't fit in the 320 px sidebar.
+              Keep the 5 most-tapped visible as SVG icon buttons (matches
+              the rest of the app — emoji glyphs render inconsistently
+              across OSes), fold the rest into a "⋮ More" overflow menu.
+              HiddenBadge + DndButton stay outside because they have their
+              own per-state rendering. */}
+          <div className="flex items-center gap-0.5">
             <HiddenBadge onClick={() => setShowUnlock(true)} />
             <IconButton title="New chat" onClick={() => setShowCompose(true)}>
-              ✏️
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" />
+              </svg>
             </IconButton>
             <DndButton
               dndUntil={notifications.dndUntil}
@@ -605,34 +614,90 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               open={dndOpen}
               setOpen={setDndOpen}
             />
-
             <IconButton title="Starred messages" onClick={() => setShowStarred(true)}>
-              ⭐
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                <path d="M12 2 14.78 8.63 22 9.24l-5.5 4.73L18.18 21 12 17.27 5.82 21l1.68-7.03L2 9.24l7.22-.61L12 2z" />
+              </svg>
             </IconButton>
             <IconButton title="Status updates" onClick={() => setShowStatuses(true)}>
-              📸
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
             </IconButton>
             <IconButton title="Channels" onClick={() => setShowNewsletters(true)}>
-              📡
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 11l18-5v12L3 13v-2z" />
+                <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+              </svg>
             </IconButton>
-            <IconButton title="Today’s briefing" onClick={() => setShowBriefing(true)}>
-              📊
-            </IconButton>
-            <IconButton title="Profiles & AI context" onClick={() => setShowProfiling(true)}>
-              🧠
-            </IconButton>
-            <IconButton title="Your profile" onClick={() => setShowSelfProfile(true)}>
-              👤
-            </IconButton>
-            <IconButton title="Privacy" onClick={() => setShowPrivacy(true)}>
-              🔒
-            </IconButton>
-            <IconButton title="Media settings" onClick={() => setShowSettings(true)}>
-              ⚙
-            </IconButton>
-            <IconButton title="Log out" onClick={() => api.logout()}>
-              ⏻
-            </IconButton>
+            <MoreMenu
+              items={[
+                {
+                  label: 'Your profile',
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  ),
+                  onClick: () => setShowSelfProfile(true),
+                },
+                {
+                  label: 'Privacy',
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                  ),
+                  onClick: () => setShowPrivacy(true),
+                },
+                {
+                  label: "Today's briefing",
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="20" x2="18" y2="10" />
+                      <line x1="12" y1="20" x2="12" y2="4" />
+                      <line x1="6" y1="20" x2="6" y2="14" />
+                    </svg>
+                  ),
+                  onClick: () => setShowBriefing(true),
+                },
+                {
+                  label: 'Profiles & AI context',
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2a5 5 0 0 0-5 5c0 1.5.7 2.8 1.8 3.7C7.1 11.7 6 13.7 6 16v3h12v-3c0-2.3-1.1-4.3-2.8-5.3A5 5 0 0 0 17 7a5 5 0 0 0-5-5z" />
+                    </svg>
+                  ),
+                  onClick: () => setShowProfiling(true),
+                },
+                {
+                  label: 'Media settings',
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3" />
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                    </svg>
+                  ),
+                  onClick: () => setShowSettings(true),
+                },
+                { divider: true },
+                {
+                  label: 'Log out',
+                  destructive: true,
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                  ),
+                  onClick: () => api.logout(),
+                },
+              ]}
+            />
           </div>
         </header>
 
@@ -902,6 +967,84 @@ function IconButton({
     >
       {children}
     </button>
+  )
+}
+
+// MoreMenu is the kebab (⋮) overflow inside the sidebar header. Holds the
+// less-frequently-tapped actions (Profile, Privacy, Settings, …) so the
+// row fits in the 320 px sidebar without wrapping.
+type MoreItem =
+  | { divider: true }
+  | {
+      label: string
+      icon: React.ReactNode
+      onClick: () => void
+      destructive?: boolean
+      divider?: undefined
+    }
+function MoreMenu({ items }: { items: MoreItem[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="More"
+        aria-label="More"
+        aria-expanded={open}
+        className={
+          'flex h-8 w-8 items-center justify-center rounded-lg transition ' +
+          (open
+            ? 'bg-neutral-800 text-neutral-100'
+            : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100')
+        }
+      >
+        {/* Vertical 3-dot kebab */}
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <circle cx="12" cy="5" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="12" cy="19" r="1.6" />
+        </svg>
+      </button>
+      {open && (
+        <>
+          {/* Click-away catcher dismisses on any outside click. */}
+          <div
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30"
+            aria-hidden="true"
+          />
+          <div className="absolute right-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60">
+            {items.map((it, i) =>
+              it.divider ? (
+                <div key={'d' + i} className="my-1 h-px bg-neutral-800" />
+              ) : (
+                <button
+                  key={it.label}
+                  onClick={() => {
+                    it.onClick()
+                    setOpen(false)
+                  }}
+                  className={
+                    'flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition hover:bg-neutral-800 ' +
+                    (it.destructive ? 'text-red-300' : 'text-neutral-200')
+                  }
+                >
+                  <span
+                    className={
+                      'flex h-5 w-5 shrink-0 items-center justify-center ' +
+                      (it.destructive ? 'text-red-300' : 'text-neutral-400')
+                    }
+                  >
+                    {it.icon}
+                  </span>
+                  {it.label}
+                </button>
+              ),
+            )}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 

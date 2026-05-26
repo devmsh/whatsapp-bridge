@@ -52,9 +52,22 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// We refuse to fetch for hidden chats — keep hidden content fully offline.
-	if s.store.IsChatHidden(rawJID) && !s.isUnlocked(r) {
-		http.NotFound(w, r)
-		return
+	// Dual-identity check: hidden_chats may have the phone form while the
+	// avatar request uses the LID form (or vice-versa). Match both so a
+	// phone-hidden chat can't leak its avatar via its LID twin.
+	if !s.isUnlocked(r) {
+		isHidden := s.store.IsChatHidden(rawJID)
+		if !isHidden && s.client != nil {
+			if lid := s.client.ResolveLIDForJID(rawJID); lid != "" && s.store.IsChatHidden(lid) {
+				isHidden = true
+			} else if pn := s.client.ResolvePhoneForLID(rawJID); pn != "" && s.store.IsChatHidden(pn) {
+				isHidden = true
+			}
+		}
+		if isHidden {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	refresh := r.URL.Query().Get("refresh") == "1"
 

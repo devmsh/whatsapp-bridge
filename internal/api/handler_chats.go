@@ -30,6 +30,18 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 	// is returned with hidden chats excluded. The two never mix — same model
 	// as WhatsApp's locked-chats secret code.
 	hidden := s.store.HiddenChatJIDs()
+	// Dual-identity expansion: hidden_chats stores rows by whatever JID form
+	// the user hid (usually phone @s.whatsapp.net), but the same conversation
+	// can be stored in `chats` under its @lid alternate. Without this, a
+	// phone-form hidden chat leaks into the archive (or main list) under its
+	// LID form. Walk the hidden set once and add every alternate form too.
+	for j := range hidden {
+		if alt := s.client.ResolveLIDForJID(j); alt != "" {
+			hidden[alt] = true
+		} else if alt := s.client.ResolvePhoneForLID(j); alt != "" {
+			hidden[alt] = true
+		}
+	}
 	unlocked := s.isUnlocked(r)
 
 	// Precompute per-chat unread @-mention counts so the chat list can show
