@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type DeviceInfo } from '../api'
+import { api, type DeviceInfo, type LinkedDevice } from '../api'
 import { ChatAvatar } from './ChatAvatar'
 
 // SelfProfile is the WA "Settings → Profile" sheet. Shows the user's avatar
@@ -184,11 +184,107 @@ export function SelfProfile({
           )}
         </div>
 
+        <LinkedDevicesSection />
+
         <footer className="border-t border-neutral-800 px-4 py-2 text-[11px] text-neutral-500">
           Display name changes still need to happen from the WhatsApp mobile
           app — the bridge can't write the push-name appstate setting yet.
         </footer>
       </div>
+    </div>
+  )
+}
+
+// LinkedDevicesSection lists every device currently signed into this WA
+// account — equivalent of WA's Settings → Linked devices. We fetch on mount
+// and label the primary phone + the device we're talking to right now so the
+// user can spot a session they don't recognise.
+//
+// We don't currently expose per-device platform / last-seen because
+// whatsmeow's user-info usync doesn't return them; the JID's device ID is
+// still enough to distinguish rows and gives the user the security signal
+// they need (number of devices, whether they recognise them all).
+function LinkedDevicesSection() {
+  const [devices, setDevices] = useState<LinkedDevice[] | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    api
+      .linkedDevices()
+      .then((r) => setDevices(r.devices))
+      .catch(() => setError('Could not load linked devices.'))
+  }, [])
+
+  return (
+    <div className="border-t border-neutral-800 px-4 py-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+          Linked devices
+        </span>
+        {devices && (
+          <span className="text-[11px] text-neutral-500">
+            {devices.length} {devices.length === 1 ? 'device' : 'devices'}
+          </span>
+        )}
+      </div>
+      {error && <div className="text-[11px] text-red-300">{error}</div>}
+      {!error && devices === null && (
+        <div className="text-[11px] text-neutral-500">Loading…</div>
+      )}
+      {!error && devices?.length === 0 && (
+        <div className="text-[11px] text-neutral-500">No linked devices yet.</div>
+      )}
+      {devices && devices.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {devices.map((d) => {
+            // Pull the ":N" suffix for a tiny device-index pill — same way
+            // WA mobile shows "Device 3" next to each linked entry.
+            const deviceIdx = (() => {
+              const m = d.jid.match(/:(\d+)@/)
+              return m ? Number(m[1]) : 0
+            })()
+            return (
+              <li
+                key={d.jid}
+                className="flex items-center gap-3 rounded-md bg-neutral-900/60 px-3 py-2"
+              >
+                <span
+                  aria-hidden="true"
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-800 text-neutral-300"
+                >
+                  {d.is_primary ? (
+                    /* Phone glyph for primary (the WA phone that scanned QR
+                       for every companion). */
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="7" y="2" width="10" height="20" rx="2" />
+                      <path d="M11 18h2" />
+                    </svg>
+                  ) : (
+                    /* Laptop glyph for companions */
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="5" width="18" height="12" rx="2" />
+                      <path d="M2 20h20" />
+                    </svg>
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-neutral-100">
+                    {d.is_primary ? 'Primary phone' : `Device ${deviceIdx}`}
+                  </div>
+                  <div className="truncate font-mono text-[10px] text-neutral-500">
+                    {d.jid}
+                  </div>
+                </div>
+                {d.is_current && (
+                  <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300">
+                    This session
+                  </span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }

@@ -61,6 +61,19 @@ export interface HistorySettings {
   note?: string
 }
 
+// LinkedDevice is one row in the WA Settings → Linked devices list — a
+// JID with the bare booleans the UI needs to render a "this is the
+// primary phone" / "this is the current session" badge.
+export interface LinkedDevice {
+  jid: string
+  is_primary: boolean
+  is_current: boolean
+}
+export interface LinkedDevicesResponse {
+  current: string
+  devices: LinkedDevice[]
+}
+
 // PrivacySettings mirrors whatsmeow's types.PrivacySettings — every field is
 // one of a small string enum. Empty string = WA hasn't synced it yet (we
 // surface as "Default" in the UI). See api.privacy() for the value set per
@@ -1262,6 +1275,14 @@ export const api = {
       if (!r.ok) throw new Error('Failed to set disappearing timer')
       return r.json() as Promise<{ success: boolean }>
     }),
+  // linkedDevices returns every device JID currently paired to this account
+  // (WA Settings → Linked devices). Resolved upstream via GetUserInfo.
+  // Includes a `current` JID so the UI can flag which row is *this* session.
+  linkedDevices: async (): Promise<LinkedDevicesResponse> => {
+    const res = await fetch('/api/v2/devices')
+    if (!res.ok) return { current: '', devices: [] }
+    return res.json()
+  },
   // selfAbout reads / writes the current user's "About" line — the short bio
   // (e.g. "Available", "At work, ping me later") shown under your name in
   // profile cards. Bridge resolves it via GetUserInfo against the connected

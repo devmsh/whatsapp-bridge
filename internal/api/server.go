@@ -113,6 +113,9 @@ func (s *Server) registerRoutes() {
 	// Single-shot typing snapshot for the chat list — every chat with a
 	// fresh 'composing' beacon, returned in one call. See handler doc.
 	s.mux.HandleFunc("/api/v2/typing", s.handleTypingSnapshot)
+	// Self linked-devices list (WA Settings → Linked devices). Resolved via
+	// GetUserInfo against the connected device's own JID.
+	s.mux.HandleFunc("/api/v2/devices", s.handleLinkedDevices)
 
 	// Newsletters
 	s.mux.HandleFunc("/api/v2/newsletters", s.handleNewsletters)
