@@ -191,33 +191,62 @@ export function MessageBubble({
 
         {msg.is_forwarded && <div className="mb-1 text-[11px] italic text-neutral-400">↪ Forwarded</div>}
 
-        {msg.reply_to_content && (
-          // Quoted-reply chip — clickable when we know which message it's
-          // quoting AND the thread provided a jump handler. WA's mobile UX
-          // is identical: tap the chip → original message scrolls into
-          // view with a quick flash. The button takes the full width of the
-          // chip so the entire area is the target, not just the text.
-          onJumpToMessage && msg.reply_to_id ? (
+        {msg.reply_to_content && (() => {
+          // Resolve the quoted message's sender for the label above the
+          // snippet — WA shows "John" in his per-sender colour, or "You"
+          // when you're quoting your own message. Falls back to the raw
+          // contact name (or empty if we have no JID at all).
+          const qSender = msg.reply_to_sender || ''
+          const youDigits = (qSender.split('@')[0] || '').split(':')[0]
+          const isYou = !!selfDigits?.has(youDigits)
+          const qName = isYou
+            ? 'You'
+            : qSender
+              ? senderTitle(qSender, '', '', nameMap)
+              : ''
+          const qColor = isYou ? '#06cf9c' : qSender ? senderColor(qSender) : '#06cf9c'
+          // The colored vertical bar uses the quoted sender's hue too —
+          // matches WA's exact look where the stripe & name share a color.
+          const stripeStyle = { borderInlineStartColor: qColor }
+          const quoteBody = (
+            <>
+              {qName && (
+                <div
+                  className="text-[11px] font-semibold"
+                  style={{ color: qColor }}
+                >
+                  {qName}
+                </div>
+              )}
+              <div dir="auto" className="line-clamp-2 text-start">
+                {msg.reply_to_content}
+              </div>
+            </>
+          )
+          // Clickable when we know which message it's quoting AND the
+          // thread provided a jump handler. WA's mobile UX is identical:
+          // tap the chip → original message scrolls into view with a flash.
+          return onJumpToMessage && msg.reply_to_id ? (
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 onJumpToMessage(msg.reply_to_id!)
               }}
               title="Jump to the original message"
-              className="mb-1 block w-full border-l-2 border-emerald-400/60 bg-black/20 px-2 py-1 text-start text-xs text-neutral-300 transition hover:bg-black/40"
+              style={stripeStyle}
+              className="mb-1 block w-full border-l-2 bg-black/20 px-2 py-1 text-start text-xs text-neutral-300 transition hover:bg-black/40"
             >
-              <div dir="auto" className="line-clamp-2">
-                {msg.reply_to_content}
-              </div>
+              {quoteBody}
             </button>
           ) : (
-            <div className="mb-1 border-l-2 border-emerald-400/60 bg-black/20 px-2 py-1 text-xs text-neutral-300">
-              <div dir="auto" className="line-clamp-2 text-start">
-                {msg.reply_to_content}
-              </div>
+            <div
+              style={stripeStyle}
+              className="mb-1 border-l-2 bg-black/20 px-2 py-1 text-xs text-neutral-300"
+            >
+              {quoteBody}
             </div>
           )
-        )}
+        })()}
 
         {msg.is_deleted ? (
           <div className="italic text-neutral-500">🚫 This message was deleted</div>
