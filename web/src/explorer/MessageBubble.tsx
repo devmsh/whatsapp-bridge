@@ -197,13 +197,31 @@ export function MessageBubble({
         {sender && (
           // Per-sender color (stable hash of sender JID) — mirrors WhatsApp's
           // "person color" so speakers stay visually distinct in busy groups.
-          <div
-            dir="auto"
-            className="mb-1 text-xs font-semibold"
-            style={{ color: senderColor(msg.sender) }}
-          >
-            {sender}
-          </div>
+          // Clickable when the thread provided an onOpenChat handler: tap
+          // the name → start / open a DM with that participant, same
+          // gesture WA's mobile + desktop clients use.
+          onOpenChat ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                onOpenChat(msg.sender)
+              }}
+              dir="auto"
+              title={`Open DM with ${sender}`}
+              className="mb-1 text-xs font-semibold transition hover:underline"
+              style={{ color: senderColor(msg.sender) }}
+            >
+              {sender}
+            </button>
+          ) : (
+            <div
+              dir="auto"
+              className="mb-1 text-xs font-semibold"
+              style={{ color: senderColor(msg.sender) }}
+            >
+              {sender}
+            </div>
+          )
         )}
 
         {msg.is_forwarded && <div className="mb-1 text-[11px] italic text-neutral-400">↪ Forwarded</div>}
