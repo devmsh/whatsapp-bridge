@@ -36,6 +36,7 @@ import { StarredPanel } from './StarredPanel'
 import { CallsPanel } from './CallsPanel'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
+import { useScheduledAutopilot } from '../hooks/useScheduledMessages'
 import { ShortcutsHelp } from './ShortcutsHelp'
 import { NewChatModal } from './NewChatModal'
 
@@ -338,6 +339,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // chats (muted ones excluded). Lets the user spot a new message from
   // another tab without focusing this one — same affordance as WA Web.
   useUnreadBadge(chats)
+  // Scheduled-message autopilot — polls localStorage every 30 s and fires
+  // any messages whose scheduled_at has passed via api.send. Mounted once
+  // here at the app root so a single tab does the work even when the user
+  // closes the chat (or has it in a different tab).
+  useScheduledAutopilot()
 
   // Persist the last-opened chat across reloads so a browser refresh /
   // crash re-restores the user's spot. localStorage on selected change;

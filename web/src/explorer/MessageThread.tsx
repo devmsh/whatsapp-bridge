@@ -20,6 +20,8 @@ import { ForwardPicker } from './ForwardPicker'
 import { EmojiPicker } from './EmojiPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
+import { ScheduleSendModal } from './ScheduleSendModal'
+import { useScheduledMessages } from '../hooks/useScheduledMessages'
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
 import { ContactInfoModal } from './ContactInfoModal'
@@ -1308,6 +1310,13 @@ function Composer({
   // composer footer; the modal handles the rest (question + options + send).
   // Lives here in Composer so it can reuse jid + onSent without re-plumbing.
   const [pollOpen, setPollOpen] = useState(false)
+  // When true, the ScheduleSendModal is open over the composer. Picking a
+  // time stages the current text + (already-uploaded) attachment into the
+  // localStorage scheduled queue.
+  const [scheduleOpen, setScheduleOpen] = useState(false)
+  // Hook into the shared scheduled-message queue so this composer can stage
+  // a new entry — the autopilot in Explorer takes over from there.
+  const scheduled = useScheduledMessages()
   // Open mention-picker state: when the user is typing '@<query>' in the
   // textarea we open an autocomplete of group participants. `start` is the
   // caret position of the '@'; `query` is what's been typed after it.
@@ -1607,6 +1616,53 @@ function Composer({
       }
     }
   }, [])
+
+  // schedule stages the current composer state for a future send via the
+  // localStorage queue + the Explorer-mounted autopilot. Mirrors send()'s
+  // upload step so scheduled media gets uploaded *now* (the File object
+  // can't survive localStorage round-trip), then stored as media_path.
+  async function schedule(when: number) {
+    const body = text.trim()
+    if (!body && !attachment) return
+    setSending(true)
+    setError('')
+    try {
+      let mediaPath: string | undefined
+      if (attachment) {
+        setUploading(true)
+        try {
+          const up = await api.upload(attachment)
+          mediaPath = up.path
+        } finally {
+          setUploading(false)
+        }
+      }
+      const mentionedJIDs = collectMentionedJIDs()
+      scheduled.schedule({
+        jid,
+        text: body,
+        scheduled_at: when,
+        media_path: mediaPath,
+        mentioned_jids: mentionedJIDs.length > 0 ? mentionedJIDs : undefined,
+      })
+      // Clear the composer same as a real send — gives the user the same
+      // tactile feedback that "it left the input box".
+      setText('')
+      setAttachment(null)
+      onClearReply?.()
+      // No echoed bubble in the timeline — the message hasn't been sent
+      // yet. The user sees the scheduled queue surface elsewhere (the
+      // header chip, in a future cycle).
+      try {
+        localStorage.removeItem(draftKey(jid))
+        window.dispatchEvent(new CustomEvent('wa.draft-changed'))
+      } catch {}
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to schedule')
+    } finally {
+      setSending(false)
+    }
+  }
 
   async function send() {
     const body = text.trim()
@@ -2125,17 +2181,44 @@ function Composer({
                 </svg>
               </button>
             ) : (
-              <button
-                onClick={send}
-                disabled={!canSendNow}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-                title={editingMsg ? 'Save edit' : uploading ? 'Uploading…' : 'Send'}
-              >
-                {sending ? '…' : editingMsg ? '✓' : '➤'}
-              </button>
+              <>
+                {/* Schedule-send sits to the left of Send when there's
+                    actually something to send. Hidden in edit mode (you
+                    can't schedule an edit) and while sending. */}
+                {!editingMsg && canSendNow && (
+                  <button
+                    onClick={() => setScheduleOpen(true)}
+                    title="Schedule send"
+                    aria-label="Schedule send"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+                  >
+                    {/* Clock-with-tick — same glyph WA Business uses. */}
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3 2" />
+                    </svg>
+                  </button>
+                )}
+                <button
+                  onClick={send}
+                  disabled={!canSendNow}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={editingMsg ? 'Save edit' : uploading ? 'Uploading…' : 'Send'}
+                >
+                  {sending ? '…' : editingMsg ? '✓' : '➤'}
+                </button>
+              </>
             )}
           </div>
         </>
+      )}
+      {scheduleOpen && (
+        <ScheduleSendModal
+          onClose={() => setScheduleOpen(false)}
+          onPick={(when) => {
+            void schedule(when)
+          }}
+        />
       )}
       {pollOpen && (
         <PollComposer
