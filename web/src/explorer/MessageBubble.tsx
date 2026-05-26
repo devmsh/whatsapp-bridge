@@ -968,6 +968,11 @@ function VCardContent({ msg }: { msg: Message }) {
 
 // TextContent shows message text, but not the "[image:…]" placeholder we store
 // for pure-media messages (the media itself + caption already cover it).
+// READ_MORE_THRESHOLD — bubbles longer than this collapse with a "Read
+// more" link, matching WA mobile's ~900-char cap. Trades a tiny click for
+// not blowing out the timeline with a forwarded essay.
+const READ_MORE_THRESHOLD = 900
+
 function TextContent({
   msg,
   mentionIndex,
@@ -981,14 +986,50 @@ function TextContent({
   selfDigits?: Set<string>
   highlightQuery?: string
 }) {
+  // Local expand/collapse state. Keyed by msg.id implicitly via component
+  // remount when the bubble swaps — each message keeps its own.
+  const [expanded, setExpanded] = useState(false)
+
+  // Caption path (media bubbles) — currently NOT subject to "Read more"
+  // because captions stay compact and a long-text bubble below media would
+  // visually break the card. If WA adds long-caption truncation in the
+  // future we can revisit.
   if (msg.media_type) {
     const caption = msg.media_caption
     return caption ? (
       <RichText text={caption} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} highlightQuery={highlightQuery} />
     ) : null
   }
-  if (!msg.content) return null
-  return <RichText text={msg.content} mentions={mentionIndex} onOpenChat={onOpenChat} selfDigits={selfDigits} highlightQuery={highlightQuery} />
+  const full = msg.content || ''
+  if (!full) return null
+
+  // Highlighted-search match must not be hidden behind "Read more" — if
+  // the matched query is in the tail, force-expand so the user sees it.
+  const matchHidden =
+    !!highlightQuery && full.length > READ_MORE_THRESHOLD &&
+    full.slice(READ_MORE_THRESHOLD).toLowerCase().includes(highlightQuery.toLowerCase())
+  const tooLong = full.length > READ_MORE_THRESHOLD && !expanded && !matchHidden
+  const shown = tooLong ? full.slice(0, READ_MORE_THRESHOLD).trimEnd() + '…' : full
+
+  return (
+    <>
+      <RichText
+        text={shown}
+        mentions={mentionIndex}
+        onOpenChat={onOpenChat}
+        selfDigits={selfDigits}
+        highlightQuery={highlightQuery}
+      />
+      {full.length > READ_MORE_THRESHOLD && !matchHidden && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-[11px] font-medium text-emerald-300 hover:text-emerald-200"
+        >
+          {expanded ? 'Show less' : 'Read more'}
+        </button>
+      )}
+    </>
+  )
 }
 
 function MediaContent({
