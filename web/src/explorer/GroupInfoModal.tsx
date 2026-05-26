@@ -96,16 +96,17 @@ export function GroupInfoModal({
 
         {/* Hero: big group avatar + name + member count. Avatar is
             clickable to open the full-screen profile photo preview
-            (cycle 12), so tapping it gives the WA "tap to see picture"
-            gesture without leaking it elsewhere. */}
+            (cycle 12). Name doubles as an inline rename (click the
+            pencil → input → Save). Description row sits below the
+            count, also inline-editable. Both edits go straight to the
+            bridge; non-admin attempts surface a friendly error. */}
         <div className="flex flex-col items-center gap-2 border-b border-neutral-800 px-4 py-5">
           <ChatAvatar jid={jid} title={title} group size={96} clickable />
-          <div dir="auto" className="text-base font-semibold text-neutral-100">
-            {title}
-          </div>
+          <EditableGroupName jid={jid} initial={title} />
           <div className="text-[11px] uppercase tracking-wider text-neutral-500">
             {count} {count === 1 ? 'member' : 'members'}
           </div>
+          <EditableGroupDescription jid={jid} />
         </div>
 
         <InviteLinkSection jid={jid} title={title} />
@@ -275,6 +276,205 @@ function ParticipantRow({
         </div>
       )}
     </div>
+  )
+}
+
+// EditableGroupName renders the title in display mode with a tiny pencil
+// affordance on hover. Clicking the pencil swaps to a single-line input;
+// Enter / blur saves, Esc cancels. WA mobile flows the same way — name is
+// not always editable to non-admins, so we let the bridge gate it and
+// surface the error inline if the save bounces.
+function EditableGroupName({ jid, initial }: { jid: string; initial: string }) {
+  const [value, setValue] = useState(initial)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(initial)
+  const [error, setError] = useState('')
+  // Keep our display value in sync if the parent's `initial` changes
+  // (e.g. chats refetch after we save it ourselves).
+  useEffect(() => {
+    setValue(initial)
+    setDraft(initial)
+  }, [initial])
+
+  async function save() {
+    const next = draft.trim()
+    if (!next || next === value) {
+      setEditing(false)
+      setDraft(value)
+      return
+    }
+    setError('')
+    try {
+      await api.groupRename(jid, next)
+      setValue(next)
+      setEditing(false)
+      // Chats prop in the parent reads this name; refetch the list so the
+      // chat header and chat-list row pick up the new title.
+      window.dispatchEvent(new CustomEvent('wa.chats-changed', { detail: { jid } }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed — only group admins can rename.')
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex w-full max-w-xs flex-col items-stretch gap-1">
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save()
+            else if (e.key === 'Escape') {
+              setDraft(value)
+              setEditing(false)
+              setError('')
+            }
+          }}
+          maxLength={100}
+          className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-1.5 text-center text-base font-semibold text-neutral-100 outline-none focus:border-emerald-500"
+        />
+        {error && (
+          <div className="text-center text-[11px] text-red-300">{error}</div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      title="Rename group (admin)"
+      className="group/n flex items-center gap-1.5 text-base font-semibold text-neutral-100 transition hover:text-emerald-200"
+    >
+      <span dir="auto">{value}</span>
+      <svg
+        viewBox="0 0 24 24"
+        width="13"
+        height="13"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="opacity-0 transition group-hover/n:opacity-70"
+        aria-hidden="true"
+      >
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" />
+      </svg>
+    </button>
+  )
+}
+
+// EditableGroupDescription is the bigger sibling — multi-line textarea on
+// edit, single placeholder ("Add a description") when empty. Fetches the
+// current description on mount via api.groupGet so we don't have to thread
+// it down from the parent. Same admin-gating + inline error pattern as the
+// name editor.
+function EditableGroupDescription({ jid }: { jid: string }) {
+  const [value, setValue] = useState<string | null>(null) // null while loading
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .groupGet(jid)
+      .then((g) => {
+        if (cancelled) return
+        const t = g.topic || ''
+        setValue(t)
+        setDraft(t)
+      })
+      .catch(() => {
+        if (!cancelled) setValue('')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [jid])
+
+  async function save() {
+    const next = draft.trim()
+    if (next === (value || '').trim()) {
+      setEditing(false)
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await api.groupSetDescription(jid, next)
+      setValue(next)
+      setEditing(false)
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Save failed — only group admins can change this.',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (value === null) return null // loading
+
+  if (editing) {
+    return (
+      <div className="mt-1 flex w-full flex-col items-stretch gap-1">
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setDraft(value || '')
+              setEditing(false)
+              setError('')
+            }
+          }}
+          maxLength={512}
+          rows={3}
+          placeholder="Add a description"
+          className="w-full resize-none rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-xs text-neutral-200 outline-none focus:border-emerald-500"
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => {
+              setDraft(value || '')
+              setEditing(false)
+              setError('')
+            }}
+            disabled={saving}
+            className="rounded-md border border-neutral-700 px-2.5 py-1 text-[11px] text-neutral-300 transition hover:bg-neutral-800 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="rounded-md bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+        {error && <div className="text-[11px] text-red-300">{error}</div>}
+      </div>
+    )
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      title="Edit group description (admin)"
+      className="mt-1 max-w-full whitespace-pre-wrap break-words rounded-md px-3 py-1 text-center text-[12px] text-neutral-400 transition hover:bg-neutral-800/40 hover:text-neutral-200"
+    >
+      {value ? value : <span className="italic text-neutral-600">Add a description</span>}
+    </button>
   )
 }
 

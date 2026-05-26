@@ -777,6 +777,30 @@ export const api = {
     const body = (await res.json()) as { link?: string }
     return body.link || ''
   },
+  // groupRename sets the visible group title. Admin-only; non-admins or
+  // groups with is_locked=true (admins-only-can-edit-info) get a 500 from
+  // whatsmeow that we surface up to the caller. The change propagates to
+  // every member's WA client immediately.
+  groupRename: (jid: string, name: string) =>
+    fetch(`/api/v2/groups/${encodeURIComponent(jid)}/name`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }).then((r) => {
+      if (!r.ok) throw new Error('Failed to rename group')
+      return r.json() as Promise<{ success: boolean }>
+    }),
+  // groupSetDescription sets the group's "Description" block (called "Topic"
+  // upstream). Same admin/locked gating as rename. Pass '' to clear.
+  groupSetDescription: (jid: string, description: string) =>
+    fetch(`/api/v2/groups/${encodeURIComponent(jid)}/description`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description }),
+    }).then((r) => {
+      if (!r.ok) throw new Error('Failed to update description')
+      return r.json() as Promise<{ success: boolean }>
+    }),
   // groupParticipantsUpdate adds, removes, promotes, or demotes participants
   // in one group. WhatsApp's underlying call is batched, so the bridge accepts
   // a list of JIDs and one action — pass [jid] for the per-row WA gestures
