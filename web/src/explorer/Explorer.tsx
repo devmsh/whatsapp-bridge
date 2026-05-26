@@ -280,6 +280,25 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // another tab without focusing this one — same affordance as WA Web.
   useUnreadBadge(chats)
 
+  // Global keyboard shortcut: Cmd/Ctrl+K focuses + selects the universal
+  // search bar at the top of the sidebar. Same convention every modern
+  // workspace app (Slack, Linear, Notion) uses; familiar to power users.
+  // Cmd+F is handled in MessageThread for in-chat find.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        const el = document.getElementById('wa-universal-search') as HTMLInputElement | null
+        if (el) {
+          el.focus()
+          el.select()
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Desktop notifications for live incoming messages. Gating, preview
   // formatting, permission + opt-out state all live inside the hook; we
   // just call fire(m) from the SSE handler below and render the optional

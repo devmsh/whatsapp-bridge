@@ -263,6 +263,22 @@ export function MessageThread({
     return null
   }, [messages])
 
+  // Global Cmd/Ctrl+F intercept — opens the in-chat search bar instead
+  // of the browser's native find. WA Web does the same; the magnifying-
+  // glass button in the chat header is still the discoverable path.
+  // Shift+Cmd+F is left untouched so the user can still reach the
+  // browser's find if they really want it.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Build the ordered list of message IDs that match the search query.
   // Search runs only on the currently-loaded window (no backend round-trip
   // for this v1); use "Load earlier messages" to widen the haystack.

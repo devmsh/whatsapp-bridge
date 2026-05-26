@@ -59,6 +59,7 @@ export function SearchBar({
   return (
     <div ref={boxRef} className="relative w-full">
       <input
+        id="wa-universal-search"
         value={q}
         onChange={(e) => {
           setQ(e.target.value)
