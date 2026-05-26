@@ -6,6 +6,7 @@ import { ChatAvatar } from './ChatAvatar'
 import { MessageTaskButton } from './MessageTaskButton'
 import { RichText } from './RichText'
 import { EmojiPicker } from './EmojiPicker'
+import { PollBubble } from './PollBubble'
 
 // MessageBubble renders one message: alignment, sender (in groups), reply
 // preview, media, text, reactions, and edited/deleted/forwarded markers.
@@ -220,6 +221,12 @@ export function MessageBubble({
 
         {msg.is_deleted ? (
           <div className="italic text-neutral-500">🚫 This message was deleted</div>
+        ) : msg.poll_id ? (
+          // Poll messages render the WA poll UI (question + options +
+          // vote bars) instead of plain text. The bridge surfaces the
+          // poll body separately at /api/v2/polls/{id}; the PollBubble
+          // fetches it on mount.
+          <PollBubble msg={msg} mine={mine} />
         ) : (
           <>
             <MediaContent msg={msg} onOpenImage={onOpenImage} />

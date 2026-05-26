@@ -128,6 +128,10 @@ export interface Message {
   reply_to_content?: string
   reactions?: Reaction[]
   chat_name?: string
+  // When non-empty, this message is a WA poll. The full poll body
+  // (question, options, votes) lives on /api/v2/polls/{id}; the bubble
+  // fetches it lazily and renders the vote UI inline.
+  poll_id?: string
 
   // AI-derived (only present when the media-understanding worker has run):
   transcript?: string         // voice-note transcript via whisper
@@ -157,6 +161,34 @@ export interface MessageReceipt {
   sender_jid: string
   receipt_type: '' | 'read' | 'played' | string
   timestamp: number
+}
+
+// Poll body — fetched on demand for any Message whose poll_id is set.
+// `options` is a JSON-encoded array of strings (the bridge stores it as a
+// blob, callers parse). `max_selections` = 1 → single-choice, > 1 →
+// multi-choice up to that many.
+export interface Poll {
+  message_id: string
+  chat_jid: string
+  question: string
+  options: string
+  max_selections: number
+  created_at: number
+}
+
+// One row per voter — selected_options is a JSON-encoded string[]. The
+// bridge upserts so the latest vote per voter replaces older ones.
+export interface PollVote {
+  poll_message_id: string
+  poll_chat_jid: string
+  voter_jid: string
+  selected_options: string
+  timestamp: number
+}
+
+export interface PollDetail {
+  poll: Poll
+  votes: PollVote[] | null
 }
 
 export interface Contact {
@@ -730,6 +762,24 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // getPoll fetches the poll body + every recorded vote for a poll message.
+  // Bridge endpoint: GET /api/v2/polls/{id}?chat_jid=... → {poll, votes}.
+  // Useful for rendering the poll bubble with live tallies.
+  getPoll: async (jid: string, messageID: string): Promise<PollDetail | null> => {
+    const res = await fetch(
+      `/api/v2/polls/${encodeURIComponent(messageID)}?chat_jid=${encodeURIComponent(jid)}`,
+    )
+    if (!res.ok) return null
+    return res.json()
+  },
+  // votePoll casts the current user's selection. The bridge re-encrypts the
+  // vote against the poll's metadata + ships it via whatsmeow.BuildPollVote.
+  // `options` is the raw option strings the user picked.
+  votePoll: (jid: string, messageID: string, options: string[]) =>
+    postBody<{ success: boolean }>(`/api/v2/polls/${encodeURIComponent(messageID)}/vote`, {
+      chat_jid: jid,
+      options,
+    }),
   // messageReceipts returns one row per recipient × receipt-type for an
   // outgoing message. Empty receipt_type = delivered; "read" + "played"
   // are the upgraded states. Drives the Message Info screen — caller
