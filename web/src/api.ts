@@ -301,6 +301,15 @@ export interface Group {
   name: string
 }
 
+// GroupJoinRequest mirrors whatsmeow's types.GroupParticipantRequest — one
+// user who tapped an invite link and is waiting for an admin to approve or
+// reject. JID is the requester (phone-form), RequestedAt is the ISO time
+// the request landed (so the UI can show "asked 2h ago").
+export interface GroupJoinRequest {
+  JID: string
+  RequestedAt: string
+}
+
 // GroupFull is the richer object behind GET /api/v2/groups/{jid} — pulled
 // from the bridge's local db.Group row. Exposes the admin-managed flags
 // (is_announce, is_locked) so the Group info modal can render them.
@@ -830,6 +839,28 @@ export const api = {
     const body = (await res.json()) as { link?: string }
     return body.link || ''
   },
+  // groupRequests returns the pending join-requests for a group — admins
+  // see this list in WA mobile under "Pending requests". Each entry is one
+  // user who tapped a stale invite link or requested join when the group
+  // doesn't auto-add. Empty array (not an error) when there's nothing
+  // pending. Non-admin callers are rejected by whatsmeow with a 500.
+  groupRequests: async (jid: string): Promise<GroupJoinRequest[]> => {
+    const res = await fetch(`/api/v2/groups/${encodeURIComponent(jid)}/requests`)
+    if (!res.ok) return []
+    return res.json()
+  },
+  // groupRequestsUpdate approves or rejects pending join requests in batch.
+  // Mirror of groupParticipantsUpdate's add/remove but routes through the
+  // request-only endpoint so whatsmeow can decline cleanly.
+  groupRequestsUpdate: (
+    jid: string,
+    jids: string[],
+    action: 'approve' | 'reject',
+  ) =>
+    postBody<{ success: boolean }>(
+      `/api/v2/groups/${encodeURIComponent(jid)}/requests`,
+      { jids, action },
+    ),
   // groupRename sets the visible group title. Admin-only; non-admins or
   // groups with is_locked=true (admins-only-can-edit-info) get a 500 from
   // whatsmeow that we surface up to the caller. The change propagates to

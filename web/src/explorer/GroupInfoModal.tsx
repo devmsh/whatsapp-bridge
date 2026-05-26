@@ -4,6 +4,7 @@ import { ChatAvatar } from './ChatAvatar'
 import { DisappearingSection } from './DisappearingSection'
 import { GroupAdminSection } from './GroupAdminSection'
 import { AddMembersModal } from './AddMembersModal'
+import { GroupRequestsSection } from './GroupRequestsSection'
 
 // GroupInfoModal mirrors WA's "Group info" — a focused panel showing the
 // group's avatar, name, member count, and the participant list with
@@ -117,6 +118,7 @@ export function GroupInfoModal({
         <InviteLinkSection jid={jid} title={title} />
         <DisappearingSection jid={jid} isGroup={true} />
         <GroupAdminSection jid={jid} />
+        <GroupRequestsSection jid={jid} nameMap={nameMap} />
 
         <div className="flex-1 overflow-y-auto py-1">
           {/* "+ Add participants" row — admin-only on the server (whatsmeow
