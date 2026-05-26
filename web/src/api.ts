@@ -249,6 +249,19 @@ export interface Group {
   name: string
 }
 
+// GroupFull is the richer object behind GET /api/v2/groups/{jid} — pulled
+// from the bridge's local db.Group row. Exposes the admin-managed flags
+// (is_announce, is_locked) so the Group info modal can render them.
+export interface GroupFull {
+  jid: string
+  name: string
+  topic?: string
+  is_announce?: boolean
+  is_locked?: boolean
+  disappearing_timer?: number
+  participants?: GroupParticipant[]
+}
+
 // GroupParticipant mirrors the bridge's GroupParticipant row, surfaced via
 // GET /api/v2/groups/{jid}/participants. Used by the composer's @-picker.
 export interface GroupParticipant {
@@ -758,11 +771,36 @@ export const api = {
   // Admin-only on most groups; non-admins get a 500 from the bridge here.
   groupInviteLink: async (jid: string, reset = false): Promise<string> => {
     const q = reset ? '?reset=true' : ''
-    const res = await fetch(`/api/v2/groups/${encodeURIComponent(jid)}/invite${q}`)
+    // Bridge route is `/invite-link`, not `/invite` — cycle-59 typo fix.
+    const res = await fetch(`/api/v2/groups/${encodeURIComponent(jid)}/invite-link${q}`)
     if (!res.ok) throw new Error('Failed to load invite link')
     const body = (await res.json()) as { link?: string }
     return body.link || ''
   },
+  // groupGet returns the full group row + participants from the bridge —
+  // /api/v2/groups/{jid}. Used by the admin settings section to read the
+  // current Announce / Locked / Disappearing state so the pills show what's
+  // actually applied instead of "unknown". Includes the participants list
+  // (same shape groupParticipants() hands back).
+  groupGet: async (jid: string): Promise<GroupFull> => {
+    const res = await fetch(`/api/v2/groups/${encodeURIComponent(jid)}`)
+    if (!res.ok) throw new Error('Failed to load group')
+    return res.json()
+  },
+  // groupSettings flips the two binary group toggles WA exposes:
+  //   announce: true  → only admins can send messages ("announcement" group)
+  //   locked:   true  → only admins can change group name / photo / description
+  // Bridge accepts either field individually so we can change one without
+  // touching the other. Non-admins are rejected upstream by whatsmeow.
+  groupSettings: (jid: string, settings: { announce?: boolean; locked?: boolean }) =>
+    fetch(`/api/v2/groups/${encodeURIComponent(jid)}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }).then((r) => {
+      if (!r.ok) throw new Error('Failed to save group settings')
+      return r.json() as Promise<{ success: boolean }>
+    }),
   // upload posts a single file as multipart/form-data, the bridge writes it
   // under <MediaDir>/uploads/<yyyymm>/, and returns an absolute path that
   // /send and /reply can consume in media_path.
