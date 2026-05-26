@@ -762,6 +762,30 @@ function VoiceBubble({ msg, url }: { msg: Message; url: string }) {
     const onEnded = () => {
       setPlaying(false)
       setCurrent(0)
+      // WA-style auto-continue: when a voice note finishes, find the next
+      // voice bubble in DOM order and play it. We tag every voice <audio>
+      // element with data-voice-audio so the lookup is a single
+      // querySelectorAll on the document — no parent coordination needed
+      // and the cluster keeps rolling through queued notes the way WA's
+      // mobile + desktop clients do.
+      try {
+        const all = Array.from(
+          document.querySelectorAll<HTMLAudioElement>('audio[data-voice-audio]'),
+        )
+        const i = all.indexOf(a)
+        if (i >= 0 && i < all.length - 1) {
+          const next = all[i + 1]
+          // Bring the next bubble into view so the user sees what's
+          // playing — same UX as official WA when it auto-rolls a queue.
+          const row = next.closest('[data-msg-id]') as HTMLElement | null
+          if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          void next.play().catch(() => {
+            // Autoplay can be blocked by the browser if the page lost a
+            // user-gesture context between notes. Fail silently — the
+            // user can hit play on the next bubble themselves.
+          })
+        }
+      } catch {}
     }
     const onTime = () => setCurrent(a.currentTime)
     const onMeta = () => setDuration(a.duration)
@@ -858,7 +882,13 @@ function VoiceBubble({ msg, url }: { msg: Message; url: string }) {
           </button>
         </div>
       </div>
-      <audio ref={audioRef} src={url} preload="metadata" className="hidden" />
+      <audio
+        ref={audioRef}
+        src={url}
+        preload="metadata"
+        data-voice-audio={msg.id}
+        className="hidden"
+      />
     </div>
   )
 }
