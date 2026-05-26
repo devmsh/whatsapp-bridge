@@ -65,6 +65,9 @@ export function ContactInfoModal({
     try {
       await api.blockContact(jid, next ? 'block' : 'unblock')
       setBlocked(next)
+      // Tell the rest of the app — the composer and any header / chat-list
+      // surface using useBlocklist() refetches and switches mode.
+      window.dispatchEvent(new CustomEvent('wa.blocklist-changed'))
     } catch (e) {
       window.alert(
         'Block action failed: ' + (e instanceof Error ? e.message : 'unknown error'),

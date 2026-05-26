@@ -24,6 +24,7 @@ import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
 import { ContactInfoModal } from './ContactInfoModal'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
+import { useBlocklist } from '../hooks/useBlocklist'
 
 const PAGE = 100
 
@@ -693,6 +694,12 @@ export function MessageThread({
   }
 
   const canSend = !isStatus(jid) && !isNewsletter(jid)
+  // Block-state: hide the composer for blocked DMs and show the WA-style
+  // "you can't message this contact" banner with a one-click Unblock.
+  // Groups are never "blocked" individually (you block participants, not
+  // the room) so the check is DM-only.
+  const { blocked: blockedSet } = useBlocklist()
+  const isBlocked = isContact && blockedSet.has(jid)
 
   return (
     <div className="flex h-full flex-col">
@@ -1051,7 +1058,7 @@ export function MessageThread({
         )}
       </div>
 
-      {canSend && (
+      {canSend && !isBlocked && (
         <Composer
           jid={jid}
           group={group}
@@ -1072,6 +1079,8 @@ export function MessageThread({
           }}
         />
       )}
+
+      {canSend && isBlocked && <BlockedComposerBanner jid={jid} title={title} />}
 
       {showDrafts && (
         <DraftRepliesPopover
@@ -2156,6 +2165,65 @@ function Composer({
           }}
         />
       )}
+    </div>
+  )
+}
+
+// BlockedComposerBanner takes the composer's slot when the open DM is on
+// the user's blocklist. Same shape and spacing as the composer so the
+// thread doesn't visually jump when a block/unblock fires — just the
+// affordance changes: read-only message + a single Unblock button.
+//
+// WA's exact pattern: the textarea disappears, the bar shrinks, and the
+// only thing you can do from this chat is unblock. Tap Unblock → instant
+// flip; the composer comes back the moment useBlocklist refetches.
+function BlockedComposerBanner({ jid, title }: { jid: string; title: string }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function unblock() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.blockContact(jid, 'unblock')
+      // Same event ContactInfoModal dispatches — useBlocklist refetches and
+      // MessageThread flips back to rendering the real composer.
+      window.dispatchEvent(new CustomEvent('wa.blocklist-changed'))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unblock failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border-t border-neutral-800 bg-neutral-900/60 px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-300">
+          {/* Slashed-circle "no entry" glyph — matches the WA blocked icon. */}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M5.6 5.6l12.8 12.8" />
+          </svg>
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm text-neutral-200">
+            You can't message <span dir="auto" className="font-medium">{title}</span>
+          </div>
+          <div className="truncate text-[11px] text-neutral-500">
+            They're blocked. Unblock to send messages and see their presence again.
+          </div>
+        </div>
+        <button
+          onClick={unblock}
+          disabled={busy}
+          className="shrink-0 rounded-lg border border-neutral-700 px-3 py-1.5 text-xs font-medium text-neutral-200 transition hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {busy ? 'Unblocking…' : 'Unblock'}
+        </button>
+      </div>
+      {error && <div className="mt-2 text-[11px] text-red-300">{error}</div>}
     </div>
   )
 }
