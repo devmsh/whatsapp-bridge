@@ -1291,6 +1291,14 @@ export const api = {
       if (!r.ok) throw new Error('Failed to set disappearing timer')
       return r.json() as Promise<{ success: boolean }>
     }),
+  // sendContact ships one of the user's contacts as a WA ContactMessage
+  // (vCard share). Bridge looks up the contact in its local DB to build the
+  // vCard body — caller only passes the contact's JID, no name plumbing.
+  sendContact: (jid: string, contactJID: string) =>
+    postBody<{ success: boolean; message_id: string; timestamp: number; display_name: string }>(
+      '/api/v2/send-contact',
+      { jid, contact_jid: contactJID },
+    ),
   // sendLocation fires a WA LocationMessage — the "📍" share-where-I-am
   // gesture every WA user knows. name + address are optional (render as the
   // location bubble's title + subtitle in WA); coordinates are required.

@@ -22,6 +22,7 @@ import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
 import { ScheduleSendModal } from './ScheduleSendModal'
 import { SendLocationModal } from './SendLocationModal'
+import { SendContactModal } from './SendContactModal'
 import { useScheduledMessages, type ScheduledMessage } from '../hooks/useScheduledMessages'
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
@@ -1355,6 +1356,9 @@ function Composer({
   // a dedicated POST /send-location, so the composer just opens the picker
   // and lets it fire when the user confirms.
   const [locationOpen, setLocationOpen] = useState(false)
+  // Send-contact modal toggle. Sibling to the location modal — same UX
+  // pattern, different payload (ContactMessage vs LocationMessage).
+  const [contactShareOpen, setContactShareOpen] = useState(false)
   // Open mention-picker state: when the user is typing '@<query>' in the
   // textarea we open an autocomplete of group participants. `start` is the
   // caret position of the '@'; `query` is what's been typed after it.
@@ -2123,6 +2127,21 @@ function Composer({
                 <path d="M12 21s-7-7.58-7-12a7 7 0 0 1 14 0c0 4.42-7 12-7 12z" />
               </svg>
             </button>
+            {/* Send contact card — the third "share" verb, completes WA's
+                paperclip menu. Person glyph; opens a contact picker that
+                ships the chosen contact as a vCard message. */}
+            <button
+              onClick={() => setContactShareOpen(true)}
+              disabled={!!editingMsg}
+              title={editingMsg ? 'Contact share is disabled while editing' : 'Share contact'}
+              aria-label="Share contact"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+            </button>
             <div className="relative shrink-0">
               <button
                 onClick={() => setEmojiOpen((v) => !v)}
@@ -2283,6 +2302,16 @@ function Composer({
             // will deliver the real bubble. We don't echo a placeholder
             // here — the timeline already handles incoming-from-self
             // messages via the stream subscription.
+          }}
+        />
+      )}
+      {contactShareOpen && (
+        <SendContactModal
+          chatJID={jid}
+          onClose={() => setContactShareOpen(false)}
+          onSent={() => {
+            // SSE round-trip delivers the real VCard bubble; same as
+            // location share, no echo needed.
           }}
         />
       )}
