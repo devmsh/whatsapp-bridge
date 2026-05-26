@@ -323,6 +323,19 @@ export function MessageBubble({
           <VCardContent msg={msg} />
         ) : (
           <>
+            {/* View-once badge — WA shows a small "1" inside a circle on
+                view-once media. We use a fire icon + label because it's
+                more legible at small bubble sizes. The badge sits above
+                the media and confirms the sender intended one-time view,
+                even though our bridge persists the captured media. */}
+            {msg.is_view_once && (
+              <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-rose-300">
+                <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" aria-hidden="true">
+                  <path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14a8 8 0 0 0 16 0c0-4.16-2-7.88-6.5-13.33z" />
+                </svg>
+                View once
+              </div>
+            )}
             <MediaContent msg={msg} onOpenImage={onOpenImage} />
             <TextContent
               msg={msg}

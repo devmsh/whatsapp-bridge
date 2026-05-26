@@ -166,6 +166,15 @@ export interface Message {
   is_deleted?: boolean
   is_edit?: boolean
   is_forwarded?: boolean
+  // True when WA flagged this message with the ephemeral bit — i.e. it was
+  // sent inside a chat with disappearing-messages on. Cosmetic only on the
+  // client (WA mobile shows a small clock badge under the bubble).
+  is_ephemeral?: boolean
+  // True when this is a view-once media message — the recipient can open
+  // the photo / video once and then it self-destructs. The bridge captures
+  // the media before that happens; we still render the "🔥 View once"
+  // badge so the user knows the sender intended one-time viewing.
+  is_view_once?: boolean
   media_type?: string
   media_path?: string
   media_mime?: string
