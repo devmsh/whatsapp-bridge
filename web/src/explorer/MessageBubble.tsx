@@ -46,7 +46,7 @@ export function MessageBubble({
   selfDigits?: Set<string>
   onOpenTask?: (id: number) => void
   onTasksChanged?: () => void
-  onOpenChat?: (jid: string) => void
+  onOpenChat?: (jid: string, draft?: string) => void
   onReply?: (msg: Message) => void
   /** Called when the user picks an emoji from the quick-react popover.
    *  Empty string removes any existing reaction (WA's toggle semantics). */
@@ -357,6 +357,14 @@ export function MessageBubble({
           onStar={onStar ? () => onStar(msg, !msg.is_starred) : undefined}
           onSelect={onSelect ? () => onSelect(msg) : undefined}
           onCopy={onCopy && canCopy ? () => onCopy(msg) : undefined}
+          // "Reply privately" — only meaningful for group messages from
+          // somebody else; opens a DM with that sender pre-filled with
+          // a quoted preview. WA's classic gesture.
+          onReplyPrivately={
+            group && onOpenChat
+              ? () => onOpenChat(msg.sender, buildPrivateReplyDraft(msg))
+              : undefined
+          }
           taskButton={taskButton}
           isStarred={!!msg.is_starred}
           side="right"
@@ -380,6 +388,7 @@ function BubbleActions({
   onInfo,
   onSelect,
   onCopy,
+  onReplyPrivately,
   taskButton,
   isStarred,
   side,
@@ -403,6 +412,10 @@ function BubbleActions({
    *  MessageBubble. Returns true on success so the button can flash a
    *  brief "Copied!" state — see the local copiedAt timer below. */
   onCopy?: () => void
+  /** Show the "Reply privately" button — only meaningful for group
+   *  messages from someone else. Click opens a DM with that sender,
+   *  composer pre-filled with a quoted preview of the original. */
+  onReplyPrivately?: () => void
   /** Pre-rendered "promote to task" button (MessageTaskButton). Lives in the
    *  same gutter cluster so it reads as a sibling action, not a stray icon
    *  in the footer. The bubble builds it with full context (chatJID, etc.). */
@@ -550,6 +563,20 @@ function BubbleActions({
           )}
         </button>
       )}
+      {onReplyPrivately && (
+        <button
+          onClick={onReplyPrivately}
+          title="Reply privately — opens a DM with this sender, quote pre-filled"
+          aria-label="Reply privately"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-800/80 text-neutral-300 transition hover:bg-neutral-700 hover:text-neutral-100"
+        >
+          {/* reply-arrow + small lock badge to read as "private reply" */}
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 17 4 12 9 7" />
+            <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+          </svg>
+        </button>
+      )}
       {taskButton}
       {pickerOpen && onReact && (
         <ReactionPicker
@@ -562,6 +589,24 @@ function BubbleActions({
       )}
     </div>
   )
+}
+
+// buildPrivateReplyDraft produces the textarea pre-fill for the
+// "Reply privately" gesture. WA's mobile client links the new DM
+// to the original group message via a real quoted-reply; without
+// bridge-side support for that cross-chat reference we approximate
+// with a plain ">" quoted preview, which still preserves intent
+// and the user can edit / trim before sending.
+function buildPrivateReplyDraft(msg: Message): string {
+  const raw = msg.content || msg.media_caption || ''
+  const text = raw.length > 140 ? raw.slice(0, 137) + '…' : raw
+  // Each line gets the > marker so multi-line quotes still read as a
+  // block. Trailing blank line so the cursor lands on a fresh line
+  // for the user's typed reply.
+  const quoted = text
+    ? text.split('\n').map((l) => '> ' + l).join('\n') + '\n\n'
+    : ''
+  return quoted
 }
 
 // ReactionChips aggregates the per-reactor rows into one chip per emoji with
@@ -810,7 +855,7 @@ function TextContent({
 }: {
   msg: Message
   mentionIndex: Map<string, MentionEntry>
-  onOpenChat?: (jid: string) => void
+  onOpenChat?: (jid: string, draft?: string) => void
   selfDigits?: Set<string>
   highlightQuery?: string
 }) {
@@ -1070,7 +1115,7 @@ function MediaUnderstanding({
   msg: Message
   mine: boolean
   mentionIndex: Map<string, MentionEntry>
-  onOpenChat?: (jid: string) => void
+  onOpenChat?: (jid: string, draft?: string) => void
   selfDigits?: Set<string>
   highlightQuery?: string
 }) {

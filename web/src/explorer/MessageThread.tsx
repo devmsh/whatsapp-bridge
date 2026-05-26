@@ -71,7 +71,7 @@ export function MessageThread({
   onOpenTask: (id: number) => void
   onTasksChanged: () => void
   onOpenChatTasks: (jid: string) => void
-  onOpenChat?: (jid: string) => void
+  onOpenChat?: (jid: string, draft?: string) => void
   onOpenCircle?: (id: number) => void
   onSent?: (m: Message) => void
   /** Message id the parent (Explorer) wants us to jump to once it's in
@@ -3167,7 +3167,7 @@ function Timeline({
   mentionIndex: Map<string, MentionEntry>
   onOpenTask: (id: number) => void
   onTasksChanged: () => void
-  onOpenChat?: (jid: string) => void
+  onOpenChat?: (jid: string, draft?: string) => void
   onReply?: (msg: Message) => void
   onReact?: (msg: Message, emoji: string) => void
   onForward?: (msg: Message) => void
