@@ -313,7 +313,7 @@ export function MessageBubble({
         )}
 
         {msg.reactions && msg.reactions.length > 0 && (
-          <ReactionChips reactions={msg.reactions} />
+          <ReactionChips reactions={msg.reactions} nameMap={nameMap} />
         )}
 
         <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-neutral-400">
@@ -547,8 +547,16 @@ function BubbleActions({
 // ReactionChips aggregates the per-reactor rows into one chip per emoji with
 // a count (when more than one person reacted with it) — matching official
 // WA's reaction display. The chip the current user added is tinted emerald
-// so they can spot their own reaction at a glance.
-function ReactionChips({ reactions }: { reactions: NonNullable<Message['reactions']> }) {
+// so they can spot their own reaction at a glance. Tapping any chip opens
+// a small modal listing every reactor grouped by emoji.
+function ReactionChips({
+  reactions,
+  nameMap,
+}: {
+  reactions: NonNullable<Message['reactions']>
+  nameMap: Map<string, string>
+}) {
+  const [open, setOpen] = useState(false)
   // Group by emoji, count, and remember whether the user themself reacted
   // with that emoji. '__me__' is the sentinel handleReact assigns for the
   // optimistic local update — server-pulled reactions don't carry it, so a
@@ -566,23 +574,133 @@ function ReactionChips({ reactions }: { reactions: NonNullable<Message['reaction
   const aggregated = Array.from(map.values())
   if (aggregated.length === 0) return null
   return (
-    <div className="mt-1 flex flex-wrap gap-1">
-      {aggregated.map(({ emoji, count, mine }) => (
-        <span
-          key={emoji}
-          className={
-            'flex items-center rounded-full px-1.5 py-0.5 text-xs ring-1 ' +
-            (mine
-              ? 'bg-emerald-500/20 text-emerald-100 ring-emerald-500/40'
-              : 'bg-black/30 text-neutral-100 ring-black/0')
-          }
-        >
-          <span className="leading-none">{emoji}</span>
-          {count > 1 && (
-            <span className="ml-1 text-[10px] tabular-nums opacity-80">{count}</span>
-          )}
-        </span>
-      ))}
+    <>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {aggregated.map(({ emoji, count, mine }) => (
+          <button
+            key={emoji}
+            onClick={(e) => { e.stopPropagation(); setOpen(true) }}
+            title="See who reacted"
+            className={
+              'flex items-center rounded-full px-1.5 py-0.5 text-xs ring-1 transition hover:brightness-125 ' +
+              (mine
+                ? 'bg-emerald-500/20 text-emerald-100 ring-emerald-500/40'
+                : 'bg-black/30 text-neutral-100 ring-black/0')
+            }
+          >
+            <span className="leading-none">{emoji}</span>
+            {count > 1 && (
+              <span className="ml-1 text-[10px] tabular-nums opacity-80">{count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+      {open && (
+        <ReactionsModal
+          reactions={reactions}
+          nameMap={nameMap}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  )
+}
+
+// ReactionsModal lists every reactor grouped by emoji — WA's "see who
+// reacted" panel. Order: most-popular emoji first (count desc), then
+// within each group most-recent reactor first.
+function ReactionsModal({
+  reactions,
+  nameMap,
+  onClose,
+}: {
+  reactions: NonNullable<Message['reactions']>
+  nameMap: Map<string, string>
+  onClose: () => void
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  // Group reactions by emoji, preserving the raw list per group so we
+  // can sort by timestamp inside it.
+  const groups = new Map<string, NonNullable<Message['reactions']>>()
+  for (const r of reactions) {
+    if (!r.emoji) continue
+    const arr = groups.get(r.emoji) || []
+    arr.push(r)
+    groups.set(r.emoji, arr)
+  }
+  const ordered = Array.from(groups.entries())
+    .map(([emoji, rs]) => ({
+      emoji,
+      reactors: rs.slice().sort((a, b) => b.timestamp - a.timestamp),
+    }))
+    .sort((a, b) => b.reactors.length - a.reactors.length)
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[80vh] w-[380px] max-w-[94vw] flex-col overflow-hidden rounded-2xl border border-neutral-700 bg-neutral-900 shadow-2xl shadow-black/60"
+      >
+        <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+          <h2 className="text-sm font-semibold text-neutral-100">Reactions</h2>
+          <button
+            onClick={onClose}
+            title="Close (Esc)"
+            aria-label="Close"
+            className="flex h-7 w-7 items-center justify-center rounded text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+          >
+            ✕
+          </button>
+        </header>
+        <div className="flex-1 overflow-y-auto px-3 py-2">
+          {ordered.map(({ emoji, reactors }) => (
+            <section key={emoji} className="mb-3">
+              <div className="flex items-baseline gap-2 px-1 py-1 text-[11px] uppercase tracking-wider text-neutral-500">
+                <span className="text-lg leading-none">{emoji}</span>
+                <span>{reactors.length}</span>
+              </div>
+              <ul className="flex flex-col">
+                {reactors.map((r, i) => {
+                  const isMe = r.sender === '__me__'
+                  const name = isMe
+                    ? 'You'
+                    : senderTitle(r.sender, r.sender_name, '', nameMap)
+                  return (
+                    <li
+                      key={r.sender + r.timestamp + i}
+                      className="flex items-center gap-3 rounded-md px-1.5 py-1.5"
+                    >
+                      <ChatAvatar
+                        jid={isMe ? '' : r.sender}
+                        title={name}
+                        size={28}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div dir="auto" className="truncate text-sm text-neutral-100">
+                          {name}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-[11px] tabular-nums text-neutral-500">
+                        {clockTime(r.timestamp)}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
