@@ -879,6 +879,19 @@ export function MessageThread({
           setOpen={setDateJumpOpen}
           onJump={jumpToDate}
         />
+        <button
+          onClick={() => exportChat(title, jid, group, messages, nameMap)}
+          title="Export chat as a text file"
+          aria-label="Export chat"
+          disabled={messages.length === 0}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+        </button>
         <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
       </header>
 
@@ -2297,6 +2310,61 @@ function formatLastSeen(ts: number): string {
     year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric',
   })
   return `${datePart} at ${time}`
+}
+
+// exportChat takes the currently-loaded messages of a thread and ships
+// them to the user as a plain-text download — same shape WA's "Export
+// chat" produces: one line per message with [YYYY-MM-DD HH:MM] sender:
+// text. Media bubbles render as "<sender>: 📷 Photo" / "🎤 Voice
+// message" using the same shorthand the chat-list preview uses. Strictly
+// what's loaded in the thread; "Load earlier" widens the export window.
+function exportChat(
+  title: string,
+  jid: string,
+  group: boolean,
+  messages: Message[],
+  nameMap: Map<string, string>,
+): void {
+  if (messages.length === 0) return
+  const lines: string[] = []
+  lines.push(`WhatsApp Chat — ${title}`)
+  lines.push(`Exported ${new Date().toISOString()}`)
+  lines.push('')
+  for (const m of messages) {
+    const ts = new Date(m.timestamp * 1000)
+    const stamp = `${ts.getFullYear()}-${pad2(ts.getMonth() + 1)}-${pad2(ts.getDate())} ${pad2(ts.getHours())}:${pad2(ts.getMinutes())}`
+    const sender = m.is_from_me
+      ? 'You'
+      : group
+        ? senderTitle(m.sender, m.sender_name, m.push_name, nameMap)
+        : title
+    let body: string
+    if (m.is_deleted) {
+      body = '🚫 deleted message'
+    } else if (m.media_type) {
+      const word = mediaWord(m.media_type) || 'Media'
+      body = m.media_caption ? `${word}: ${m.media_caption}` : word
+    } else {
+      body = m.content || ''
+    }
+    lines.push(`[${stamp}] ${sender}: ${body}`)
+  }
+  const text = lines.join('\n')
+  const safeTitle = title.replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 80) || 'chat'
+  const stamp = new Date().toISOString().slice(0, 10)
+  const filename = `whatsapp-${safeTitle}-${stamp}.txt`
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  // Defer revoke past the click handler so the browser has time to
+  // start the download in slow / quirky environments.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  void jid // future enhancement could fetch a wider window via the API
 }
 
 // draftKey is the localStorage namespace for the Composer's per-chat draft
