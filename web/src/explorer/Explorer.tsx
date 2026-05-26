@@ -33,6 +33,7 @@ import { ChatUnlockModal } from './ChatUnlockModal'
 import { StarredPanel } from './StarredPanel'
 import { CallsPanel } from './CallsPanel'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
+import { useUnreadBadge } from '../hooks/useUnreadBadge'
 
 type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls'
 
@@ -273,6 +274,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     setTaskSelection({ kind: 'view', view: 'open' })
     setTab('tasks')
   }, [])
+
+  // Tab title + favicon badge driven by the total unread count across all
+  // chats (muted ones excluded). Lets the user spot a new message from
+  // another tab without focusing this one — same affordance as WA Web.
+  useUnreadBadge(chats)
 
   // Desktop notifications for live incoming messages. Gating, preview
   // formatting, permission + opt-out state all live inside the hook; we
