@@ -973,7 +973,7 @@ export function MessageThread({
           className="h-full overflow-y-auto px-4 py-4"
         >
           {loading && messages.length === 0 ? (
-            <div className="py-10 text-center text-sm text-neutral-600">Loading…</div>
+            <SkeletonThread />
           ) : messages.length === 0 ? (
             <div className="py-10 text-center text-sm text-neutral-600">No messages</div>
           ) : (
@@ -2960,6 +2960,40 @@ function RecordingWaveform({ stream }: { stream: MediaStream | null }) {
     }
   }, [stream])
   return <canvas ref={canvasRef} className="h-6 flex-1" aria-hidden="true" />
+}
+
+// SkeletonThread is what we paint while the first /messages fetch is in
+// flight — gives the user something that looks like the chat will look,
+// instead of a stark "Loading…" line. WA Web does the same. Six fake
+// rows alternating in/out with varying widths so the eye reads them as
+// a real conversation instead of identical placeholders. Pulse from
+// Tailwind's animate-pulse so we don't ship a custom keyframe.
+function SkeletonThread() {
+  // Right side = "mine" (emerald), left = "theirs" (neutral) — same
+  // alignment + tint the real bubbles use.
+  const rows: Array<{ mine: boolean; widthPct: number }> = [
+    { mine: false, widthPct: 56 },
+    { mine: false, widthPct: 42 },
+    { mine: true,  widthPct: 38 },
+    { mine: false, widthPct: 64 },
+    { mine: true,  widthPct: 50 },
+    { mine: false, widthPct: 30 },
+  ]
+  return (
+    <div className="flex animate-pulse flex-col gap-2 py-2">
+      {rows.map((r, i) => (
+        <div key={i} className={'flex ' + (r.mine ? 'justify-end' : 'justify-start')}>
+          <div
+            className={
+              'h-9 rounded-2xl ' +
+              (r.mine ? 'bg-emerald-700/30' : 'bg-neutral-800')
+            }
+            style={{ width: r.widthPct + '%' }}
+          />
+        </div>
+      ))}
+    </div>
+  )
 }
 
 // ScrollToBottomFab is the small floating ↓ button WhatsApp pops at the
