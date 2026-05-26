@@ -186,6 +186,22 @@ export interface Message {
   is_starred?: boolean
   // Unix seconds — only populated on the /starred global list.
   starred_at?: number
+
+  // WA LocationMessage payload. Present whenever message_type is "location"
+  // — both for our own /send-location echoes and for messages received via
+  // the SSE stream. (lat, lng) are mandatory at the protocol level so they
+  // come together; name / address are the "title / subtitle" lines WA
+  // renders inside the location bubble.
+  latitude?: number
+  longitude?: number
+  location_name?: string
+  location_address?: string
+
+  // WA ContactMessage payload (vCard share). The bridge stashes the
+  // displayed name and the raw vCard body so the bubble can render a
+  // "Contact card" chip with download / open / save actions.
+  vcard_name?: string
+  vcard_data?: string
 }
 
 // One row per (message, recipient, receipt-type) — what GET

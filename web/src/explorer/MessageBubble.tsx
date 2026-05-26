@@ -311,6 +311,16 @@ export function MessageBubble({
           // poll body separately at /api/v2/polls/{id}; the PollBubble
           // fetches it on mount.
           <PollBubble msg={msg} mine={mine} />
+        ) : msg.latitude != null && msg.longitude != null ? (
+          // Static location share — WA "📍" attachment. Bubble shows a
+          // pinned-card with the name / address (when sent) + a click-out
+          // to Google Maps for the actual map view. We deliberately don't
+          // try to embed a real tile-rendered map: needs an external
+          // provider + a key + privacy decisions, all out of scope.
+          <LocationContent msg={msg} />
+        ) : msg.vcard_data ? (
+          // ContactMessage (vCard share). Bubble offers Open / Download.
+          <VCardContent msg={msg} />
         ) : (
           <>
             <MediaContent msg={msg} onOpenImage={onOpenImage} />
@@ -841,6 +851,83 @@ function ReplyButton({ onClick }: { onClick: () => void }) {
         <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
       </svg>
     </button>
+  )
+}
+
+// LocationContent renders a WA-style location bubble: pin icon + name +
+// address + (lat, lng), all wrapped in a click-out to Google Maps. We don't
+// embed a tile-rendered map: needs an external provider + key + privacy
+// implications, all out of scope. Click → opens Maps in a new tab.
+function LocationContent({ msg }: { msg: Message }) {
+  const lat = msg.latitude ?? 0
+  const lng = msg.longitude ?? 0
+  const url = `https://www.google.com/maps?q=${encodeURIComponent(lat + ',' + lng)}`
+  const title = msg.location_name || 'Location'
+  const sub = msg.location_address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="-mx-1 mb-1 flex items-start gap-2 rounded-lg bg-black/15 px-2 py-2 transition hover:bg-black/25"
+    >
+      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="10" r="3" />
+          <path d="M12 21s-7-7.58-7-12a7 7 0 0 1 14 0c0 4.42-7 12-7 12z" />
+        </svg>
+      </span>
+      <div className="min-w-0 flex-1">
+        <div dir="auto" className="truncate text-sm font-medium">{title}</div>
+        <div dir="auto" className="break-words text-[11px] text-current/70">{sub}</div>
+        <div className="mt-0.5 text-[10px] uppercase tracking-wider text-current/60">
+          Open in Maps ↗
+        </div>
+      </div>
+    </a>
+  )
+}
+
+// VCardContent renders a shared contact card. WA puts a person icon + the
+// vCard display name + an Open / Save row. We render the icon + name, plus
+// a download button that hands the raw vCard text back as a .vcf file —
+// importable into the OS address book without leaving the page.
+function VCardContent({ msg }: { msg: Message }) {
+  const name = msg.vcard_name || 'Shared contact'
+
+  function download() {
+    if (!msg.vcard_data) return
+    const blob = new Blob([msg.vcard_data], { type: 'text/vcard;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = (msg.vcard_name || 'contact').replace(/[^\w\d. -]+/g, '_') + '.vcf'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="-mx-1 mb-1 flex items-center gap-3 rounded-lg bg-black/15 px-2 py-2">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-300">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      </span>
+      <div className="min-w-0 flex-1">
+        <div dir="auto" className="truncate text-sm font-medium">{name}</div>
+        <div className="text-[11px] text-current/70">Contact card</div>
+      </div>
+      <button
+        onClick={download}
+        className="shrink-0 rounded-md border border-current/20 px-2 py-1 text-[11px] font-medium transition hover:bg-black/20"
+        title="Download as .vcf"
+      >
+        Save
+      </button>
+    </div>
   )
 }
 
