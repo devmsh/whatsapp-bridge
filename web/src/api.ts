@@ -163,6 +163,22 @@ export interface MessageReceipt {
   timestamp: number
 }
 
+// One row per whatsmeow call event the bridge has observed (offer /
+// accept / reject / terminate / timeout). A single real-world call usually
+// shows up as several rows sharing call_id; the UI groups them by call_id
+// to summarise "answered", "declined", or "missed".
+export interface CallEvent {
+  call_id: string
+  from_jid: string
+  timestamp: number
+  call_creator?: string
+  group_jid?: string
+  event_type: string
+  remote_platform?: string
+  remote_version?: string
+  data?: string
+}
+
 // Poll body — fetched on demand for any Message whose poll_id is set.
 // `options` is a JSON-encoded array of strings (the bridge stores it as a
 // blob, callers parse). `max_selections` = 1 → single-choice, > 1 →
@@ -759,6 +775,15 @@ export const api = {
   // ~10s without a refresh.
   chatTyping: async (jid: string): Promise<string[]> => {
     const res = await fetch('/api/v2/chats/' + encodeURIComponent(jid) + '/typing')
+    if (!res.ok) return []
+    return res.json()
+  },
+  // calls returns the most recent call events the bridge has seen, newest
+  // first. limit caps the row count (default 100 server-side). One real
+  // call shows up as several rows (offer/accept/terminate/...); the UI
+  // groups by call_id to render one row per call.
+  calls: async (limit = 100): Promise<CallEvent[]> => {
+    const res = await fetch('/api/v2/calls?limit=' + limit)
     if (!res.ok) return []
     return res.json()
   },

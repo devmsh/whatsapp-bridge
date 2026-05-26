@@ -31,8 +31,9 @@ import { setUnlockToken as setHiddenUnlockToken } from '../hidden'
 import { HiddenBadge } from './HiddenBadge'
 import { ChatUnlockModal } from './ChatUnlockModal'
 import { StarredPanel } from './StarredPanel'
+import { CallsPanel } from './CallsPanel'
 
-type Tab = 'chats' | 'contacts' | 'circles' | 'tasks'
+type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls'
 
 // Explorer is the main app after onboarding: a chat list / contacts sidebar and
 // a message thread, with live updates over SSE.
@@ -418,6 +419,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           <TabButton active={tab === 'tasks'} onClick={() => setTab('tasks')}>
             Tasks
           </TabButton>
+          <TabButton active={tab === 'calls'} onClick={() => setTab('calls')}>
+            Calls
+          </TabButton>
         </div>
 
         {tab === 'chats' && (
@@ -468,6 +472,12 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               setTaskSelection(s)
               setSelectedTask(null) // back to the list when changing scope
             }}
+          />
+        )}
+        {tab === 'calls' && (
+          <CallsPanel
+            nameMap={nameMap}
+            onOpenChat={openChat}
           />
         )}
       </aside>
