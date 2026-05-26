@@ -19,6 +19,7 @@ import { ImageLightbox, type LightboxImage } from './ImageLightbox'
 import { ForwardPicker } from './ForwardPicker'
 import { EmojiPicker } from './EmojiPicker'
 import { MessageInfo } from './MessageInfo'
+import { PollComposer } from './PollComposer'
 
 const PAGE = 100
 
@@ -862,6 +863,10 @@ function Composer({
   // of the composer; click toggles, click-outside / Esc closes (handled
   // inside EmojiPicker so the textarea keeps its own keydown wiring clean).
   const [emojiOpen, setEmojiOpen] = useState(false)
+  // Poll-create modal open/closed. Opens via the bar-chart icon in the
+  // composer footer; the modal handles the rest (question + options + send).
+  // Lives here in Composer so it can reuse jid + onSent without re-plumbing.
+  const [pollOpen, setPollOpen] = useState(false)
   // Open mention-picker state: when the user is typing '@<query>' in the
   // textarea we open an autocomplete of group participants. `start` is the
   // caret position of the '@'; `query` is what's been typed after it.
@@ -1527,6 +1532,20 @@ function Composer({
                 />
               )}
             </div>
+            <button
+              onClick={() => setPollOpen(true)}
+              disabled={!!editingMsg}
+              title={editingMsg ? 'Polls are disabled while editing' : 'Create poll'}
+              aria-label="Create poll"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              {/* bar-chart — reads as "poll" without needing a label */}
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="6" y1="20" x2="6" y2="12" />
+                <line x1="12" y1="20" x2="12" y2="6" />
+                <line x1="18" y1="20" x2="18" y2="14" />
+              </svg>
+            </button>
             <div className="relative flex-1">
               {mention && filteredParticipants.length > 0 && (
                 <MentionPicker
@@ -1594,6 +1613,34 @@ function Composer({
             )}
           </div>
         </>
+      )}
+      {pollOpen && (
+        <PollComposer
+          jid={jid}
+          onClose={() => setPollOpen(false)}
+          onSent={(messageID, question, options, maxSelections) => {
+            // Echo a poll bubble immediately. The PollBubble inside it
+            // re-fetches /api/v2/polls/{id} on mount; the bridge persists
+            // the poll body synchronously during createPoll, so that
+            // fetch returns the row we just wrote.
+            const echoed: Message = {
+              id: messageID,
+              chat_jid: jid,
+              sender: '',
+              sender_name: '',
+              push_name: '',
+              content: '[poll] ' + question,
+              timestamp: Math.floor(Date.now() / 1000),
+              is_from_me: true,
+              is_group: group,
+              message_type: 'poll',
+              poll_id: messageID,
+            }
+            void options
+            void maxSelections
+            onSent(echoed)
+          }}
+        />
       )}
     </div>
   )

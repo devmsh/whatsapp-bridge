@@ -762,6 +762,22 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // createPoll posts a fresh poll into a chat. Backend uses whatsmeow's
+  // BuildPollCreation (which adds the MessageSecret) and persists the poll
+  // body locally so the bubble can render it immediately. Returns the new
+  // poll's message_id so the caller can echo a bubble.
+  createPoll: (
+    jid: string,
+    question: string,
+    options: string[],
+    maxSelections = 1,
+  ) =>
+    postBody<{ success: boolean; message_id: string }>('/api/v2/polls', {
+      chat_jid: jid,
+      question,
+      options,
+      max_selections: maxSelections,
+    }),
   // getPoll fetches the poll body + every recorded vote for a poll message.
   // Bridge endpoint: GET /api/v2/polls/{id}?chat_jid=... → {poll, votes}.
   // Useful for rendering the poll bubble with live tallies.
