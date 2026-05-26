@@ -24,6 +24,7 @@ import { MessageThread } from './MessageThread'
 import { MediaSettings } from '../Settings'
 import { PrivacySettings } from './PrivacySettings'
 import { SelfProfile } from './SelfProfile'
+import { StatusUpdatesPanel } from './StatusUpdatesPanel'
 import { ProfilingStatusModal } from './ProfilingStatus'
 import { BriefingModal } from './BriefingView'
 import { SearchBar } from './Search'
@@ -67,6 +68,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showSettings, setShowSettings] = useState(false)
   const [showPrivacy, setShowPrivacy] = useState(false)
   const [showSelfProfile, setShowSelfProfile] = useState(false)
+  const [showStatuses, setShowStatuses] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
   const [dndOpen, setDndOpen] = useState(false)
@@ -505,6 +507,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
       {showPrivacy && <PrivacySettings onClose={() => setShowPrivacy(false)} />}
       {showSelfProfile && <SelfProfile device={device} onClose={() => setShowSelfProfile(false)} />}
+      {showStatuses && <StatusUpdatesPanel onClose={() => setShowStatuses(false)} />}
       {showShortcuts && <ShortcutsHelp onClose={() => setShowShortcuts(false)} />}
       {showCompose && (
         <NewChatModal
@@ -597,6 +600,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
             <IconButton title="Starred messages" onClick={() => setShowStarred(true)}>
               ⭐
+            </IconButton>
+            <IconButton title="Status updates" onClick={() => setShowStatuses(true)}>
+              📸
             </IconButton>
             <IconButton title="Today’s briefing" onClick={() => setShowBriefing(true)}>
               📊
