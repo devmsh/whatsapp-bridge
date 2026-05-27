@@ -28,6 +28,7 @@ import { useScheduledMessages, type ScheduledMessage } from '../hooks/useSchedul
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
 import { ContactInfoModal } from './ContactInfoModal'
+import { ClickToChatModal } from './ClickToChatModal'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
 import { useBlocklist } from '../hooks/useBlocklist'
 
@@ -135,6 +136,8 @@ export function MessageThread({
   // GroupInfo — focused hero + tags + activity, plus a footer link to
   // the heavier Dashboard view.
   const [contactInfoOpen, setContactInfoOpen] = useState(false)
+  // Click-to-chat (wa.me link + QR) modal — DMs only.
+  const [clickToChatOpen, setClickToChatOpen] = useState(false)
   // IDs of messages the user has selected for batch actions. Non-empty
   // means "select mode" is on; bubbles then show a checkbox overlay
   // and clicking a bubble toggles its selection instead of acting on it.
@@ -969,6 +972,21 @@ export function MessageThread({
             <path d="M21 15l-5-5L5 21" />
           </svg>
         </button>
+        {!group && jid.endsWith('@s.whatsapp.net') && (
+          <button
+            onClick={() => setClickToChatOpen(true)}
+            title="Click-to-chat link & QR code"
+            aria-label="Click-to-chat link and QR code"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <path d="M14 14h3v3h-3zM21 14v7M17 21h4M21 17h-1" />
+            </svg>
+          </button>
+        )}
         {group && (
           <button
             onClick={() => setGroupInfoOpen(true)}
@@ -1276,6 +1294,14 @@ export function MessageThread({
             setContactInfoOpen(false)
             setShowDashboard(true)
           }}
+        />
+      )}
+
+      {clickToChatOpen && !group && (
+        <ClickToChatModal
+          phone={jid.split('@')[0].split(':')[0]}
+          name={title}
+          onClose={() => setClickToChatOpen(false)}
         />
       )}
 
