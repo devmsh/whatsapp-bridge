@@ -18,6 +18,7 @@ import { setUnlockToken } from '../hidden'
 import { ImageLightbox, type LightboxImage } from './ImageLightbox'
 import { ForwardPicker } from './ForwardPicker'
 import { EmojiPicker } from './EmojiPicker'
+import { QuickReplyPicker } from './QuickReplyPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
 import { ScheduleSendModal } from './ScheduleSendModal'
@@ -1400,6 +1401,8 @@ function Composer({
   // Sticker-tray popover toggle. Picks a server-path sticker from
   // /api/v2/stickers/recent and fires api.send with sticker:true.
   const [stickerTrayOpen, setStickerTrayOpen] = useState(false)
+  // Quick-replies picker popover (WA Business canned responses).
+  const [quickRepliesOpen, setQuickRepliesOpen] = useState(false)
   // In-flight flag while a sticker send is firing. Hides the picker on
   // success; on failure surfaces an inline error.
   const [stickerSending, setStickerSending] = useState(false)
@@ -2019,6 +2022,35 @@ function Composer({
     })
   }
 
+  // insertQuickReply drops a saved canned response into the composer at the
+  // caret (same draft-persist path as insertEmoji), adding separating spaces
+  // so it never butts up against existing words.
+  function insertQuickReply(reply: string) {
+    const el = taRef.current
+    const caret = el?.selectionStart ?? text.length
+    const before = text.slice(0, caret)
+    const after = text.slice(caret)
+    const lead = before && !/\s$/.test(before) ? ' ' : ''
+    const trail = after && !/^\s/.test(after) ? ' ' : ''
+    const next = before + lead + reply + trail + after
+    setText(next)
+    if (!editingMsg) {
+      try {
+        if (next.trim()) localStorage.setItem(draftKey(jid), next)
+        else localStorage.removeItem(draftKey(jid))
+        window.dispatchEvent(new CustomEvent('wa.draft-changed'))
+      } catch {}
+    }
+    requestAnimationFrame(() => {
+      const el2 = taRef.current
+      if (!el2) return
+      el2.focus()
+      const pos = before.length + lead.length + reply.length
+      el2.setSelectionRange(pos, pos)
+      resize()
+    })
+  }
+
   // wrapSelection takes a WA markup marker (*, _, ~, `) and wraps the
   // textarea's current selection in it — what the keyboard shortcuts
   // below cast to. With no selection it inserts the pair and parks the
@@ -2227,6 +2259,34 @@ function Composer({
                 <circle cx="12" cy="7" r="4" />
               </svg>
             </button>
+            {/* Quick replies — WA Business canned responses. Pops a picker
+                above the button; pick → insert the text into the composer. */}
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setQuickRepliesOpen((v) => !v)}
+                disabled={!!editingMsg}
+                title={editingMsg ? 'Quick replies are disabled while editing' : 'Quick replies'}
+                aria-label="Quick replies"
+                aria-expanded={quickRepliesOpen}
+                className={
+                  'flex h-10 w-10 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-40 ' +
+                  (quickRepliesOpen
+                    ? 'bg-neutral-800 text-emerald-300'
+                    : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200')
+                }
+              >
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 11.5a8.38 8.38 0 0 1 8.5-8.5 8.5 8.5 0 0 1 8.5 8.5 8.38 8.38 0 0 1-8.5 8.5 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8z" />
+                  <path d="m8 11 2.5 2.5L15 9" />
+                </svg>
+              </button>
+              {quickRepliesOpen && (
+                <QuickReplyPicker
+                  onPick={insertQuickReply}
+                  onClose={() => setQuickRepliesOpen(false)}
+                />
+              )}
+            </div>
             <div className="relative shrink-0">
               <button
                 onClick={() => setEmojiOpen((v) => !v)}
