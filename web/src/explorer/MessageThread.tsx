@@ -30,6 +30,7 @@ import { GroupInfoModal } from './GroupInfoModal'
 import { ContactInfoModal } from './ContactInfoModal'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
 import { useBlocklist } from '../hooks/useBlocklist'
+import { usePinnedMessages } from '../hooks/usePinnedMessages'
 
 const PAGE = 100
 
@@ -193,6 +194,19 @@ export function MessageThread({
   // matchIndex steps through hits via ↑/↓ / Enter. Mirrors WA's per-chat
   // search UX — closed by Esc or the ✕ button.
   const [searchOpen, setSearchOpen] = useState(false)
+  // Pinned messages for this chat (WA "Pin message"), client-side.
+  const { pins, pinnedIds, pin, unpin } = usePinnedMessages(jid)
+  const togglePin = (m: Message) => {
+    if (pinnedIds.has(m.id)) {
+      unpin(m.id)
+      return
+    }
+    const who = m.is_from_me ? 'You' : senderTitle(m.sender, m.sender_name, m.push_name, nameMap)
+    let text = m.content || ''
+    if (m.is_deleted) text = '<message deleted>'
+    else if (!text && m.media_type) text = '<' + m.media_type + '>'
+    pin({ id: m.id, who, text, timestamp: m.timestamp })
+  }
   const [searchQuery, setSearchQuery] = useState('')
   const [searchIdx, setSearchIdx] = useState(0)
   // Transient "flash this message" state — set by jumpToMessage when the
@@ -1039,6 +1053,40 @@ export function MessageThread({
         />
       )}
 
+      {/* Pinned-message banner — WA's strip above the thread. Shows the most
+          recently pinned message; tap to jump to it, ✕ to unpin. */}
+      {pins.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 bg-neutral-900/80 px-4 py-2">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-sky-300" aria-hidden="true">
+            <path d="M12 17v5" />
+            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+          </svg>
+          <button
+            onClick={() => jumpToMessage(pins[pins.length - 1].id)}
+            className="min-w-0 flex-1 text-left"
+            title="Jump to pinned message"
+          >
+            <div className="text-[11px] font-medium text-sky-300">
+              Pinned{pins.length > 1 ? ` · ${pins.length} messages` : ''}
+            </div>
+            <div className="truncate text-xs text-neutral-300">
+              <span className="text-neutral-500">{pins[pins.length - 1].who}: </span>
+              {pins[pins.length - 1].text}
+            </div>
+          </button>
+          <button
+            onClick={() => unpin(pins[pins.length - 1].id)}
+            title="Unpin"
+            aria-label="Unpin message"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-200"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       {/* Scroll wrapper: stays `relative` so the floating ↓ FAB + the drop
           overlay anchor to it (and don't scroll out of view) while the inner
           div handles all the actual scrolling. Inline background carries the
@@ -1125,6 +1173,8 @@ export function MessageThread({
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 adminJids={adminJids}
+                onPin={togglePin}
+                pinnedIds={pinnedIds}
               />
             </>
           )}
@@ -3817,6 +3867,8 @@ function Timeline({
   selectedIds,
   onToggleSelect,
   adminJids,
+  onPin,
+  pinnedIds,
 }: {
   messages: Message[]
   /** Protocol-level events scoped to this chat — disappearing-timer
@@ -3870,6 +3922,10 @@ function Timeline({
    *  owner privileges. The bubble paints a small "admin" pill next to
    *  the colored sender name when its sender is in this set. */
   adminJids?: Set<string> | null
+  /** Pin / unpin a message (WhatsApp "Pin message"). pinnedIds marks which
+   *  message ids are currently pinned so the bubble shows the filled state. */
+  onPin?: (msg: Message) => void
+  pinnedIds?: Set<string>
 }) {
   // Same-sender bursts cluster together: a new day, a new sender, or a >60s
   // gap from the previous message ends one cluster and starts another. WA does
@@ -4088,6 +4144,8 @@ function Timeline({
                   highlighted={highlightId === m.id}
                   highlightQuery={highlightQuery}
                   senderIsAdmin={!!adminJids?.has(m.sender)}
+                  onPin={selectMode ? undefined : onPin}
+                  isPinned={!!pinnedIds?.has(m.id)}
                 />
                 {selectMode && (
                   <div
