@@ -28,6 +28,7 @@ import { useScheduledMessages, type ScheduledMessage } from '../hooks/useSchedul
 import { SharedMediaModal } from './SharedMediaModal'
 import { GroupInfoModal } from './GroupInfoModal'
 import { ContactInfoModal } from './ContactInfoModal'
+import { ChatLabelPicker } from './ChatLabelPicker'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
 import { useBlocklist } from '../hooks/useBlocklist'
 
@@ -135,6 +136,8 @@ export function MessageThread({
   // GroupInfo — focused hero + tags + activity, plus a footer link to
   // the heavier Dashboard view.
   const [contactInfoOpen, setContactInfoOpen] = useState(false)
+  // Chat-labels picker popover (WA Business color labels).
+  const [labelPickerOpen, setLabelPickerOpen] = useState(false)
   // IDs of messages the user has selected for batch actions. Non-empty
   // means "select mode" is on; bubbles then show a checkbox overlay
   // and clicking a bubble toggles its selection instead of acting on it.
@@ -969,6 +972,26 @@ export function MessageThread({
             <path d="M21 15l-5-5L5 21" />
           </svg>
         </button>
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setLabelPickerOpen((v) => !v)}
+            title="Labels"
+            aria-label="Labels"
+            aria-expanded={labelPickerOpen}
+            className={
+              'flex h-8 w-8 items-center justify-center rounded-lg border transition ' +
+              (labelPickerOpen
+                ? 'border-emerald-600/60 bg-emerald-500/15 text-emerald-300'
+                : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
+            }
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+              <line x1="7" y1="7" x2="7.01" y2="7" />
+            </svg>
+          </button>
+          {labelPickerOpen && <ChatLabelPicker jid={jid} onClose={() => setLabelPickerOpen(false)} />}
+        </div>
         {group && (
           <button
             onClick={() => setGroupInfoOpen(true)}

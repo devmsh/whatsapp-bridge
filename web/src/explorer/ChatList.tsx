@@ -5,6 +5,7 @@ import { ChatAvatar } from './ChatAvatar'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { useDrafts } from '../hooks/useDrafts'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
+import { useChatLabels } from '../hooks/useChatLabels'
 import { WallpaperPicker } from './WallpaperPicker'
 
 // ChatList shows the time-ordered list of chats. Search is handled by the
@@ -38,6 +39,13 @@ export function ChatList({
   // replaces the last-message line. One poll per tick covers every visible
   // row (groups + DMs combined) — see /api/v2/typing on the bridge.
   const typing = useTypingSnapshot()
+  // WA Business labels → colored dots on each row. Read once here (hook can't
+  // run inside the row map) and resolve ids to {name,color} per row.
+  const { labels: chatLabels, assignments: labelAssignments } = useChatLabels()
+  const labelById = useMemo(
+    () => new Map(chatLabels.map((l) => [l.id, l] as const)),
+    [chatLabels],
+  )
   const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
   // When set, shows the circle-membership picker for this chat.
   const [picking, setPicking] = useState<{ jid: string; title: string } | null>(null)
@@ -263,8 +271,23 @@ export function ChatList({
                 <span dir="auto" className="truncate text-sm font-medium">
                   {title}
                 </span>
-                <span className="shrink-0 text-[11px] text-neutral-500">
-                  {chatListTime(chat.last_message_at)}
+                <span className="flex shrink-0 items-center gap-1">
+                  {(labelAssignments[chat.jid] || []).map((lid) => {
+                    const l = labelById.get(lid)
+                    if (!l) return null
+                    return (
+                      <span
+                        key={lid}
+                        title={l.name}
+                        aria-label={`Label: ${l.name}`}
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: l.color }}
+                      />
+                    )
+                  })}
+                  <span className="text-[11px] text-neutral-500">
+                    {chatListTime(chat.last_message_at)}
+                  </span>
                 </span>
               </div>
               <div dir="auto" className="flex items-center gap-1.5 truncate text-xs text-neutral-500">
