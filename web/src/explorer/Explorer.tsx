@@ -35,6 +35,7 @@ import { setUnlockToken as setHiddenUnlockToken } from '../hidden'
 import { HiddenBadge } from './HiddenBadge'
 import { ChatUnlockModal } from './ChatUnlockModal'
 import { StarredPanel } from './StarredPanel'
+import { QuickRepliesPanel } from './QuickRepliesPanel'
 import { CallsPanel } from './CallsPanel'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
@@ -82,6 +83,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
+  const [showQuickReplies, setShowQuickReplies] = useState(false)
   // Digit identifiers of the current user — used to color "@you" mention
   // chips in emerald so a ping in a busy group is obvious. WhatsApp's wire
   // format sends LID digits as the mention identifier; we keep the phone
@@ -151,9 +153,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     // — the full chats load is ~50 ms locally — and keeps every consumer of
     // the chats prop honest without each one wiring its own onChanged.
     window.addEventListener('wa.chats-changed', loadAll)
+    // The composer's quick-reply picker fires this to open the manager
+    // panel without prop-drilling through MessageThread.
+    const openQuickReplies = () => setShowQuickReplies(true)
+    window.addEventListener('wa.open-quick-replies', openQuickReplies)
     return () => {
       window.removeEventListener('wa.unlock-changed', loadAll)
       window.removeEventListener('wa.chats-changed', loadAll)
+      window.removeEventListener('wa.open-quick-replies', openQuickReplies)
     }
   }, [])
 
@@ -601,6 +608,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           onClose={() => setShowStarred(false)}
         />
       )}
+      {showQuickReplies && <QuickRepliesPanel onClose={() => setShowQuickReplies(false)} />}
 
       <aside
         className={
@@ -708,6 +716,15 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
                     </svg>
                   ),
                   onClick: () => setShowSettings(true),
+                },
+                {
+                  label: 'Quick replies',
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 11.5a8.38 8.38 0 0 1 8.5-8.5 8.5 8.5 0 0 1 8.5 8.5 8.38 8.38 0 0 1-8.5 8.5 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8z" />
+                    </svg>
+                  ),
+                  onClick: () => setShowQuickReplies(true),
                 },
                 { divider: true },
                 {
