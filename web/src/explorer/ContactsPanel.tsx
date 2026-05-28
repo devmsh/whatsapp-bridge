@@ -10,7 +10,14 @@ function contactName(c: Contact): string {
 
 // messageCount returns how many messages we have with this contact, checking the
 // JIDs a DM might be stored under (jid, phone, lid).
+//
+// Privacy: hidden chats always report ZERO so they can't betray themselves by
+// sorting to the top of the "most contacted first" list. The contact still
+// appears (alphabetically, behind everyone else); only the activity signal is
+// masked so a bystander glancing at the contacts tab learns nothing about
+// volume or recency.
 function messageCount(c: Contact, activity: Map<string, number>): number {
+  if (c.is_hidden) return 0
   const candidates = [c.jid, c.phone ? c.phone + '@s.whatsapp.net' : '', c.lid || '']
   let max = 0
   for (const j of candidates) {
