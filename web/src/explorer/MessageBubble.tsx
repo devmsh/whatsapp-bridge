@@ -35,6 +35,8 @@ export function MessageBubble({
   highlighted = false,
   highlightQuery,
   senderIsAdmin = false,
+  onPin,
+  isPinned = false,
 }: {
   msg: Message
   group: boolean
@@ -99,6 +101,10 @@ export function MessageBubble({
    *  groups (DMs have no admin concept); MessageThread only sets it
    *  for groups via the adminJids set it fetches with participants. */
   senderIsAdmin?: boolean
+  /** Pin / unpin this message (WhatsApp "Pin message"). isPinned drives the
+   *  filled state of the pin action. */
+  onPin?: (msg: Message) => void
+  isPinned?: boolean
 }) {
   const mine = msg.is_from_me
   const sender =
@@ -177,7 +183,7 @@ export function MessageBubble({
           (so it sits between the bubble and the chat edge, exactly where the
           official WA chevron lives). Only rendered when the chat can be replied
           to (onReply provided) and the message isn't already deleted. */}
-      {(onReply || onReact || onForward || onStar || (onEdit && canEdit) || onInfo || onSelect || (onCopy && canCopy) || taskButton) && mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || (onEdit && canEdit) || onInfo || onSelect || (onCopy && canCopy) || onPin || taskButton) && mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
@@ -188,6 +194,8 @@ export function MessageBubble({
           onSelect={onSelect ? () => onSelect(msg) : undefined}
           onCopy={onCopy && canCopy ? () => onCopy(msg) : undefined}
           taskButton={taskButton}
+          onPin={onPin ? () => onPin(msg) : undefined}
+          isPinned={isPinned}
           isStarred={!!msg.is_starred}
           side="left"
         />
@@ -394,7 +402,7 @@ export function MessageBubble({
           {mine && <StatusTicks status={msg.status} />}
         </div>
       </div>
-      {(onReply || onReact || onForward || onStar || onSelect || (onCopy && canCopy) || taskButton) && !mine && !msg.is_deleted && (
+      {(onReply || onReact || onForward || onStar || onSelect || (onCopy && canCopy) || onPin || taskButton) && !mine && !msg.is_deleted && (
         <BubbleActions
           onReply={onReply ? () => onReply(msg) : undefined}
           onReact={onReact ? (emoji) => onReact(msg, emoji) : undefined}
@@ -411,6 +419,8 @@ export function MessageBubble({
               : undefined
           }
           taskButton={taskButton}
+          onPin={onPin ? () => onPin(msg) : undefined}
+          isPinned={isPinned}
           isStarred={!!msg.is_starred}
           side="right"
         />
@@ -436,6 +446,8 @@ function BubbleActions({
   onReplyPrivately,
   taskButton,
   isStarred,
+  onPin,
+  isPinned,
   side,
 }: {
   onReply?: () => void
@@ -466,6 +478,9 @@ function BubbleActions({
    *  in the footer. The bubble builds it with full context (chatJID, etc.). */
   taskButton?: React.ReactNode
   isStarred?: boolean
+  /** Pin / unpin this message (WhatsApp "Pin message"). */
+  onPin?: () => void
+  isPinned?: boolean
   side: 'left' | 'right'
 }) {
   // Brief "✓ Copied" affordance on the Copy button — clears after a
@@ -538,6 +553,24 @@ function BubbleActions({
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill={isStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        </button>
+      )}
+      {onPin && (
+        <button
+          onClick={onPin}
+          title={isPinned ? 'Unpin' : 'Pin'}
+          aria-label={isPinned ? 'Unpin message' : 'Pin message'}
+          className={
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition ' +
+            (isPinned
+              ? 'bg-sky-500/20 text-sky-300 hover:bg-sky-500/30'
+              : 'bg-neutral-800/80 text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100')
+          }
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 17v5" />
+            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
           </svg>
         </button>
       )}
