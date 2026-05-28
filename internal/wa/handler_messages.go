@@ -156,7 +156,29 @@ func extractContent(msg *waE2E.Message) string {
 		return list.GetDescription()
 	}
 	if tmpl := msg.GetTemplateMessage(); tmpl != nil {
+		if h := tmpl.GetHydratedTemplate(); h != nil {
+			if s := formatHydratedTemplate(h); s != "" {
+				return s
+			}
+		}
+		if h := tmpl.GetHydratedFourRowTemplate(); h != nil {
+			if s := formatHydratedTemplate(h); s != "" {
+				return s
+			}
+		}
 		return "[template]"
+	}
+	if im := msg.GetInteractiveMessage(); im != nil {
+		if s := formatInteractive(im); s != "" {
+			return s
+		}
+		return "[interactive]"
+	}
+	if btn := msg.GetButtonsMessage(); btn != nil {
+		if s := formatButtons(btn); s != "" {
+			return s
+		}
+		return "[buttons]"
 	}
 	if msg.GetOrderMessage() != nil {
 		return "[order]"
@@ -166,6 +188,100 @@ func extractContent(msg *waE2E.Message) string {
 	}
 	if gi := msg.GetGroupInviteMessage(); gi != nil {
 		return fmt.Sprintf("[group_invite:%s]", gi.GetGroupName())
+	}
+	return ""
+}
+
+// formatHydratedTemplate flattens a WA Business hydrated template (title +
+// content + footer + button labels and targets) into plain text. Same shape
+// WA mobile renders inside the bubble — keeps the body searchable + readable
+// while the frontend still treats it as a normal text message. URL/call
+// buttons get "[Label] target" so the user can act on them; quick-reply
+// buttons render as bare "[Label]".
+func formatHydratedTemplate(h *waE2E.TemplateMessage_HydratedFourRowTemplate) string {
+	var parts []string
+	if t := h.GetHydratedTitleText(); t != "" {
+		parts = append(parts, t)
+	}
+	if t := h.GetHydratedContentText(); t != "" {
+		parts = append(parts, t)
+	}
+	if t := h.GetHydratedFooterText(); t != "" {
+		parts = append(parts, "— "+t)
+	}
+	for _, b := range h.GetHydratedButtons() {
+		if ub := b.GetUrlButton(); ub != nil {
+			parts = append(parts, formatButtonRef(ub.GetDisplayText(), ub.GetURL()))
+		} else if cb := b.GetCallButton(); cb != nil {
+			parts = append(parts, formatButtonRef(cb.GetDisplayText(), cb.GetPhoneNumber()))
+		} else if qb := b.GetQuickReplyButton(); qb != nil {
+			if t := qb.GetDisplayText(); t != "" {
+				parts = append(parts, "["+t+"]")
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// formatInteractive flattens a newer-style InteractiveMessage (header title +
+// subtitle, body text, footer) — what WA Business now sends instead of the
+// legacy template path for things like product cards and native flows.
+func formatInteractive(im *waE2E.InteractiveMessage) string {
+	var parts []string
+	if h := im.GetHeader(); h != nil {
+		if t := h.GetTitle(); t != "" {
+			parts = append(parts, t)
+		}
+		if t := h.GetSubtitle(); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	if b := im.GetBody(); b != nil {
+		if t := b.GetText(); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	if f := im.GetFooter(); f != nil {
+		if t := f.GetText(); t != "" {
+			parts = append(parts, "— "+t)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// formatButtons flattens the older ButtonsMessage (text + content + footer +
+// reply-button labels).
+func formatButtons(b *waE2E.ButtonsMessage) string {
+	var parts []string
+	if t := b.GetText(); t != "" {
+		parts = append(parts, t)
+	}
+	if t := b.GetContentText(); t != "" {
+		parts = append(parts, t)
+	}
+	if t := b.GetFooterText(); t != "" {
+		parts = append(parts, "— "+t)
+	}
+	for _, btn := range b.GetButtons() {
+		if bt := btn.GetButtonText(); bt != nil {
+			if d := bt.GetDisplayText(); d != "" {
+				parts = append(parts, "["+d+"]")
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// formatButtonRef renders a button as "[label] target" / "[label]" / "target"
+// depending on which fields are populated. Empty inputs collapse to "".
+func formatButtonRef(label, target string) string {
+	switch {
+	case label != "" && target != "":
+		return "[" + label + "] " + target
+	case label != "":
+		return "[" + label + "]"
+	case target != "":
+		return target
 	}
 	return ""
 }
