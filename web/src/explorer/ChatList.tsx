@@ -5,6 +5,7 @@ import { ChatAvatar } from './ChatAvatar'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { useDrafts } from '../hooks/useDrafts'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
+import { useChatLabels } from '../hooks/useChatLabels'
 import { WallpaperPicker } from './WallpaperPicker'
 
 // ChatList shows the time-ordered list of chats. Search is handled by the
@@ -38,6 +39,26 @@ export function ChatList({
   // replaces the last-message line. One poll per tick covers every visible
   // row (groups + DMs combined) — see /api/v2/typing on the bridge.
   const typing = useTypingSnapshot()
+  // WA Business labels → colored dots on each row. Read once here (hook can't
+  // run inside the row map) and resolve ids to {name,color} per row.
+  const { labels: chatLabels, assignments: labelAssignments } = useChatLabels()
+  const labelById = useMemo(
+    () => new Map(chatLabels.map((l) => [l.id, l] as const)),
+    [chatLabels],
+  )
+  // Filter the list to one label (WA Business "tap a label to see its chats").
+  const [labelFilter, setLabelFilter] = useState<string | null>(null)
+  // Only labels actually in use get a filter chip — no point offering a
+  // filter that would always be empty.
+  const usedLabelIds = useMemo(() => {
+    const s = new Set<string>()
+    for (const ids of Object.values(labelAssignments)) for (const id of ids) s.add(id)
+    return s
+  }, [labelAssignments])
+  // Clear a stale filter if its label was deleted out from under us.
+  useEffect(() => {
+    if (labelFilter && !chatLabels.some((l) => l.id === labelFilter)) setLabelFilter(null)
+  }, [labelFilter, chatLabels])
   const [menu, setMenu] = useState<{ jid: string; title: string; x: number; y: number } | null>(null)
   // When set, shows the circle-membership picker for this chat.
   const [picking, setPicking] = useState<{ jid: string; title: string } | null>(null)
@@ -108,15 +129,19 @@ export function ChatList({
   // Apply the active filter to normalRows. We deliberately don't touch
   // archivedRows — WA's archived view is its own world, always unfiltered.
   const filteredNormalRows = useMemo(() => {
-    if (filter === 'all') return normalRows
-    return normalRows.filter((r) => {
+    let rows = normalRows
+    if (labelFilter) {
+      rows = rows.filter((r) => (labelAssignments[r.chat.jid] || []).includes(labelFilter))
+    }
+    if (filter === 'all') return rows
+    return rows.filter((r) => {
       if (filter === 'unread') return (r.chat.unread_count || 0) > 0
       if (filter === 'groups') return isGroup(r.chat.jid)
       if (filter === 'mentions') return (r.chat.unread_mentions || 0) > 0
       if (filter === 'drafts') return drafts.has(r.chat.jid)
       return true
     })
-  }, [normalRows, filter, drafts])
+  }, [normalRows, filter, drafts, labelFilter, labelAssignments])
 
   const rows = view === 'archived' ? archivedRows : filteredNormalRows
 
@@ -169,6 +194,39 @@ export function ChatList({
               Drafts
             </FilterPill>
           )}
+          {/* Label filter chips — WA Business "tap a label to see its chats".
+              Only labels in use appear; tapping toggles the single-label
+              filter, tapping the active one clears it. */}
+          {chatLabels
+            .filter((l) => usedLabelIds.has(l.id))
+            .map((l) => {
+              const active = labelFilter === l.id
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => setLabelFilter(active ? null : l.id)}
+                  title={`Show chats labeled "${l.name}"`}
+                  className={
+                    'flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition ' +
+                    (active
+                      ? 'text-neutral-50'
+                      : 'bg-neutral-800/70 text-neutral-300 hover:bg-neutral-700/70')
+                  }
+                  style={
+                    active
+                      ? { backgroundColor: l.color + '33', boxShadow: `inset 0 0 0 1px ${l.color}` }
+                      : undefined
+                  }
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: l.color }}
+                    aria-hidden="true"
+                  />
+                  {l.name}
+                </button>
+              )
+            })}
           {/* Mark-all-read sits at the right edge of the filter row and
               only appears when there's something to clear, so the row
               doesn't carry a dangling action in calm times. */}
@@ -263,8 +321,23 @@ export function ChatList({
                 <span dir="auto" className="truncate text-sm font-medium">
                   {title}
                 </span>
-                <span className="shrink-0 text-[11px] text-neutral-500">
-                  {chatListTime(chat.last_message_at)}
+                <span className="flex shrink-0 items-center gap-1">
+                  {(labelAssignments[chat.jid] || []).map((lid) => {
+                    const l = labelById.get(lid)
+                    if (!l) return null
+                    return (
+                      <span
+                        key={lid}
+                        title={l.name}
+                        aria-label={`Label: ${l.name}`}
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: l.color }}
+                      />
+                    )
+                  })}
+                  <span className="text-[11px] text-neutral-500">
+                    {chatListTime(chat.last_message_at)}
+                  </span>
                 </span>
               </div>
               <div dir="auto" className="flex items-center gap-1.5 truncate text-xs text-neutral-500">
