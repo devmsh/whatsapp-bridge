@@ -5,7 +5,9 @@ import { TagChips, TagEditor } from './Tags'
 import { ChatAvatar } from './ChatAvatar'
 
 function contactName(c: Contact): string {
-  return c.name || c.push_name || c.business_name || '+' + (c.phone || jidUser(c.jid))
+  // Display priority matches WA mobile: a WA-verified business name and the
+  // plain business name both beat a self-set push name.
+  return c.name || c.verified_name || c.business_name || c.push_name || '+' + (c.phone || jidUser(c.jid))
 }
 
 // messageCount returns how many messages we have with this contact, checking the

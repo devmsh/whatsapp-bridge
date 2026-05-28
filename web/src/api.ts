@@ -322,6 +322,10 @@ export interface Contact {
   name: string
   push_name?: string
   business_name?: string
+  /** WA-verified business name (green-check). Same field as the one on the
+   *  ContactFull return — surfaced here too so the contact-list rendering can
+   *  prefer it ahead of business_name / push_name when picking a label. */
+  verified_name?: string
   is_business?: boolean
   // True when this contact's DM is in hidden_chats. The UI uses this to
   // trigger a per-chat fingerprint unlock when the user clicks a mention chip

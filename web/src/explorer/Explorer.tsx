@@ -242,7 +242,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         (c.lid && c.lid + '@lid' === jid),
     )
     if (contact?.is_hidden) {
-      const name = contact.name || contact.push_name || contact.business_name || jid
+      // Display priority matches WA mobile: a WA-verified business name and
+      // the plain business name both beat a self-set push name.
+      const name = contact.name || contact.verified_name || contact.business_name || contact.push_name || jid
       pendingOpenRef.current = jid
       setUnlockPrompt({ jid, name })
       return
