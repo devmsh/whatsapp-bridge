@@ -62,7 +62,7 @@ export function AddMembersModal({
       if (c.is_hidden) continue
       if (existingJIDs.has(c.jid)) continue
       if (c.lid && existingJIDs.has(c.lid)) continue
-      const name = c.name || c.business_name || c.push_name || ''
+      const name = c.name || c.verified_name || c.business_name || c.push_name || ''
       const phone = c.phone || ''
       if (
         needle &&
@@ -75,8 +75,8 @@ export function AddMembersModal({
     }
     // Same sort the NewChatModal uses — contacts ordered alphabetically.
     out.sort((a, b) =>
-      (a.name || a.business_name || a.phone || '').localeCompare(
-        b.name || b.business_name || b.phone || '',
+      (a.name || a.verified_name || a.business_name || a.phone || '').localeCompare(
+        b.name || b.verified_name || b.business_name || b.phone || '',
       ),
     )
     // Cap at 300 to keep the list snappy even with thousands of contacts.

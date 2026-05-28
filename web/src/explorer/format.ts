@@ -47,7 +47,7 @@ export function buildNameMap(contacts: Contact[], groups: Group[] = []): Map<str
     if (g.name) m.set(g.jid, g.name)
   }
   for (const c of contacts) {
-    const name = c.name || c.push_name || c.business_name || ''
+    const name = c.name || c.verified_name || c.business_name || c.push_name || ''
     if (!name) continue
     if (c.jid) m.set(c.jid, name)
     if (c.phone) m.set(c.phone + '@s.whatsapp.net', name)
@@ -77,7 +77,7 @@ export function buildMentionIndex(contacts: Contact[]): Map<string, MentionEntry
   const m = new Map<string, MentionEntry>()
   for (const c of contacts) {
     if (!c.jid || !c.jid.endsWith('@s.whatsapp.net')) continue
-    const name = c.name || c.push_name || c.business_name || ''
+    const name = c.name || c.verified_name || c.business_name || c.push_name || ''
     const phoneJID = c.jid // already phone-form
     const entry: MentionEntry = { jid: phoneJID, name, unknown: !name }
     if (c.lid) {
