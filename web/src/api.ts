@@ -1145,6 +1145,20 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // refreshContactProfile asks the bridge to re-fetch this contact's WA-side
+  // identity (verified business name, plain business name, push name, is_business)
+  // via GetUserInfo + GetBusinessProfile and upsert it locally. The bridge
+  // has a per-JID hourly cooldown so calling on every chat open is cheap.
+  // Returns null when the JID has no business identity (404).
+  refreshContactProfile: async (jid: string): Promise<Contact | null> => {
+    const res = await fetch(
+      `/api/v2/contacts/${encodeURIComponent(jid)}/refresh-profile`,
+      { method: 'POST' },
+    )
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`refresh-profile: ${res.status}`)
+    return res.json()
+  },
   // forward reposts the message at (fromChat, messageID) into a different
   // chat. Backend currently re-sends the text body with the WA "Forwarded"
   // badge (ContextInfo.IsForwarded=true). Call once per target chat for

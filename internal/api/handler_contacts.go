@@ -13,6 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"whatsapp-bridge-v2/internal/db"
+	"whatsapp-bridge-v2/internal/wa"
 )
 
 func (s *Server) handleContacts(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +113,8 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 	switch sub {
 	case "business":
 		s.handleContactBusiness(w, r, jid)
+	case "refresh-profile":
+		s.handleContactRefreshProfile(w, r, jid)
 	case "avatar":
 		s.handleContactAvatar(w, r, jid)
 	case "name":
@@ -132,6 +135,30 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonOK(w, contact)
 	}
+}
+
+// POST /api/v2/contacts/{jid}/refresh-profile — re-fetch this contact's
+// WA-side identity (verified business name, plain business name, push name,
+// is_business) via GetUserInfo + GetBusinessProfile + whatsmeow's local
+// contact store, upsert the result into the contacts table, and return the
+// refreshed row. The UI calls this on chat open for contacts we have no
+// name for, so 966xxxxxxxxxx-style raw numbers turn into their business
+// name without waiting for an unprompted appstate push.
+func (s *Server) handleContactRefreshProfile(w http.ResponseWriter, r *http.Request, jid string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	contact, err := wa.EnsureBusinessProfile(r.Context(), s.client.GetWhatsmeowClient(), s.store, jid)
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("refresh profile: %v", err))
+		return
+	}
+	if contact == nil {
+		jsonError(w, 404, "no business identity")
+		return
+	}
+	jsonOK(w, contact)
 }
 
 func (s *Server) handleContactBusiness(w http.ResponseWriter, r *http.Request, jid string) {

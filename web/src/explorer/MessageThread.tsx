@@ -222,6 +222,27 @@ export function MessageThread({
   // nothing fresh to show (privacy-hidden, stale, or not yet learned).
   const presence = useDmPresence(isContact ? jid : null)
   const presenceLine = presence ? formatPresence(presence) : ''
+  // Self-heal the contact's display name on chat open. The bridge does a
+  // GetUserInfo + GetBusinessProfile lookup (with a per-JID hourly cooldown,
+  // so this stays cheap to call every open) and upserts verified_name /
+  // business_name / is_business, so DMs from unknown businesses surface
+  // their actual name instead of a raw phone number. On success we kick the
+  // shared 'wa.chats-changed' event so Explorer reloads contacts + chats.
+  useEffect(() => {
+    if (!isContact) return
+    let cancelled = false
+    api
+      .refreshContactProfile(jid)
+      .then((c) => {
+        if (!cancelled && c) {
+          window.dispatchEvent(new CustomEvent('wa.chats-changed'))
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [jid, isContact])
   // For groups, poll the typing cache so we can render WA's
   // "X is typing…" / "X and Y are typing…" / "Several people are typing…"
   // header line. Resolved to display names via nameMap.
