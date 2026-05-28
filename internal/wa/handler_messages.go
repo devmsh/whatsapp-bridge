@@ -125,6 +125,19 @@ func handleMessage(c *Client, evt *events.Message) {
 			PushName: info.PushName,
 		})
 	}
+
+	// Self-heal business identities. When an inbound DM arrives from a
+	// phone-form JID that whatsmeow never sent us a contact event for (the
+	// typical WA Business template path from numbers you haven't saved), kick
+	// off a one-time GetUserInfo + GetBusinessProfile lookup in the background
+	// so the chat list can show the verified business name instead of a raw
+	// number. EnsureBusinessProfile keeps a per-JID hourly cooldown so a
+	// flurry of inbound templates doesn't fan out into a flurry of queries.
+	if !info.IsFromMe && !info.IsGroup && strings.HasSuffix(chatJID, "@s.whatsapp.net") {
+		go func(jid string) {
+			_, _ = EnsureBusinessProfile(context.Background(), c.WA, c.Store, jid)
+		}(chatJID)
+	}
 }
 
 func extractContent(msg *waE2E.Message) string {
