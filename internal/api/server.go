@@ -208,6 +208,9 @@ func (s *Server) registerRoutes() {
 	// Stats
 	s.mux.HandleFunc("/api/v2/stats/messages", s.handleStatsMessages)
 
+	// Working hours (auto-mute outside business hours)
+	s.mux.HandleFunc("/api/v2/working-hours", s.handleWorkingHours)
+
 	// Settings
 	s.mux.HandleFunc("/api/v2/settings/media", s.handleSettingsMedia)
 	s.mux.HandleFunc("/api/v2/settings/history", s.handleSettingsHistory)
