@@ -84,6 +84,9 @@ func main() {
 	// Start periodic sync (every 6 hours)
 	wa.StartPeriodicSync(client, 6*time.Hour)
 
+	// Start working-hours auto-mute scheduler (1-min reconcile)
+	wa.StartWorkingHoursScheduler(client, store)
+
 	// Start background entity profiling (purpose descriptions + 7-working-day refresh)
 	server.StartProfiler()
 
