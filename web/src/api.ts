@@ -769,6 +769,20 @@ export interface RecsResponse {
   hidden: Recommendation[]
 }
 
+// WorkingHoursConfig is the working-hours auto-mute feature configuration.
+// start/end are "HH:MM" 24-hour strings. working_days is a list of weekday
+// numbers (0=Sunday … 6=Saturday). chat_jids is the explicit opt-in list of
+// chats to auto-mute when outside working hours. feature_muted is read-only —
+// it lists JIDs the feature has muted itself (do NOT send it on PUT).
+export interface WorkingHoursConfig {
+  enabled: boolean
+  start: string
+  end: string
+  working_days: number[]
+  chat_jids: string[]
+  feature_muted: string[]
+}
+
 async function postJSON(path: string): Promise<void> {
   const res = await fetch(path, { method: 'POST' })
   if (!res.ok) {
@@ -827,6 +841,18 @@ export const api = {
     return res.json()
   },
   setMediaSettings: (p: MediaPolicy) => putJSON<MediaPolicy>('/api/v2/settings/media', p),
+  workingHours: async (): Promise<WorkingHoursConfig> => {
+    const res = await fetch('/api/v2/working-hours')
+    return res.json()
+  },
+  setWorkingHours: (cfg: WorkingHoursConfig) =>
+    putJSON<WorkingHoursConfig>('/api/v2/working-hours', {
+      enabled: cfg.enabled,
+      start: cfg.start,
+      end: cfg.end,
+      working_days: cfg.working_days,
+      chat_jids: cfg.chat_jids,
+    }),
   historySettings: async (): Promise<HistorySettings> => {
     const res = await fetch('/api/v2/settings/history')
     return res.json()
