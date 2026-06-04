@@ -36,6 +36,7 @@ import { HiddenBadge } from './HiddenBadge'
 import { ChatUnlockModal } from './ChatUnlockModal'
 import { StarredPanel } from './StarredPanel'
 import { QuickRepliesPanel } from './QuickRepliesPanel'
+import { WorkingHours } from './WorkingHours'
 import { CallsPanel } from './CallsPanel'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
@@ -84,6 +85,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
   const [showQuickReplies, setShowQuickReplies] = useState(false)
+  const [showWorkingHours, setShowWorkingHours] = useState(false)
   // Digit identifiers of the current user — used to color "@you" mention
   // chips in emerald so a ping in a busy group is obvious. WhatsApp's wire
   // format sends LID digits as the mention identifier; we keep the phone
@@ -609,6 +611,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         />
       )}
       {showQuickReplies && <QuickRepliesPanel onClose={() => setShowQuickReplies(false)} />}
+      {showWorkingHours && <WorkingHours onClose={() => setShowWorkingHours(false)} />}
 
       <aside
         className={
@@ -725,6 +728,16 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
                     </svg>
                   ),
                   onClick: () => setShowQuickReplies(true),
+                },
+                {
+                  label: 'Working hours',
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  ),
+                  onClick: () => setShowWorkingHours(true),
                 },
                 { divider: true },
                 {
