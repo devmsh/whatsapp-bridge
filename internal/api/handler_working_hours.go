@@ -60,38 +60,24 @@ func (s *Server) handleWorkingHours(w http.ResponseWriter, r *http.Request) {
 			oldFeatureMutedSet[jid] = true
 		}
 
-		// Compute removed = (old.ChatJIDs ∩ old.FeatureMuted) − new ChatJIDs.
-		var removed []string
+		// Compute the deduplicated set of JIDs to release:
+		//   – chats removed from selection that were feature-muted, AND
+		//   – all feature-muted chats when disabling.
+		// Merging both into one set avoids two sequential ReleaseMutes calls.
+		releaseSet := make(map[string]bool)
 		for _, jid := range old.ChatJIDs {
 			if oldFeatureMutedSet[jid] && !newChatSet[jid] {
-				removed = append(removed, jid)
+				releaseSet[jid] = true
 			}
 		}
-
-		// Release mutes for chats removed from ChatJIDs.
-		if len(removed) > 0 {
-			wa.ReleaseMutes(s.client, s.store, removed)
-		}
-
-		// If disabling, release all feature-muted chats.
 		if !req.Enabled {
-			wa.ReleaseMutes(s.client, s.store, old.FeatureMuted)
-		}
-
-		// Reload old config after potential ReleaseMutes mutations.
-		old = wa.LoadWorkingHoursConfig(s.store)
-
-		// Build new FeatureMuted: old.FeatureMuted trimmed to chats still in
-		// new ChatJIDs and not already released.
-		newFeatureMutedSet := make(map[string]bool)
-		for _, jid := range old.FeatureMuted {
-			if newChatSet[jid] {
-				newFeatureMutedSet[jid] = true
+			for _, jid := range old.FeatureMuted {
+				releaseSet[jid] = true
 			}
 		}
-		newFeatureMuted := make([]string, 0, len(newFeatureMutedSet))
-		for jid := range newFeatureMutedSet {
-			newFeatureMuted = append(newFeatureMuted, jid)
+		jidsToRelease := make([]string, 0, len(releaseSet))
+		for jid := range releaseSet {
+			jidsToRelease = append(jidsToRelease, jid)
 		}
 
 		newChatJIDs := req.ChatJIDs
@@ -104,16 +90,19 @@ func (s *Server) handleWorkingHours(w http.ResponseWriter, r *http.Request) {
 		}
 
 		newCfg := wa.WorkingHoursConfig{
-			Enabled:      req.Enabled,
-			Start:        req.Start,
-			End:          req.End,
-			WorkingDays:  newWorkingDays,
-			ChatJIDs:     newChatJIDs,
-			FeatureMuted: newFeatureMuted,
+			Enabled:     req.Enabled,
+			Start:       req.Start,
+			End:         req.End,
+			WorkingDays: newWorkingDays,
+			ChatJIDs:    newChatJIDs,
 		}
 
-		wa.SaveWorkingHoursConfig(s.store, newCfg)
-		wa.ReconcileNow(s.client, s.store)
+		// ApplyWorkingHoursUpdate performs release → save → reconcile atomically
+		// under workingHoursMu, preventing any background Reconcile race.
+		if err := wa.ApplyWorkingHoursUpdate(s.client, s.store, newCfg, jidsToRelease); err != nil {
+			jsonError(w, 500, "failed to save config")
+			return
+		}
 
 		jsonOK(w, wa.LoadWorkingHoursConfig(s.store))
 

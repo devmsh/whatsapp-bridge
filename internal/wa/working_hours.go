@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -189,12 +190,24 @@ func ReconcileNow(client *Client, store *db.Store) {
 
 // ReleaseMutes unmutes the given JIDs unconditionally, removes them from
 // FeatureMuted, and persists the updated config.
+// If the client is offline, the loop body is skipped and feature_muted is left
+// intact so the next Reconcile tick can retry once reconnected.
+// If jids is empty, it returns immediately without touching the DB.
 func ReleaseMutes(client *Client, store *db.Store, jids []string) {
+	if len(jids) == 0 {
+		return
+	}
+
 	workingHoursMu.Lock()
 	defer workingHoursMu.Unlock()
 
+	if !client.IsConnected() {
+		// Leave feature_muted intact; Reconcile will apply the release when back online.
+		return
+	}
+
 	cfg := LoadWorkingHoursConfig(store)
-	wa := client.GetWhatsmeowClient()
+	waClient := client.GetWhatsmeowClient()
 
 	featureMutedSet := make(map[string]bool, len(cfg.FeatureMuted))
 	for _, jid := range cfg.FeatureMuted {
@@ -206,13 +219,98 @@ func ReleaseMutes(client *Client, store *db.Store, jids []string) {
 		if err != nil {
 			continue
 		}
-		wa.SendAppState(context.Background(), appstate.BuildMute(chatJID, false, 0))
+		waClient.SendAppState(context.Background(), appstate.BuildMute(chatJID, false, 0))
 		store.SetChatMuted(jidStr, false, 0)
 		delete(featureMutedSet, jidStr)
 	}
 
 	cfg.FeatureMuted = setToSlice(featureMutedSet)
 	SaveWorkingHoursConfig(store, cfg)
+}
+
+// ApplyWorkingHoursUpdate atomically applies a new working-hours config received
+// from the API handler. It performs the full release → save → reconcile sequence
+// under workingHoursMu so no background Reconcile tick can race in the middle.
+//
+// jidsToRelease is the deduplicated set of JIDs that need to be unmuted before
+// saving (chats removed from selection, plus all feature-muted chats if disabling).
+// If offline, release is skipped and those JIDs remain in feature_muted so the
+// next Reconcile can retry.
+func ApplyWorkingHoursUpdate(client *Client, store *db.Store, newCfg WorkingHoursConfig, jidsToRelease []string) error {
+	workingHoursMu.Lock()
+	defer workingHoursMu.Unlock()
+
+	// Build the current feature-muted set from the freshly-loaded live config so
+	// we don't clobber concurrent changes.
+	live := LoadWorkingHoursConfig(store)
+	featureMutedSet := make(map[string]bool, len(live.FeatureMuted))
+	for _, jid := range live.FeatureMuted {
+		featureMutedSet[jid] = true
+	}
+
+	if len(jidsToRelease) > 0 && client.IsConnected() {
+		waClient := client.GetWhatsmeowClient()
+		for _, jidStr := range jidsToRelease {
+			chatJID, err := types.ParseJID(jidStr)
+			if err != nil {
+				continue
+			}
+			waClient.SendAppState(context.Background(), appstate.BuildMute(chatJID, false, 0))
+			store.SetChatMuted(jidStr, false, 0)
+			delete(featureMutedSet, jidStr)
+		}
+	}
+	// If offline, leave featureMutedSet unchanged; the JIDs stay in feature_muted
+	// so the next Reconcile tick applies the release once reconnected.
+
+	// Trim feature_muted to only chats still in the new selection.
+	newChatSet := make(map[string]bool, len(newCfg.ChatJIDs))
+	for _, jid := range newCfg.ChatJIDs {
+		newChatSet[jid] = true
+	}
+	trimmedSet := make(map[string]bool)
+	for jid := range featureMutedSet {
+		if newChatSet[jid] {
+			trimmedSet[jid] = true
+		}
+	}
+	newCfg.FeatureMuted = setToSlice(trimmedSet)
+
+	if err := SaveWorkingHoursConfig(store, newCfg); err != nil {
+		return err
+	}
+
+	// Run reconcile inline (still under lock) to immediately apply the new state.
+	if newCfg.Enabled && client.IsConnected() {
+		now := time.Now()
+		desired := DesiredMute(now, newCfg)
+		waClient := client.GetWhatsmeowClient()
+		changed := false
+		for _, jidStr := range newCfg.ChatJIDs {
+			chatJID, err := types.ParseJID(jidStr)
+			if err != nil {
+				continue
+			}
+			inSet := trimmedSet[jidStr]
+			if desired && !inSet {
+				waClient.SendAppState(context.Background(), appstate.BuildMute(chatJID, true, -1))
+				store.SetChatMuted(jidStr, true, windowEndUnix(now, newCfg))
+				trimmedSet[jidStr] = true
+				changed = true
+			} else if !desired && inSet {
+				waClient.SendAppState(context.Background(), appstate.BuildMute(chatJID, false, 0))
+				store.SetChatMuted(jidStr, false, 0)
+				delete(trimmedSet, jidStr)
+				changed = true
+			}
+		}
+		if changed {
+			newCfg.FeatureMuted = setToSlice(trimmedSet)
+			SaveWorkingHoursConfig(store, newCfg)
+		}
+	}
+
+	return nil
 }
 
 // StartWorkingHoursScheduler starts a background goroutine that reconciles mute
@@ -234,5 +332,6 @@ func setToSlice(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }

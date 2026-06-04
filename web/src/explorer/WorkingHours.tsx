@@ -117,6 +117,9 @@ export function WorkingHours({ onClose }: { onClose: () => void }) {
       c.jid.toLowerCase().includes(filterLower),
   )
 
+  // O(1) per-row lookup instead of O(S) includes() inside the map.
+  const selectedSet = new Set(cfg?.chat_jids ?? [])
+
   return (
     <div
       role="dialog"
@@ -257,7 +260,7 @@ export function WorkingHours({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
                 {visibleChats.map((c) => {
-                  const selected = cfg.chat_jids.includes(c.jid)
+                  const selected = selectedSet.has(c.jid)
                   return (
                     <label
                       key={c.jid}
