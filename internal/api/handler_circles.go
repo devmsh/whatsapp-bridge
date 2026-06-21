@@ -190,7 +190,8 @@ func (s *Server) handleCircleForMember(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, circles)
 }
 
-// handleCircleByID handles /api/v2/circles/{id} and sub-paths {id}/members, {id}/chats.
+// handleCircleByID handles /api/v2/circles/{id} and sub-paths {id}/members,
+// {id}/chats, {id}/contacts, {id}/suggestions, {id}/extract, {id}/export.
 func (s *Server) handleCircleByID(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/circles/")
 	parts := strings.SplitN(path, "/", 2)
@@ -215,6 +216,8 @@ func (s *Server) handleCircleByID(w http.ResponseWriter, r *http.Request) {
 		s.handleCircleContacts(w, r, id)
 	case "extract":
 		s.handleCircleExtract(w, r, id)
+	case "export":
+		s.handleCircleExport(w, r, id)
 	default:
 		s.handleCircleEntity(w, r, id)
 	}

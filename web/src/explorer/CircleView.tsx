@@ -70,6 +70,7 @@ export function CircleView({
   const [contactsEnriched, setContactsEnriched] = useState<CircleContact[]>([])
   const [expand, setExpand] = useState({ circles: false, groups: false, contacts: false })
   const [extracting, setExtracting] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [liveRunId, setLiveRunId] = useState<string | null>(null)
 
@@ -308,6 +309,26 @@ export function CircleView({
           title="Tasks in this circle"
         >
           ✓ Tasks
+        </button>
+        <button
+          onClick={async () => {
+            if (exporting) return
+            setExporting(true)
+            try {
+              const date = new Date().toISOString().slice(0, 10)
+              const safe = (circle.name || 'circle').replace(/[\\/:*?"<>|]/g, '_')
+              await api.exportCircle(circleId, `circle-${safe}-${date}.zip`)
+            } catch (e) {
+              alert('Export failed: ' + (e as Error).message)
+            } finally {
+              setExporting(false)
+            }
+          }}
+          disabled={exporting}
+          className="shrink-0 rounded-lg border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-60"
+          title="Download all chats in this circle as a .zip of text transcripts"
+        >
+          {exporting ? 'Preparing…' : '⬇ Export'}
         </button>
         <button
           onClick={() => setShowSettings(true)}

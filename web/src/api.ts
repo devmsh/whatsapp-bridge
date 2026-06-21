@@ -1246,6 +1246,21 @@ export const api = {
     const res = await fetch(`/api/v2/circles/${id}/contacts`)
     return res.json()
   },
+  // exportCircle downloads a .zip of every chat in the circle as plain-text
+  // transcripts. Fetched as a blob so the caller can show a progress state.
+  exportCircle: async (id: number, filename: string): Promise<void> => {
+    const res = await fetch(`/api/v2/circles/${id}/export`)
+    if (!res.ok) throw new Error(`Export failed (${res.status})`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
   tags: async (): Promise<Tag[]> => {
     const res = await fetch('/api/v2/tags')
     return res.json()
