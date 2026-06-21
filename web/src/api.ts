@@ -696,6 +696,9 @@ export interface HideChatResult extends HideChatPreview {
 }
 
 export interface MediaUnderstandingStatus {
+  // True when the feature is parked behind the rate-limit guard (server-side
+  // kill switch). When set, the per-kind toggles are forced OFF and disabled.
+  disabled?: boolean
   audio_enabled: boolean
   image_enabled: boolean
   whisper_detected: boolean

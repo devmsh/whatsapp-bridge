@@ -202,12 +202,14 @@ function MediaUnderstandingPanel() {
     return () => window.clearInterval(t)
   }, [])
 
+  const disabled = !!st?.disabled
+
   async function toggleAudio() {
-    if (!st) return
+    if (!st || disabled) return
     setSt(await api.mediaUnderstandingSet(!st.audio_enabled, undefined))
   }
   async function toggleImage() {
-    if (!st) return
+    if (!st || disabled) return
     setSt(await api.mediaUnderstandingSet(undefined, !st.image_enabled))
   }
 
@@ -220,6 +222,12 @@ function MediaUnderstandingPanel() {
         Transcribe voice notes locally with whisper, and describe images with vision. Enriches what
         the extraction agent sees in noisy chats.
       </p>
+      {disabled && (
+        <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-300">
+          Disabled to protect the API rate limit. The voice-transcript refine pass and image
+          description both call the AI, so the feature is paused for now.
+        </div>
+      )}
 
       <div className="mt-3 flex items-center justify-between">
         <div>
@@ -240,7 +248,7 @@ function MediaUnderstandingPanel() {
         </div>
         <button
           onClick={toggleAudio}
-          disabled={!st.whisper_detected}
+          disabled={disabled || !st.whisper_detected}
           className={
             'rounded-full px-2.5 py-0.5 text-[11px] font-medium disabled:opacity-40 ' +
             (st.audio_enabled
@@ -262,8 +270,9 @@ function MediaUnderstandingPanel() {
         </div>
         <button
           onClick={toggleImage}
+          disabled={disabled}
           className={
-            'rounded-full px-2.5 py-0.5 text-[11px] font-medium ' +
+            'rounded-full px-2.5 py-0.5 text-[11px] font-medium disabled:opacity-40 ' +
             (st.image_enabled
               ? 'bg-emerald-500 text-neutral-950'
               : 'bg-neutral-700 text-neutral-300')

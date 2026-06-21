@@ -45,6 +45,20 @@ const (
 	imageEnabledKey = "media_image_enabled"
 )
 
+// mediaUnderstandingEnabled is a hard kill switch for the AI media-understanding
+// workers: voice-note transcript refinement (Claude) and image description
+// (Claude vision). It is OFF on purpose.
+//
+// These run per message and were draining the Anthropic API rate limit. Whisper
+// transcription itself is local, but the refine pass and the image vision call
+// both hit the API — so the whole feature is parked here until a rate-limit-
+// friendly design (batching / throttling) lands. While this is false:
+//   - Start() does not launch the audio/image workers or the refine backfill.
+//   - enabledFor() always reports OFF, so the per-kind UI toggles cannot turn
+//     anything on and the status panel shows the feature as disabled.
+// Flip to true to restore the previous behaviour.
+const mediaUnderstandingEnabled = false
+
 func newMediaManager(s *Server) *MediaUnderstandingManager {
 	return &MediaUnderstandingManager{s: s, running: map[string]bool{}}
 }
@@ -52,6 +66,10 @@ func newMediaManager(s *Server) *MediaUnderstandingManager {
 // Start launches both kinds of workers. They idle unless enabled.
 func (m *MediaUnderstandingManager) Start() {
 	m.audioBin = detectWhisperBinary()
+	if !mediaUnderstandingEnabled {
+		fmt.Println("media-understanding: disabled (rate-limit guard) — voice + image AI workers not started")
+		return
+	}
 	go m.workerLoop("audio", 2)  // 2 parallel transcribes
 	go m.workerLoop("image", 3)  // 3 parallel image descriptions
 	go m.refineBackfillLoop()    // re-refine old raw transcripts in the background
@@ -112,6 +130,9 @@ func (m *MediaUnderstandingManager) processRefineBatch(batch []db.RefineTarget) 
 }
 
 func (m *MediaUnderstandingManager) enabledFor(kind string) bool {
+	if !mediaUnderstandingEnabled {
+		return false
+	}
 	key := audioEnabledKey
 	if kind == "image" {
 		key = imageEnabledKey
@@ -121,6 +142,9 @@ func (m *MediaUnderstandingManager) enabledFor(kind string) bool {
 }
 
 func (m *MediaUnderstandingManager) setEnabled(kind string, enabled bool) {
+	if !mediaUnderstandingEnabled {
+		return // feature parked behind the rate-limit guard; ignore toggle writes
+	}
 	key := audioEnabledKey
 	if kind == "image" {
 		key = imageEnabledKey
@@ -523,6 +547,7 @@ func (m *MediaUnderstandingManager) describeImage(path string) (string, error) {
 // ── HTTP handler ────────────────────────────────────────────────────
 
 type mediaStatusBody struct {
+	Disabled        bool         `json:"disabled"` // feature parked behind the rate-limit guard
 	AudioEnabled    bool         `json:"audio_enabled"`
 	ImageEnabled    bool         `json:"image_enabled"`
 	WhisperDetected bool         `json:"whisper_detected"`
@@ -543,6 +568,7 @@ func (s *Server) handleMediaUnderstanding(w http.ResponseWriter, r *http.Request
 	switch r.Method {
 	case http.MethodGet:
 		jsonOK(w, mediaStatusBody{
+			Disabled:        !mediaUnderstandingEnabled,
 			AudioEnabled:    m.enabledFor("audio"),
 			ImageEnabled:    m.enabledFor("image"),
 			WhisperDetected: m.audioAvailable(),
@@ -562,6 +588,7 @@ func (s *Server) handleMediaUnderstanding(w http.ResponseWriter, r *http.Request
 			m.setEnabled("image", *req.ImageEnabled)
 		}
 		jsonOK(w, mediaStatusBody{
+			Disabled:        !mediaUnderstandingEnabled,
 			AudioEnabled:    m.enabledFor("audio"),
 			ImageEnabled:    m.enabledFor("image"),
 			WhisperDetected: m.audioAvailable(),
