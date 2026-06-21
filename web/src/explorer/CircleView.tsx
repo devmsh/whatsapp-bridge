@@ -12,7 +12,7 @@ import {
   type MemberType,
   type Tag,
 } from '../api'
-import { initial, jidUser, previewText } from './format'
+import { chatListTime, initial, jidUser, previewText } from './format'
 import { CIRCLE_COLORS, pickColor } from './colors'
 import { CircleSettings } from './CircleSettings'
 import { TagChips, TagEditor } from './Tags'
@@ -21,7 +21,7 @@ import { ExtractionsModal } from './Extractions'
 
 // Kind is the add-members picker mode; "all" searches groups + contacts together.
 type Kind = 'all' | MemberType
-type Item = { ref: string; label: string; sub: string; type: MemberType }
+type Item = { ref: string; label: string; sub: string; type: MemberType; at: number }
 
 // CircleView shows one circle's members (nested circles, groups, contacts) with
 // management: rename, delete, add and remove members.
@@ -573,6 +573,7 @@ export function CircleView({
           circleId={circleId}
           existing={members}
           circles={circles}
+          chats={chats}
           contacts={contacts}
           groups={groups}
           nameMap={nameMap}
@@ -678,6 +679,7 @@ function AddMembers({
   circleId,
   existing,
   circles,
+  chats,
   contacts,
   groups,
   nameMap,
@@ -687,6 +689,7 @@ function AddMembers({
   circleId: number
   existing: CircleMember[]
   circles: Circle[]
+  chats: Chat[]
   contacts: Contact[]
   groups: Group[]
   nameMap: Map<string, string>
@@ -703,21 +706,35 @@ function AddMembers({
     return s
   }, [existing])
 
+  // lastAt maps a jid to its last message timestamp, so rows surface most-recent first.
+  const lastAt = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const ch of chats) m.set(ch.jid, ch.last_message_at || 0)
+    return m
+  }, [chats])
+
   const items = useMemo(() => {
     const needle = q.trim().toLowerCase()
     const groupItems = (): Item[] =>
-      groups.map((g) => ({ ref: g.jid, label: g.name || g.jid, sub: 'Group', type: 'group' }))
+      groups.map((g) => ({
+        ref: g.jid,
+        label: g.name || g.jid,
+        sub: 'Group',
+        type: 'group',
+        at: lastAt.get(g.jid) || 0,
+      }))
     const contactItems = (): Item[] =>
       contacts.map((c) => ({
         ref: c.jid,
         label: nameMap.get(c.jid) || c.name || c.push_name || '+' + (c.phone || jidUser(c.jid)),
         sub: '+' + (c.phone || jidUser(c.jid)),
         type: 'contact',
+        at: lastAt.get(c.jid) || 0,
       }))
     const circleItems = (): Item[] =>
       circles
         .filter((c) => c.id !== circleId)
-        .map((c) => ({ ref: String(c.id), label: c.name, sub: 'Circle', type: 'circle' }))
+        .map((c) => ({ ref: String(c.id), label: c.name, sub: 'Circle', type: 'circle', at: 0 }))
 
     let list: Item[] = []
     if (kind === 'all') list = [...groupItems(), ...contactItems()]
@@ -731,8 +748,9 @@ function AddMembers({
         (it) =>
           !needle || it.label.toLowerCase().includes(needle) || it.ref.toLowerCase().includes(needle),
       )
+      .sort((a, b) => b.at - a.at)
       .slice(0, 100)
-  }, [kind, q, groups, contacts, circles, circleId, has, nameMap])
+  }, [kind, q, groups, contacts, circles, circleId, has, nameMap, lastAt])
 
   async function add(it: Item) {
     const key = it.type + ':' + it.ref
@@ -818,6 +836,9 @@ function AddMembers({
                 </span>
                 <span className="block truncate text-xs text-neutral-500">{it.sub}</span>
               </span>
+              {it.at > 0 && (
+                <span className="shrink-0 text-xs text-neutral-500">{chatListTime(it.at)}</span>
+              )}
               <span className="shrink-0 text-emerald-400">+</span>
             </button>
           ))}
