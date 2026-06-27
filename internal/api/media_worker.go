@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -27,11 +26,11 @@ func snippet(s string, n int) string {
 	}
 	return s
 }
-func jsonUnmarshalSafe(b []byte, v any) { _ = json.Unmarshal(b, v) }
 
 // MediaUnderstandingManager runs background workers that transcribe voice notes
-// (whisper-cli) and describe images (Claude vision via a sidecar). Both kinds
-// are gated behind toggles so they don't run by default.
+// (whisper-cli, local) and describe images (Codex vision). Voice-note
+// transcripts are also cleaned up by a Codex refine pass. Each kind is gated
+// behind a per-kind toggle.
 type MediaUnderstandingManager struct {
 	s *Server
 
@@ -45,19 +44,15 @@ const (
 	imageEnabledKey = "media_image_enabled"
 )
 
-// mediaUnderstandingEnabled is a hard kill switch for the AI media-understanding
-// workers: voice-note transcript refinement (Claude) and image description
-// (Claude vision). It is OFF on purpose.
+// mediaUnderstandingEnabled is the master switch for the AI media-understanding
+// workers: voice-note transcription (local whisper) + transcript refinement
+// (Codex) and image description (Codex vision).
 //
-// These run per message and were draining the Anthropic API rate limit. Whisper
-// transcription itself is local, but the refine pass and the image vision call
-// both hit the API — so the whole feature is parked here until a rate-limit-
-// friendly design (batching / throttling) lands. While this is false:
-//   - Start() does not launch the audio/image workers or the refine backfill.
-//   - enabledFor() always reports OFF, so the per-kind UI toggles cannot turn
-//     anything on and the status panel shows the feature as disabled.
-// Flip to true to restore the previous behaviour.
-const mediaUnderstandingEnabled = false
+// It was OFF while these ran on the Anthropic API and drained its rate limit.
+// The AI calls now go through the local Codex CLI on the ChatGPT subscription
+// (no API billing), and concurrency is capped in codexExec, so the feature is
+// back ON. Per-kind UI toggles still apply on top of this (see enabledFor).
+const mediaUnderstandingEnabled = true
 
 func newMediaManager(s *Server) *MediaUnderstandingManager {
 	return &MediaUnderstandingManager{s: s, running: map[string]bool{}}
@@ -70,8 +65,8 @@ func (m *MediaUnderstandingManager) Start() {
 		fmt.Println("media-understanding: disabled (rate-limit guard) — voice + image AI workers not started")
 		return
 	}
-	go m.workerLoop("audio", 2)  // 2 parallel transcribes
-	go m.workerLoop("image", 3)  // 3 parallel image descriptions
+	go m.workerLoop("audio", 2)  // 2 parallel whisper transcribes (local CPU)
+	go m.workerLoop("image", 2)  // 2 parallel Codex image descriptions
 	go m.refineBackfillLoop()    // re-refine old raw transcripts in the background
 }
 
@@ -81,9 +76,10 @@ func (m *MediaUnderstandingManager) Start() {
 // were transcribed before the refinement layer existed.
 //
 // Up to refineBackfillParallel refinements run at once. Each refinement is a
-// single Claude call (~5-15s). At 3 in parallel a 120-voice-note backlog
-// finishes in under 10 minutes.
-const refineBackfillParallel = 3
+// single Codex call. The real cap on concurrent Codex work is enforced in
+// codexExec (CODEX_MAX_CONCURRENT, default 2) across image + refine combined,
+// so the history backfill stays gentle on the ChatGPT quota.
+const refineBackfillParallel = 2
 
 func (m *MediaUnderstandingManager) refineBackfillLoop() {
 	time.Sleep(60 * time.Second) // let initial transcription work settle
@@ -138,7 +134,8 @@ func (m *MediaUnderstandingManager) enabledFor(kind string) bool {
 		key = imageEnabledKey
 	}
 	v, _, _ := m.s.store.GetSyncState(key)
-	return v == "1"
+	// Default ON when never toggled: only an explicit "0" from the UI disables.
+	return v != "0"
 }
 
 func (m *MediaUnderstandingManager) setEnabled(kind string, enabled bool) {
@@ -405,37 +402,55 @@ func findWhisperModel() string {
 	return ""
 }
 
-// refineTranscript runs the refine-transcript sidecar on a raw whisper
-// transcript using the last 10 messages of the chat as context. Returns the
-// refined text — or the raw text if the refiner can't be reached or returns
-// nothing (so a refiner failure NEVER costs us the transcript).
+// refineSystemInstructions is the cleaning brief for raw whisper output. Kept
+// in sync with the previous Claude sidecar, with a "no tools" guard for Codex.
+const refineSystemInstructions = `You are a transcript cleaner for Arabic WhatsApp voice notes.
+
+INPUT
+- "RAW TRANSCRIPT": the verbatim output of whisper on one voice note. It is mostly correct but has zero punctuation, may have a few misheard words on technical terms, and sometimes transliterates English words into Arabic letters (e.g. writes "إم سي بي" or "هب سبوت" instead of "MCP" or "HubSpot").
+- "CONTEXT": the most recent messages in the same chat (oldest→newest). Use this ONLY to disambiguate names, product names, tech terms, and topics that appear in the voice note. Do not invent content that is not in the raw transcript.
+
+YOUR OUTPUT (the refined transcript)
+1. Keep the speaker's words faithfully. Do NOT paraphrase, summarize, or add anything they did not say. Only fix obvious mishearings using the chat context.
+2. Add proper punctuation where the speaker paused or finished a thought ("،"/"." for clauses, "؟"/"?" for questions, "!" for exclamations). Break into normal sentences and short paragraphs.
+3. Restore English spelling for any English word, brand, product, or acronym the speaker said in English — even if whisper transliterated it to Arabic letters (e.g. "إم سي بي" → "MCP", "هب سبوت" → "HubSpot"). Match what the speaker actually said; do not translate Arabic words to English.
+4. Keep Arabic words in Arabic and English words in English. The output is mixed AR/EN, mirroring what was spoken.
+5. If the speaker naturally enumerates (lists items, counts off steps), format that part as a markdown list. Otherwise keep prose.
+6. No headings, no end summary, no speaker labels, no quotes or code fences, and do not include the original raw text.
+
+If you cannot improve the raw transcript (already clean, or too short), output it unchanged.
+Do not run any commands or use any tools. Output ONLY the cleaned transcript text.`
+
+// buildRefinePrompt assembles the single Codex prompt from the cleaning brief,
+// the optional recent-chat context, and the raw transcript.
+func buildRefinePrompt(rawText string, recent []string) string {
+	var b strings.Builder
+	b.WriteString(refineSystemInstructions)
+	b.WriteString("\n\n")
+	if len(recent) > 0 {
+		b.WriteString("CONTEXT (recent chat, oldest→newest):\n")
+		for _, l := range recent {
+			b.WriteString("  " + l + "\n")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("RAW TRANSCRIPT:\n\"\"\"\n")
+	b.WriteString(rawText)
+	b.WriteString("\n\"\"\"\n\nReturn the cleaned transcript text only.")
+	return b.String()
+}
+
+// refineTranscript runs the Codex refiner on a raw whisper transcript using the
+// last 10 messages of the chat as context. Returns the refined text — or the
+// raw text if Codex can't be reached or returns nothing (so a refiner failure
+// NEVER costs us the transcript).
 func (m *MediaUnderstandingManager) refineTranscript(chatJID, msgID, rawText string) string {
 	ctx := m.recentChatLinesBefore(chatJID, msgID, 10)
-	input := map[string]any{
-		"raw":             rawText,
-		"recent_messages": ctx,
-	}
-	in, err := json.Marshal(input)
-	if err != nil {
+	out, err := codexExec(2*time.Minute, buildRefinePrompt(rawText, ctx))
+	if err != nil || strings.TrimSpace(out) == "" {
 		return rawText
 	}
-	out, runErr := m.s.runAgentInput(2*time.Minute, string(in), "refine-transcript.mjs")
-	if runErr != nil {
-		return rawText
-	}
-	line := lastJSONLine(out)
-	if line == nil {
-		return rawText
-	}
-	var res struct {
-		OK      bool   `json:"ok"`
-		Refined string `json:"refined"`
-	}
-	json.Unmarshal(line, &res)
-	if !res.OK || strings.TrimSpace(res.Refined) == "" {
-		return rawText
-	}
-	return res.Refined
+	return out
 }
 
 // recentChatLinesBefore returns up to n recent messages in chatJID with
@@ -524,24 +539,28 @@ func (m *MediaUnderstandingManager) recentChatLinesBefore(chatJID, msgID string,
 	return lines
 }
 
-// describeImage runs the image sidecar (Claude vision) on a single file.
+// imageDescribePrompt instructs Codex to describe one WhatsApp image. Mirrors
+// the previous Claude vision sidecar, with an explicit "no tools" guard since
+// Codex is otherwise an agentic coding CLI.
+const imageDescribePrompt = `Describe this WhatsApp image in 1-3 short sentences. Cover:
+- What kind of image it is (screenshot, photo, document, meme, etc.)
+- The main subject or any visible text (OCR the readable text)
+- Any detail useful to a task-tracking agent (e.g. a receipt for $X, a chart of Y, a UI screenshot of Z)
+Be concrete; do not start with "this image shows". No greetings, no markdown.
+If the image contains Arabic text, transcribe it in Arabic; keep English in English; mixed AR/EN is fine.
+If the image is uninformative (blank, decorative), output exactly: Uninformative.
+Do not run any commands or use any tools. Output only the description text.`
+
+// describeImage runs Codex vision on a single image file.
 func (m *MediaUnderstandingManager) describeImage(path string) (string, error) {
-	out, err := m.s.runAgentInput(2*time.Minute, "", "describe-image.mjs", path)
+	out, err := codexExec(2*time.Minute, imageDescribePrompt, path)
 	if err != nil {
-		return "", fmt.Errorf("image sidecar failed: %v", err)
+		return "", fmt.Errorf("codex vision failed: %v", err)
 	}
-	if line := lastJSONLine(out); line != nil {
-		var res struct {
-			OK          bool   `json:"ok"`
-			Description string `json:"description"`
-		}
-		jsonUnmarshalSafe(line, &res)
-		if res.OK {
-			return res.Description, nil
-		}
-		return "", fmt.Errorf("vision: %s", res.Description)
+	if strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("codex vision: empty result")
 	}
-	return "", fmt.Errorf("no result")
+	return out, nil
 }
 
 // ── HTTP handler ────────────────────────────────────────────────────
