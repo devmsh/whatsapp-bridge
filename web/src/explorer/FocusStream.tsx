@@ -123,6 +123,12 @@ export function FocusStream({
           )
           setRefreshing(r.refreshing)
           setDigestLoading(false)
+          // Reconcile the optimistic "just replied" hide-list against fresh
+          // server truth on every poll, instead of letting it persist for
+          // the rest of the session: once real digest data has arrived, it
+          // is more honest than our guess, even if the same jid reappears
+          // later as a genuinely new awaiting-reply instance.
+          setJustReplied(new Set())
           if (r.refreshing) {
             timer = setTimeout(() => {
               if (cancelled) return
@@ -153,6 +159,16 @@ export function FocusStream({
     setQuietExpanded(false)
   }, [circleId])
 
+  // Reconcile the optimistic "just marked done" hide-list against fresh
+  // task data whenever the parent's allTasks prop updates (e.g. after
+  // onTasksChanged() triggers a refetch), instead of letting a task stay
+  // hidden until the user leaves and re-enters the circle — if a task was
+  // reopened elsewhere in the app, it should reappear here too.
+  useEffect(() => {
+    setJustDoneTasks(new Set())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allTasks])
+
   const { needsYou, moving, quiet, orphanTasks } = useMemo(() => {
     if (!jids) return { needsYou: [] as Row[], moving: [] as Row[], quiet: [] as Row[], orphanTasks: [] as Task[] }
 
@@ -168,20 +184,23 @@ export function FocusStream({
     const awaitingByJid = new Map((digest?.awaiting_reply ?? []).map((a) => [a.jid, a]))
     const signalByJid = new Map((digest?.signal_chats ?? []).map((s) => [s.jid, s]))
 
-    // Pick each chat's single best task (only if it's actually not been
-    // marked done locally already), preferring overdue over due-today.
+    // Pick each anchorable chat's single best urgent task (preferring overdue
+    // over due-today). A task with no chat in this circle to anchor to is an
+    // orphan — ALWAYS counted here regardless of urgency, so a non-urgent
+    // orphan is never silently invisible: it's still reachable via "browse
+    // all tasks", just not forced into the urgency-ranked Needs You section.
     const bestTaskByJid = new Map<string, { task: Task; overdue: boolean }>()
     const orphans: Task[] = []
     for (const t of circleTasks) {
       if (justDoneTasks.has(t.id)) continue
       const overdue = t.due_at > 0 && t.due_at < Date.now() / 1000
       const dueToday = t.due_at > 0 && !overdue && isToday(t.due_at)
-      if (!overdue && !dueToday) continue // not urgent enough to surface in the stream
       const belongsToChat = t.origin_chat_jid && jids.has(t.origin_chat_jid)
       if (!belongsToChat) {
         orphans.push(t)
         continue
       }
+      if (!overdue && !dueToday) continue // anchored but not urgent — visible via the chat itself/full board, not forced into Needs You
       const existing = bestTaskByJid.get(t.origin_chat_jid)
       if (!existing || (overdue && !existing.overdue)) {
         bestTaskByJid.set(t.origin_chat_jid, { task: t, overdue })
@@ -308,44 +327,49 @@ export function FocusStream({
         </div>
       )}
 
-      {needsYou.length === 0 ? (
-        <div className="mb-5 rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-4 text-center text-sm text-neutral-400">
-          You're on top of this circle.
-        </div>
-      ) : (
-        <div className="mb-5">
-          <div className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-            Needs you ({needsYou.length})
+      <div className="mb-5">
+        {needsYou.length === 0 ? (
+          <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-4 text-center text-sm text-neutral-400">
+            You're on top of this circle.
           </div>
-          <div className="space-y-1">
-            {needsYou.map((row) => {
-              const reason = row.reason
-              return (
-                <StreamRow
-                  key={row.chat.jid}
-                  row={row}
-                  title={nameMap.get(row.chat.jid) || row.chat.name}
-                  draft={replyDrafts[row.chat.jid] || ''}
-                  sending={sendingTo.has(row.chat.jid)}
-                  onDraftChange={(v) => setReplyDrafts((d) => ({ ...d, [row.chat.jid]: v }))}
-                  onSend={() => sendReply(row.chat.jid)}
-                  onMarkDone={reason.kind === 'task' ? () => markTaskDone(reason.task) : undefined}
-                  onOpenTaskDetail={reason.kind === 'task' ? () => onOpenTask(reason.task.id) : undefined}
-                  onOpen={() => onSelectChat(row.chat.jid)}
-                />
-              )
-            })}
-          </div>
-          {orphanTasks.length > 0 && (
-            <button
-              onClick={onBrowseAllTasks}
-              className="mt-1 px-2 py-1.5 text-xs text-neutral-500 hover:text-neutral-300"
-            >
-              {orphanTasks.length} more task{orphanTasks.length === 1 ? '' : 's'} not tied to a chat → See all tasks
-            </button>
-          )}
-        </div>
-      )}
+        ) : (
+          <>
+            <div className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+              Needs you ({needsYou.length})
+            </div>
+            <div className="space-y-1">
+              {needsYou.map((row) => {
+                const reason = row.reason
+                return (
+                  <StreamRow
+                    key={row.chat.jid}
+                    row={row}
+                    title={nameMap.get(row.chat.jid) || row.chat.name}
+                    draft={replyDrafts[row.chat.jid] || ''}
+                    sending={sendingTo.has(row.chat.jid)}
+                    onDraftChange={(v) => setReplyDrafts((d) => ({ ...d, [row.chat.jid]: v }))}
+                    onSend={() => sendReply(row.chat.jid)}
+                    onMarkDone={reason.kind === 'task' ? () => markTaskDone(reason.task) : undefined}
+                    onOpenTaskDetail={reason.kind === 'task' ? () => onOpenTask(reason.task.id) : undefined}
+                    onOpen={() => onSelectChat(row.chat.jid)}
+                  />
+                )
+              })}
+            </div>
+          </>
+        )}
+        {/* Always reachable, regardless of Needs You being empty — a
+            non-urgent orphan task must never be invisible just because
+            nothing else needs attention right now. */}
+        <button
+          onClick={onBrowseAllTasks}
+          className="mt-2 px-2 py-1.5 text-xs text-neutral-500 hover:text-neutral-300"
+        >
+          {orphanTasks.length > 0
+            ? `${orphanTasks.length} task${orphanTasks.length === 1 ? '' : 's'} not tied to a chat → See all tasks`
+            : 'See all tasks'}
+        </button>
+      </div>
 
       {moving.length > 0 && (
         <div className="mb-5">
