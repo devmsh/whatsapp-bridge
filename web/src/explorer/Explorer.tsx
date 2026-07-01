@@ -546,7 +546,10 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         circles={circles}
         chats={chats}
         nameMap={nameMap}
-        onOpenChat={openChat}
+        onOpenChat={(jid) => {
+          setFocusCircleId(null)
+          openChat(jid)
+        }}
         onExit={() => setFocusCircleId(null)}
       />
     )
