@@ -157,10 +157,10 @@ iterations:
           - web/src/explorer/CircleSettings.tsx
           - web/src/explorer/Explorer.tsx
     estimated_weight: 9
-    status: pending
-    branch: null
-    spec_path: null
-    plan_path: null
-    merge_commit: null
-    completed_at: null
-    notes: null
+    status: completed
+    branch: worktree-turbo+iter-04-drilldown-management-foldin-2026-07-01
+    spec_path: docs/superpowers/specs/2026-07-01-focus-mode-iter4-drilldown-management-foldin-design.md
+    plan_path: docs/superpowers/plans/2026-07-01-focus-mode-iter4-drilldown-management-foldin-plan.md
+    merge_commit: c19493ac197a5c1e38aea3478daacd0190b2e0d6
+    completed_at: "2026-07-01T14:39:53Z"
+    notes: "Merged to main and pushed. Deviated from projected files: reused CircleView.tsx/CircleSettings.tsx verbatim (zero source changes) instead of building a new FocusManage.tsx, and did not touch FocusSwitcher.tsx (breadcrumb built from existing props in FocusMode.tsx directly). Adversarial review caught a real regression before implementation (naive redirect of openCircle would have stripped direct access to management) — fixed with an explicit focusManagingIntent flag. Post-implementation review found zero issues. Manually verified end-to-end via gstack /browse: circle row click -> direct to Manage; persistent switcher -> normal dashboard; breadcrumb drill-down re-targets while preserving Manage/dashboard mode; Manage toggle on/off. Known limitation deferred (not fixed): FocusMode.tsx has no mobile-responsive breakpoints, flagged as a recommended follow-up, not part of the original brainstorm scope. THIS COMPLETES THE FOCUS MODE MANIFEST — all 4 iterations shipped."
