@@ -38,6 +38,7 @@ import { StarredPanel } from './StarredPanel'
 import { QuickRepliesPanel } from './QuickRepliesPanel'
 import { WorkingHours } from './WorkingHours'
 import { CallsPanel } from './CallsPanel'
+import { FocusMode } from './FocusMode'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
 import { useScheduledAutopilot } from '../hooks/useScheduledMessages'
@@ -59,6 +60,10 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [tab, setTab] = useState<Tab>('chats')
   const [selected, setSelected] = useState<string | null>(null)
   const [selectedCircle, setSelectedCircle] = useState<number | null>(null)
+  // Circle currently in full-screen Focus Mode takeover; non-null replaces the
+  // entire normal UI (tab bar, aside, main) with <FocusMode>. Set from the
+  // per-row "Focus" button in CirclesPanel.
+  const [focusCircleId, setFocusCircleId] = useState<number | null>(null)
   const [recoOpen, setRecoOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<number | null>(null)
   const [taskVersion, setTaskVersion] = useState(0)
@@ -534,6 +539,21 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     if (tab === 'tasks') return setTab('chats')
   }
 
+  if (focusCircleId != null)
+    return (
+      <FocusMode
+        circleId={focusCircleId}
+        circles={circles}
+        chats={chats}
+        nameMap={nameMap}
+        onOpenChat={(jid) => {
+          setFocusCircleId(null)
+          openChat(jid)
+        }}
+        onExit={() => setFocusCircleId(null)}
+      />
+    )
+
   return (
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
@@ -859,6 +879,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               reloadCircles()
               openCircle(c.id)
             }}
+            onFocusCircle={setFocusCircleId}
           />
         )}
         {tab === 'tasks' && (

@@ -164,7 +164,7 @@ export function WorkingHours({ onClose }: { onClose: () => void }) {
                 <div>
                   <p className="text-sm text-neutral-100">Enable working-hours mute</p>
                   <p className="text-[11px] text-neutral-500">
-                    Selected chats are muted during working hours (focus mode).
+                    Selected chats are muted during working hours (quiet hours).
                   </p>
                 </div>
                 <input
