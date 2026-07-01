@@ -3,16 +3,18 @@ import type { Chat, Circle, Contact, Group, Message, Tag, Task } from '../api'
 import type { MentionEntry } from './format'
 import { AdminSlideOver } from './AdminSlideOver'
 import { CirclePopover } from './CirclePopover'
-import { FocusChatList } from './FocusChatList'
-import { FocusDigest } from './FocusDigest'
+import { FocusStream } from './FocusStream'
 import { FocusSwitcher } from './FocusSwitcher'
 import { FocusTasks } from './FocusTasks'
 import { MessageThread } from './MessageThread'
 
 // FocusMode is a full-screen, per-circle takeover: when active, Explorer
 // renders ONLY this component (tab bar, aside, and main are not rendered).
-// The grid layout below is deliberately built to accept more panels later
-// (digest) without a rewrite.
+// The daily-driver surface is FocusStream: one ranked, actionable list
+// (needs-you / moving / quiet), not separate digest/profile/task-board
+// panels. Circle purpose+members live in CirclePopover (anchored to the
+// circle name); rare admin actions live in AdminSlideOver — both overlays,
+// never competing with the daily view for primary screen space.
 export function FocusMode({
   circleId,
   circles,
@@ -89,6 +91,10 @@ export function FocusMode({
   // Whether the circle-purpose/members popover (anchored to the circle name
   // in the header) is open. Replaces the old permanent FocusProfile panel.
   const [showProfile, setShowProfile] = useState(false)
+  // Whether the right pane is showing the full task board (triggered by
+  // FocusStream's "See all tasks" link, for tasks the ranked stream can't
+  // anchor to a chat) instead of its default idle state.
+  const [browsingAllTasks, setBrowsingAllTasks] = useState(false)
 
   // Switching the focused circle (via the switcher) should not leave a
   // stale thread open for a chat that may not belong to the new circle.
@@ -172,48 +178,60 @@ export function FocusMode({
       </header>
 
       {/*
-        Content grid: named areas so future panels (digest) can be added as
-        new grid-template-areas rows/columns without reworking the panels
-        already here. For now it's a two-column layout: digest + task board
-        on the left, chat list / inline thread on the right. "Manage" and
-        circle purpose/members no longer replace this grid outright — they
-        overlay it via AdminSlideOver / CirclePopover above, so the dashboard
-        stays mounted underneath.
+        Two-column layout: FocusStream (the entire daily-driver surface — one
+        ranked, actionable list) on the left; a reading pane on the right
+        that shows an open chat thread, the full task board (only when
+        explicitly requested via "See all tasks"), or an idle placeholder.
+        "Manage" and circle purpose/members don't live in this grid at all —
+        they overlay it via AdminSlideOver / CirclePopover above, so this
+        dashboard stays mounted underneath.
       */}
       <div
         className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4"
         style={{ gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}
       >
-        <div className="flex min-h-0 flex-col gap-4">
-          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-            {/* digest slot */}
-            <FocusDigest circleId={circleId} onOpenTask={onOpenTask} onOpenChat={onOpenChat} />
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-            {/* task-board slot */}
-            <FocusTasks
-              circleId={circleId}
-              tasks={allTasks}
-              circles={circles}
-              chats={chats}
-              nameMap={nameMap}
-              ownJID={ownJID}
-              onOpenTask={onOpenTask}
-              onCreated={onTasksChanged}
-              onChanged={onTasksChanged}
-            />
-          </div>
+        <div className="min-h-0 overflow-hidden rounded-lg border border-neutral-800">
+          <FocusStream
+            circleId={circleId}
+            chats={chats}
+            allTasks={allTasks}
+            nameMap={nameMap}
+            onSelectChat={setActiveChatJid}
+            onOpenTask={onOpenTask}
+            onTasksChanged={onTasksChanged}
+            onBrowseAllTasks={() => setBrowsingAllTasks(true)}
+          />
         </div>
 
         {activeChatJid == null ? (
-          <div className="min-h-0 overflow-y-auto rounded-lg border border-neutral-800">
-            {/* chat-list slot */}
-            <FocusChatList
-              circleId={circleId}
-              chats={chats}
-              nameMap={nameMap}
-              onSelectChat={setActiveChatJid}
-            />
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-800">
+            {browsingAllTasks ? (
+              <>
+                <button
+                  onClick={() => setBrowsingAllTasks(false)}
+                  className="shrink-0 self-start px-3 py-2 text-xs text-neutral-400 hover:text-neutral-200"
+                >
+                  ← Back
+                </button>
+                <div className="min-h-0 flex-1">
+                  <FocusTasks
+                    circleId={circleId}
+                    tasks={allTasks}
+                    circles={circles}
+                    chats={chats}
+                    nameMap={nameMap}
+                    ownJID={ownJID}
+                    onOpenTask={onOpenTask}
+                    onCreated={onTasksChanged}
+                    onChanged={onTasksChanged}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-neutral-600">
+                Select a chat from the stream, or browse all tasks.
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-800">
