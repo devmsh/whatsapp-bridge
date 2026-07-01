@@ -386,4 +386,18 @@ CREATE TABLE IF NOT EXISTS chat_extraction_state (
     last_session_id TEXT    NOT NULL DEFAULT '',
     updated_at      INTEGER NOT NULL DEFAULT 0
 );
+
+-- circle_digests: AI-written incremental digest for one circle (overdue /
+-- today / signal chats / awaiting reply, scoped to the circle's flattened
+-- chats). One row per circle, upserted on regenerate (not append-only, unlike
+-- briefings). last_msg_ts is the watermark: the newest message timestamp seen
+-- across the circle's chats at generation time, used to decide when enough
+-- new activity has accrued to warrant a refresh.
+CREATE TABLE IF NOT EXISTS circle_digests (
+    circle_id     INTEGER PRIMARY KEY,
+    summary       TEXT    NOT NULL DEFAULT '',
+    data          TEXT    NOT NULL DEFAULT '', -- full briefingPayload-shaped JSON
+    last_msg_ts   INTEGER NOT NULL DEFAULT 0,
+    generated_at  INTEGER NOT NULL DEFAULT 0
+);
 `

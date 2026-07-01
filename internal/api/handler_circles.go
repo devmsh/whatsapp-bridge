@@ -191,7 +191,8 @@ func (s *Server) handleCircleForMember(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCircleByID handles /api/v2/circles/{id} and sub-paths {id}/members,
-// {id}/chats, {id}/contacts, {id}/suggestions, {id}/extract, {id}/export.
+// {id}/chats, {id}/contacts, {id}/suggestions, {id}/extract, {id}/export,
+// {id}/digest.
 func (s *Server) handleCircleByID(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/circles/")
 	parts := strings.SplitN(path, "/", 2)
@@ -218,6 +219,8 @@ func (s *Server) handleCircleByID(w http.ResponseWriter, r *http.Request) {
 		s.handleCircleExtract(w, r, id)
 	case "export":
 		s.handleCircleExport(w, r, id)
+	case "digest":
+		s.handleCircleDigest(w, r, id)
 	default:
 		s.handleCircleEntity(w, r, id)
 	}

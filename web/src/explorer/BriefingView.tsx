@@ -155,7 +155,7 @@ export function BriefingModal({
   )
 }
 
-function Section({
+export function Section({
   title,
   hint,
   children,
@@ -177,7 +177,7 @@ function Section({
   )
 }
 
-function TaskRow({
+export function TaskRow({
   t,
   overdue,
   onOpen,
@@ -217,7 +217,7 @@ function TaskRow({
   )
 }
 
-function SignalChatRow({ c, onOpen }: { c: BriefingChat; onOpen: () => void }) {
+export function SignalChatRow({ c, onOpen }: { c: BriefingChat; onOpen: () => void }) {
   return (
     <button
       onClick={onOpen}
@@ -240,7 +240,7 @@ function SignalChatRow({ c, onOpen }: { c: BriefingChat; onOpen: () => void }) {
   )
 }
 
-function AwaitingRow({ c, onOpen }: { c: BriefingAwaiting; onOpen: () => void }) {
+export function AwaitingRow({ c, onOpen }: { c: BriefingAwaiting; onOpen: () => void }) {
   return (
     <button
       onClick={onOpen}

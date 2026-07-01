@@ -1382,6 +1382,12 @@ export const api = {
     const res = await fetch('/api/v2/briefings')
     return res.json()
   },
+  circleDigest: async (
+    id: number,
+  ): Promise<{ digest: BriefingPayload | null; refreshing: boolean }> => {
+    const res = await fetch(`/api/v2/circles/${id}/digest`)
+    return res.json()
+  },
 
   draftReplies: async (
     jid: string,
