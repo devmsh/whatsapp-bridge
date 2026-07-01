@@ -1,11 +1,11 @@
 import type { Chat, Circle } from '../api'
+import { FocusChatList } from './FocusChatList'
+import { FocusProfile } from './FocusProfile'
 
 // FocusMode is a full-screen, per-circle takeover: when active, Explorer
 // renders ONLY this component (tab bar, aside, and main are not rendered).
-// This iteration (iter 1) ships the shell plus two placeholder slots; T05
-// wires in the real <FocusProfile> and <FocusChatList> panels. The grid
-// layout below is deliberately built to accept more panels later (task
-// board, digest) without a rewrite.
+// The grid layout below is deliberately built to accept more panels later
+// (task board, digest) without a rewrite.
 export function FocusMode({
   circleId,
   circles,
@@ -22,14 +22,6 @@ export function FocusMode({
   onExit: () => void
 }) {
   const circle = circles.find((c) => c.id === circleId)
-
-  // `chats`, `nameMap`, and `onOpenChat` are unused until T05 wires the real
-  // <FocusProfile>/<FocusChatList> panels into the slots below; referencing
-  // them here (without changing their names) keeps `noUnusedParameters` happy
-  // in the interim without pre-wiring components that may not exist yet.
-  void chats
-  void nameMap
-  void onOpenChat
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-neutral-950 text-neutral-100">
@@ -60,13 +52,13 @@ export function FocusMode({
         style={{ gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}
       >
         <div className="min-h-0 overflow-y-auto rounded-lg border border-neutral-800">
-          {/* profile slot: T05 replaces this with <FocusProfile circleId={circleId} circles={circles} nameMap={nameMap} /> */}
-          <div className="p-4 text-sm text-neutral-500">Profile panel coming soon.</div>
+          {/* profile slot */}
+          <FocusProfile circleId={circleId} circles={circles} nameMap={nameMap} />
         </div>
 
         <div className="min-h-0 overflow-y-auto rounded-lg border border-neutral-800">
-          {/* chat-list slot: T05 replaces this with <FocusChatList circleId={circleId} chats={chats} nameMap={nameMap} onOpenChat={onOpenChat} /> */}
-          <div className="p-4 text-sm text-neutral-500">Chat list panel coming soon.</div>
+          {/* chat-list slot */}
+          <FocusChatList circleId={circleId} chats={chats} nameMap={nameMap} onOpenChat={onOpenChat} />
         </div>
       </div>
     </div>
