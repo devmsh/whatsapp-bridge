@@ -12,12 +12,12 @@ export function FocusChatList({
   circleId,
   chats,
   nameMap,
-  onOpenChat,
+  onSelectChat,
 }: {
   circleId: number
   chats: Chat[]
   nameMap: Map<string, string>
-  onOpenChat: (jid: string) => void
+  onSelectChat: (jid: string) => void
 }) {
   const [jids, setJids] = useState<Set<string> | null>(null)
 
@@ -47,12 +47,9 @@ export function FocusChatList({
       {rows.map((chat) => {
         const title = nameMap.get(chat.jid) || chat.name
         return (
-          // Row tap exits Focus Mode into the normal full-screen thread
-          // view (existing `onOpenChat` behavior) — inline split-view
-          // thread rendering inside Focus Mode lands in a later iteration.
           <button
             key={chat.jid}
-            onClick={() => onOpenChat(chat.jid)}
+            onClick={() => onSelectChat(chat.jid)}
             className="flex w-full items-center gap-3 border-b border-neutral-900 px-3 py-2.5 text-left transition hover:bg-neutral-900"
           >
             <ChatAvatar jid={chat.jid} title={title} group={isGroup(chat.jid)} size={36} />
