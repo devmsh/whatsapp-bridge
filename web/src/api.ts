@@ -1246,6 +1246,14 @@ export const api = {
     const res = await fetch(`/api/v2/circles/${id}/contacts`)
     return res.json()
   },
+  // circleChats returns the flattened set of chat JIDs belonging to a
+  // circle (including its sub-circles), used by Focus Mode's chat-list
+  // panel to filter the global chats list down to this circle.
+  circleChats: async (id: number): Promise<string[]> => {
+    const res = await fetch(`/api/v2/circles/${id}/chats`)
+    const data = await res.json()
+    return data.chat_jids ?? []
+  },
   // exportCircle downloads a .zip of every chat in the circle as plain-text
   // transcripts. Fetched as a blob so the caller can show a progress state.
   exportCircle: async (id: number, filename: string): Promise<void> => {
