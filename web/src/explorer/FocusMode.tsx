@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Chat, Circle, Message, Tag, Task } from '../api'
 import type { MentionEntry } from './format'
 import { FocusChatList } from './FocusChatList'
+import { FocusDigest } from './FocusDigest'
 import { FocusProfile } from './FocusProfile'
 import { FocusSwitcher } from './FocusSwitcher'
 import { FocusTasks } from './FocusTasks'
@@ -101,6 +102,10 @@ export function FocusMode({
         style={{ gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}
       >
         <div className="flex min-h-0 flex-col gap-4">
+          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
+            {/* digest slot */}
+            <FocusDigest circleId={circleId} onOpenTask={onOpenTask} onOpenChat={onOpenChat} />
+          </div>
           <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
             {/* profile slot */}
             <FocusProfile circleId={circleId} circles={circles} nameMap={nameMap} />
