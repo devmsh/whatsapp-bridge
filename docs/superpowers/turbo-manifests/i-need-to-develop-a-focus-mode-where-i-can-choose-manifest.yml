@@ -69,13 +69,13 @@ iterations:
           - web/src/explorer/FocusProfile.tsx
           - web/src/explorer/Dashboard.tsx
     estimated_weight: 8
-    status: in_progress
+    status: completed
     branch: worktree-turbo+iter-01-focus-shell-foundation-2026-07-01
-    spec_path: null
-    plan_path: null
-    merge_commit: null
-    completed_at: null
-    notes: "Worktree at .claude/worktrees/turbo+iter-01-focus-shell-foundation-2026-07-01; cwd probe confirmed isolation holds."
+    spec_path: docs/superpowers/specs/2026-07-01-focus-mode-iter1-shell-foundation-design.md
+    plan_path: docs/superpowers/plans/2026-07-01-focus-mode-iter1-shell-foundation-plan.md
+    merge_commit: 3dec1a334bfda19945198c6659b68c008ba755e6
+    completed_at: "2026-07-01T12:30:40Z"
+    notes: "Merged to main and pushed. Review found 1 real bug (chat-tap didn't clear Focus Mode) — fixed and committed. Manually verified end-to-end via gstack /browse: takeover shell, purpose+member panel, filtered chat list, chat-tap-exits-to-thread, and Exit Focus button all confirmed working against the live backend on :8082. No backend changes were needed for this iteration."
   - id: iter-02-switcher-thread-tasks
     name: "Persistent switcher, inline thread, task board"
     rationale: "Turn the shell into the real product surface: enter/switch circles from anywhere, read/reply inline, and act on tasks."
