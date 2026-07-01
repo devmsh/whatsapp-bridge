@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react'
 import type { Chat, Circle, Contact, Group, Message, Tag, Task } from '../api'
 import type { MentionEntry } from './format'
-import { CircleView } from './CircleView'
-import { FocusChatList } from './FocusChatList'
-import { FocusDigest } from './FocusDigest'
-import { FocusProfile } from './FocusProfile'
+import { AdminSlideOver } from './AdminSlideOver'
+import { CirclePopover } from './CirclePopover'
+import { FocusStream } from './FocusStream'
 import { FocusSwitcher } from './FocusSwitcher'
 import { FocusTasks } from './FocusTasks'
 import { MessageThread } from './MessageThread'
 
 // FocusMode is a full-screen, per-circle takeover: when active, Explorer
 // renders ONLY this component (tab bar, aside, and main are not rendered).
-// The grid layout below is deliberately built to accept more panels later
-// (digest) without a rewrite.
+// The daily-driver surface is FocusStream: one ranked, actionable list
+// (needs-you / moving / quiet), not separate digest/profile/task-board
+// panels. Circle purpose+members live in CirclePopover (anchored to the
+// circle name); rare admin actions live in AdminSlideOver — both overlays,
+// never competing with the daily view for primary screen space.
 export function FocusMode({
   circleId,
   circles,
@@ -86,6 +88,13 @@ export function FocusMode({
   // the breadcrumb) changes circleId WITHOUT unmounting FocusMode, which
   // correctly PRESERVES whichever mode the user was already in.
   const [managing, setManaging] = useState(initialManaging)
+  // Whether the circle-purpose/members popover (anchored to the circle name
+  // in the header) is open. Replaces the old permanent FocusProfile panel.
+  const [showProfile, setShowProfile] = useState(false)
+  // Whether the right pane is showing the full task board (triggered by
+  // FocusStream's "See all tasks" link, for tasks the ranked stream can't
+  // anchor to a chat) instead of its default idle state.
+  const [browsingAllTasks, setBrowsingAllTasks] = useState(false)
 
   // Switching the focused circle (via the switcher) should not leave a
   // stale thread open for a chat that may not belong to the new circle.
@@ -98,9 +107,23 @@ export function FocusMode({
           className="h-3.5 w-3.5 shrink-0 rounded-full"
           style={{ backgroundColor: circle?.color || '#737373' }}
         />
-        <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
-          {circle?.name || `Circle ${circleId}`}
-        </h1>
+        <div className="relative min-w-0 flex-1">
+          <button
+            onClick={() => setShowProfile((v) => !v)}
+            aria-pressed={showProfile}
+            className="max-w-full truncate rounded px-1 text-left text-lg font-semibold hover:bg-neutral-800"
+            title="Show circle purpose & members"
+          >
+            {circle?.name || `Circle ${circleId}`}
+          </button>
+          <CirclePopover
+            open={showProfile}
+            onClose={() => setShowProfile(false)}
+            circleId={circleId}
+            circles={circles}
+            nameMap={nameMap}
+          />
+        </div>
         {((circle?.parent_ids?.length ?? 0) > 0 || (circle?.child_circles?.length ?? 0) > 0) && (
           <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1.5">
             {circle?.parent_ids?.map((parentId) => {
@@ -154,110 +177,119 @@ export function FocusMode({
         </button>
       </header>
 
-      {managing ? (
-        <div className="min-h-0 flex-1 overflow-hidden">
-          <CircleView
+      {/*
+        Two-column layout: FocusStream (the entire daily-driver surface — one
+        ranked, actionable list) on the left; a reading pane on the right
+        that shows an open chat thread, the full task board (only when
+        explicitly requested via "See all tasks"), or an idle placeholder.
+        "Manage" and circle purpose/members don't live in this grid at all —
+        they overlay it via AdminSlideOver / CirclePopover above, so this
+        dashboard stays mounted underneath.
+      */}
+      <div
+        className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4"
+        style={{ gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}
+      >
+        <div className="min-h-0 overflow-hidden rounded-lg border border-neutral-800">
+          <FocusStream
             circleId={circleId}
-            circles={circles}
             chats={chats}
-            contacts={contacts}
-            groups={groups}
+            allTasks={allTasks}
             nameMap={nameMap}
-            allTags={allTags}
-            onTagsChanged={onTagsChanged}
-            onOpenChat={onOpenChat}
-            onOpenCircle={onOpenCircle}
-            onOpenTasks={onOpenTasks}
-            onChanged={onCirclesChanged}
-            onDeleted={() => {
-              setManaging(false)
-              onExit()
-            }}
+            onSelectChat={setActiveChatJid}
+            onOpenTask={onOpenTask}
+            onTasksChanged={onTasksChanged}
+            onBrowseAllTasks={() => setBrowsingAllTasks(true)}
           />
         </div>
-      ) : (
-        /*
-          Content grid: named areas so future panels (digest) can be added as
-          new grid-template-areas rows/columns without reworking the panels
-          already here. For now it's a two-column layout: profile + task board
-          on the left, chat list / inline thread on the right.
-        */
-        <div
-          className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4"
-          style={{ gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}
-        >
-          <div className="flex min-h-0 flex-col gap-4">
-            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-              {/* digest slot */}
-              <FocusDigest circleId={circleId} onOpenTask={onOpenTask} onOpenChat={onOpenChat} />
-            </div>
-            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-              {/* profile slot */}
-              <FocusProfile circleId={circleId} circles={circles} nameMap={nameMap} />
-            </div>
-            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-              {/* task-board slot */}
-              <FocusTasks
-                circleId={circleId}
-                tasks={allTasks}
-                circles={circles}
+
+        {activeChatJid == null ? (
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-800">
+            {browsingAllTasks ? (
+              <>
+                <button
+                  onClick={() => setBrowsingAllTasks(false)}
+                  className="shrink-0 self-start px-3 py-2 text-xs text-neutral-400 hover:text-neutral-200"
+                >
+                  ← Back
+                </button>
+                <div className="min-h-0 flex-1">
+                  <FocusTasks
+                    circleId={circleId}
+                    tasks={allTasks}
+                    circles={circles}
+                    chats={chats}
+                    nameMap={nameMap}
+                    ownJID={ownJID}
+                    onOpenTask={onOpenTask}
+                    onCreated={onTasksChanged}
+                    onChanged={onTasksChanged}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-neutral-600">
+                Select a chat from the stream, or browse all tasks.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-800">
+            <button
+              onClick={() => setActiveChatJid(null)}
+              className="shrink-0 self-start px-3 py-2 text-xs text-neutral-400 hover:text-neutral-200"
+            >
+              ← Back to chats
+            </button>
+            <div className="min-h-0 flex-1">
+              <MessageThread
+                jid={activeChatJid}
                 chats={chats}
                 nameMap={nameMap}
-                ownJID={ownJID}
+                mentionIndex={mentionIndex}
+                selfDigits={selfDigits}
+                liveMsg={liveMsg}
+                circles={circles}
+                allTags={allTags}
+                contactTags={contactTags}
+                initialDraft={chatDrafts[activeChatJid] || ''}
+                onDraftConsumed={() => consumeChatDraft(activeChatJid)}
+                onCirclesChanged={onCirclesChanged}
+                onTagsChanged={onTagsChanged}
                 onOpenTask={onOpenTask}
-                onCreated={onTasksChanged}
-                onChanged={onTasksChanged}
+                onTasksChanged={onTasksChanged}
+                onOpenChatTasks={onOpenChatTasks}
+                onOpenChat={onOpenChat}
+                onOpenCircle={onOpenCircle}
+                onSent={onSent}
+                pendingJumpId={pendingJumpId}
+                onJumpHandled={onJumpHandled}
               />
             </div>
           </div>
+        )}
+      </div>
 
-          {activeChatJid == null ? (
-            <div className="min-h-0 overflow-y-auto rounded-lg border border-neutral-800">
-              {/* chat-list slot */}
-              <FocusChatList
-                circleId={circleId}
-                chats={chats}
-                nameMap={nameMap}
-                onSelectChat={setActiveChatJid}
-              />
-            </div>
-          ) : (
-            <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-800">
-              <button
-                onClick={() => setActiveChatJid(null)}
-                className="shrink-0 self-start px-3 py-2 text-xs text-neutral-400 hover:text-neutral-200"
-              >
-                ← Back to chats
-              </button>
-              <div className="min-h-0 flex-1">
-                <MessageThread
-                  jid={activeChatJid}
-                  chats={chats}
-                  nameMap={nameMap}
-                  mentionIndex={mentionIndex}
-                  selfDigits={selfDigits}
-                  liveMsg={liveMsg}
-                  circles={circles}
-                  allTags={allTags}
-                  contactTags={contactTags}
-                  initialDraft={chatDrafts[activeChatJid] || ''}
-                  onDraftConsumed={() => consumeChatDraft(activeChatJid)}
-                  onCirclesChanged={onCirclesChanged}
-                  onTagsChanged={onTagsChanged}
-                  onOpenTask={onOpenTask}
-                  onTasksChanged={onTasksChanged}
-                  onOpenChatTasks={onOpenChatTasks}
-                  onOpenChat={onOpenChat}
-                  onOpenCircle={onOpenCircle}
-                  onSent={onSent}
-                  pendingJumpId={pendingJumpId}
-                  onJumpHandled={onJumpHandled}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      <AdminSlideOver
+        open={managing}
+        onClose={() => setManaging(false)}
+        circleId={circleId}
+        circles={circles}
+        chats={chats}
+        contacts={contacts}
+        groups={groups}
+        nameMap={nameMap}
+        allTags={allTags}
+        onTagsChanged={onTagsChanged}
+        onOpenChat={onOpenChat}
+        onOpenCircle={onOpenCircle}
+        onOpenTasks={onOpenTasks}
+        onChanged={onCirclesChanged}
+        onDeleted={() => {
+          setManaging(false)
+          onExit()
+        }}
+      />
     </div>
   )
 }
