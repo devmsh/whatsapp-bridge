@@ -67,11 +67,17 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [focusCircleId, setFocusCircleId] = useState<number | null>(() => {
     try {
       const saved = localStorage.getItem('wa.focus-circle-id')
-      return saved ? Number(saved) : null
+      if (!saved) return null
+      const parsed = Number(saved)
+      return Number.isFinite(parsed) ? parsed : null
     } catch {
       return null
     }
   })
+  // Tracks whether the initial circles fetch has resolved (even if it came
+  // back empty), so the validation effect below can distinguish "circles
+  // haven't loaded yet" from "the user genuinely has zero circles".
+  const [circlesLoaded, setCirclesLoaded] = useState(false)
   const [recoOpen, setRecoOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<number | null>(null)
   const [taskVersion, setTaskVersion] = useState(0)
@@ -157,7 +163,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           setActivity(m)
         })
         .catch(() => {})
-      api.circles().then((c) => setCircles(c || [])).catch(() => {})
+      api
+        .circles()
+        .then((c) => setCircles(c || []))
+        .catch(() => {})
+        .finally(() => setCirclesLoaded(true))
       api.tags().then((t) => setTags(t || [])).catch(() => {})
       api.contactTagsMap().then((m) => setContactTags(m || {})).catch(() => {})
     }
@@ -417,18 +427,19 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     } catch {}
   }, [focusCircleId])
 
-  // Once circles have loaded, drop a restored focusCircleId that no longer
-  // maps to a real circle so a deleted circle isn't resurrected into a
-  // broken Focus Mode view.
+  // Once circles have loaded (even if the result is an empty list — e.g. all
+  // circles were deleted), drop a restored focusCircleId that no longer maps
+  // to a real circle so a deleted circle isn't resurrected into a broken
+  // Focus Mode view.
   useEffect(() => {
     if (
-      circles.length > 0 &&
+      circlesLoaded &&
       focusCircleId != null &&
       !circles.some((c) => c.id === focusCircleId)
     ) {
       setFocusCircleId(null)
     }
-  }, [circles])
+  }, [circles, circlesLoaded])
 
   // Global keyboard shortcuts:
   //   ⌘/Ctrl + K          → focus + select the universal search bar
