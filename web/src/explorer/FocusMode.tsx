@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { Chat, Circle, Message, Tag, Task } from '../api'
+import type { Chat, Circle, Contact, Group, Message, Tag, Task } from '../api'
 import type { MentionEntry } from './format'
+import { CircleView } from './CircleView'
 import { FocusChatList } from './FocusChatList'
 import { FocusDigest } from './FocusDigest'
 import { FocusProfile } from './FocusProfile'
@@ -16,6 +17,8 @@ export function FocusMode({
   circleId,
   circles,
   chats,
+  contacts,
+  groups,
   nameMap,
   mentionIndex,
   selfDigits,
@@ -26,6 +29,7 @@ export function FocusMode({
   consumeChatDraft,
   allTasks,
   ownJID,
+  initialManaging,
   onOpenChat,
   onExit,
   onSwitchCircle,
@@ -34,6 +38,7 @@ export function FocusMode({
   onOpenTask,
   onTasksChanged,
   onOpenChatTasks,
+  onOpenTasks,
   onOpenCircle,
   onSent,
   pendingJumpId,
@@ -42,6 +47,8 @@ export function FocusMode({
   circleId: number
   circles: Circle[]
   chats: Chat[]
+  contacts: Contact[]
+  groups: Group[]
   nameMap: Map<string, string>
   mentionIndex: Map<string, MentionEntry>
   selfDigits?: Set<string>
@@ -52,6 +59,7 @@ export function FocusMode({
   consumeChatDraft: (jid: string) => void
   allTasks: Task[]
   ownJID: string
+  initialManaging: boolean
   onOpenChat: (jid: string, draft?: string) => void
   onExit: () => void
   onSwitchCircle: (id: number) => void
@@ -60,6 +68,7 @@ export function FocusMode({
   onOpenTask: (id: number) => void
   onTasksChanged: () => void
   onOpenChatTasks: (jid: string) => void
+  onOpenTasks: (id: number) => void
   onOpenCircle: (id: number) => void
   onSent?: (m: Message) => void
   pendingJumpId?: string | null
@@ -67,6 +76,16 @@ export function FocusMode({
 }) {
   const circle = circles.find((c) => c.id === circleId)
   const [activeChatJid, setActiveChatJid] = useState<string | null>(null)
+  // Whether Focus Mode is showing the "⚙ Manage" screen (circle rename,
+  // members, keyword suggestions, sub-circles, task extraction, export) in
+  // place of the normal dashboard. Seeded from initialManaging — a plain
+  // useState initializer, NOT a [circleId]-keyed effect: FocusMode only
+  // mounts fresh on a genuine null→non-null entry (Explorer's early-return
+  // stops rendering it on exit), so the initializer captures "was Manage
+  // intent set at entry". Switching circles mid-session (via the switcher or
+  // the breadcrumb) changes circleId WITHOUT unmounting FocusMode, which
+  // correctly PRESERVES whichever mode the user was already in.
+  const [managing, setManaging] = useState(initialManaging)
 
   // Switching the focused circle (via the switcher) should not leave a
   // stale thread open for a chat that may not belong to the new circle.
@@ -82,7 +101,51 @@ export function FocusMode({
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
           {circle?.name || `Circle ${circleId}`}
         </h1>
+        {((circle?.parent_ids?.length ?? 0) > 0 || (circle?.child_circles?.length ?? 0) > 0) && (
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1.5">
+            {circle?.parent_ids?.map((parentId) => {
+              const parent = circles.find((c) => c.id === parentId)
+              if (!parent) return null
+              return (
+                <button
+                  key={`parent-${parentId}`}
+                  onClick={() => onSwitchCircle(parentId)}
+                  className="shrink-0 rounded-full border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                  title={`Go to parent circle: ${parent.name}`}
+                >
+                  ↑ {parent.name}
+                </button>
+              )
+            })}
+            {circle?.child_circles?.map((childId) => {
+              const child = circles.find((c) => c.id === childId)
+              if (!child) return null
+              return (
+                <button
+                  key={`child-${childId}`}
+                  onClick={() => onSwitchCircle(childId)}
+                  className="shrink-0 rounded-full border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                  title={`Go to sub-circle: ${child.name}`}
+                >
+                  ↳ {child.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
         <FocusSwitcher circles={circles} activeCircleId={circleId} onSelect={onSwitchCircle} />
+        <button
+          onClick={() => setManaging((v) => !v)}
+          aria-pressed={managing}
+          className={
+            'shrink-0 rounded-lg border px-3 py-1.5 text-sm transition ' +
+            (managing
+              ? 'border-emerald-600 bg-emerald-500/15 text-emerald-300'
+              : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
+          }
+        >
+          ⚙ Manage
+        </button>
         <button
           onClick={onExit}
           className="shrink-0 rounded-lg border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
@@ -91,87 +154,110 @@ export function FocusMode({
         </button>
       </header>
 
-      {/*
-        Content grid: named areas so future panels (digest) can be added as
-        new grid-template-areas rows/columns without reworking the panels
-        already here. For now it's a two-column layout: profile + task board
-        on the left, chat list / inline thread on the right.
-      */}
-      <div
-        className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4"
-        style={{ gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}
-      >
-        <div className="flex min-h-0 flex-col gap-4">
-          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-            {/* digest slot */}
-            <FocusDigest circleId={circleId} onOpenTask={onOpenTask} onOpenChat={onOpenChat} />
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-            {/* profile slot */}
-            <FocusProfile circleId={circleId} circles={circles} nameMap={nameMap} />
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-            {/* task-board slot */}
-            <FocusTasks
-              circleId={circleId}
-              tasks={allTasks}
-              circles={circles}
-              chats={chats}
-              nameMap={nameMap}
-              ownJID={ownJID}
-              onOpenTask={onOpenTask}
-              onCreated={onTasksChanged}
-              onChanged={onTasksChanged}
-            />
-          </div>
+      {managing ? (
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <CircleView
+            circleId={circleId}
+            circles={circles}
+            chats={chats}
+            contacts={contacts}
+            groups={groups}
+            nameMap={nameMap}
+            allTags={allTags}
+            onTagsChanged={onTagsChanged}
+            onOpenChat={onOpenChat}
+            onOpenCircle={onOpenCircle}
+            onOpenTasks={onOpenTasks}
+            onChanged={onCirclesChanged}
+            onDeleted={() => {
+              setManaging(false)
+              onExit()
+            }}
+          />
         </div>
-
-        {activeChatJid == null ? (
-          <div className="min-h-0 overflow-y-auto rounded-lg border border-neutral-800">
-            {/* chat-list slot */}
-            <FocusChatList
-              circleId={circleId}
-              chats={chats}
-              nameMap={nameMap}
-              onSelectChat={setActiveChatJid}
-            />
-          </div>
-        ) : (
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-800">
-            <button
-              onClick={() => setActiveChatJid(null)}
-              className="shrink-0 self-start px-3 py-2 text-xs text-neutral-400 hover:text-neutral-200"
-            >
-              ← Back to chats
-            </button>
-            <div className="min-h-0 flex-1">
-              <MessageThread
-                jid={activeChatJid}
+      ) : (
+        /*
+          Content grid: named areas so future panels (digest) can be added as
+          new grid-template-areas rows/columns without reworking the panels
+          already here. For now it's a two-column layout: profile + task board
+          on the left, chat list / inline thread on the right.
+        */
+        <div
+          className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4"
+          style={{ gridTemplateColumns: 'minmax(280px, 1fr) minmax(320px, 1.4fr)' }}
+        >
+          <div className="flex min-h-0 flex-col gap-4">
+            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
+              {/* digest slot */}
+              <FocusDigest circleId={circleId} onOpenTask={onOpenTask} onOpenChat={onOpenChat} />
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
+              {/* profile slot */}
+              <FocusProfile circleId={circleId} circles={circles} nameMap={nameMap} />
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
+              {/* task-board slot */}
+              <FocusTasks
+                circleId={circleId}
+                tasks={allTasks}
+                circles={circles}
                 chats={chats}
                 nameMap={nameMap}
-                mentionIndex={mentionIndex}
-                selfDigits={selfDigits}
-                liveMsg={liveMsg}
-                circles={circles}
-                allTags={allTags}
-                contactTags={contactTags}
-                initialDraft={chatDrafts[activeChatJid] || ''}
-                onDraftConsumed={() => consumeChatDraft(activeChatJid)}
-                onCirclesChanged={onCirclesChanged}
-                onTagsChanged={onTagsChanged}
+                ownJID={ownJID}
                 onOpenTask={onOpenTask}
-                onTasksChanged={onTasksChanged}
-                onOpenChatTasks={onOpenChatTasks}
-                onOpenChat={onOpenChat}
-                onOpenCircle={onOpenCircle}
-                onSent={onSent}
-                pendingJumpId={pendingJumpId}
-                onJumpHandled={onJumpHandled}
+                onCreated={onTasksChanged}
+                onChanged={onTasksChanged}
               />
             </div>
           </div>
-        )}
-      </div>
+
+          {activeChatJid == null ? (
+            <div className="min-h-0 overflow-y-auto rounded-lg border border-neutral-800">
+              {/* chat-list slot */}
+              <FocusChatList
+                circleId={circleId}
+                chats={chats}
+                nameMap={nameMap}
+                onSelectChat={setActiveChatJid}
+              />
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-neutral-800">
+              <button
+                onClick={() => setActiveChatJid(null)}
+                className="shrink-0 self-start px-3 py-2 text-xs text-neutral-400 hover:text-neutral-200"
+              >
+                ← Back to chats
+              </button>
+              <div className="min-h-0 flex-1">
+                <MessageThread
+                  jid={activeChatJid}
+                  chats={chats}
+                  nameMap={nameMap}
+                  mentionIndex={mentionIndex}
+                  selfDigits={selfDigits}
+                  liveMsg={liveMsg}
+                  circles={circles}
+                  allTags={allTags}
+                  contactTags={contactTags}
+                  initialDraft={chatDrafts[activeChatJid] || ''}
+                  onDraftConsumed={() => consumeChatDraft(activeChatJid)}
+                  onCirclesChanged={onCirclesChanged}
+                  onTagsChanged={onTagsChanged}
+                  onOpenTask={onOpenTask}
+                  onTasksChanged={onTasksChanged}
+                  onOpenChatTasks={onOpenChatTasks}
+                  onOpenChat={onOpenChat}
+                  onOpenCircle={onOpenCircle}
+                  onSent={onSent}
+                  pendingJumpId={pendingJumpId}
+                  onJumpHandled={onJumpHandled}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
