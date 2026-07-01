@@ -15,7 +15,6 @@ import { buildMentionIndex, buildNameMap } from './format'
 import { ChatList } from './ChatList'
 import { ContactsPanel } from './ContactsPanel'
 import { CirclesPanel } from './CirclesPanel'
-import { CircleView } from './CircleView'
 import { RecommendationsView } from './RecommendationsView'
 import { TasksSidebar, type TasksSelection } from './TasksSidebar'
 import { TasksView } from './TasksView'
@@ -60,7 +59,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [contactTags, setContactTags] = useState<Record<string, Tag[]>>({})
   const [tab, setTab] = useState<Tab>('chats')
   const [selected, setSelected] = useState<string | null>(null)
-  const [selectedCircle, setSelectedCircle] = useState<number | null>(null)
   // Circle currently in full-screen Focus Mode takeover; non-null replaces the
   // entire normal UI (tab bar, aside, main) with <FocusMode>. Set from the
   // persistent FocusSwitcher (sidebar or FocusMode's own header).
@@ -74,6 +72,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       return null
     }
   })
+  // Whether the next Focus Mode entry should land directly on the "⚙ Manage"
+  // screen (circle management folded into FocusMode) instead of the normal
+  // dashboard. Set by openCircle (management-intent entry points: CirclesPanel rows,
+  // SearchBar circle hits, RecommendationsView, non-focused MessageThread's
+  // onOpenCircle) and reset to false at every other non-exit setFocusCircleId
+  // call site (switcher / breadcrumb navigation). Deliberately NOT persisted —
+  // a restored/resumed session must resume on the normal dashboard.
+  const [focusManagingIntent, setFocusManagingIntent] = useState(false)
   // Tracks whether the initial circles fetch has resolved (even if it came
   // back empty), so the validation effect below can distinguish "circles
   // haven't loaded yet" from "the user genuinely has zero circles".
@@ -359,7 +365,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const openTask = useCallback((id: number) => {
     setRecoOpen(false)
     setSelected(null)
-    setSelectedCircle(null)
     setSelectedTask(id)
     setTab('tasks')
   }, [])
@@ -369,7 +374,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     // just open the tasks tab on the default "all open" view.
     setRecoOpen(false)
     setSelected(null)
-    setSelectedCircle(null)
     setSelectedTask(null)
     setTaskSelection({ kind: 'view', view: 'open' })
     setTab('tasks')
@@ -532,7 +536,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const openCircleTasks = useCallback((id: number) => {
     setRecoOpen(false)
     setSelected(null)
-    setSelectedCircle(null)
     setSelectedTask(null)
     setTaskSelection({ kind: 'circle', id })
     setTab('tasks')
@@ -542,7 +545,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const openContactDM = useCallback(
     (c: Contact) => {
       const jid = c.jid && c.jid.includes('@') ? c.jid : `${c.phone || ''}@s.whatsapp.net`
-      setSelectedCircle(null)
       setTab('chats')
       openChat(jid)
     },
@@ -553,12 +555,12 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     setRecoOpen(false)
     setSelected(null)
     setSelectedTask(null)
-    setSelectedCircle(id)
+    setFocusManagingIntent(true)
+    setFocusCircleId(id)
   }, [])
 
   const openReco = useCallback(() => {
     setSelected(null)
-    setSelectedCircle(null)
     setSelectedTask(null)
     setRecoOpen(true)
   }, [])
@@ -568,15 +570,13 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // phone, so below `md` we show ONE pane: the list, or — once the user
   // opens something — the main pane full-screen with a Back affordance.
   // detailOpen = the main pane is showing navigated-into content.
-  const detailOpen =
-    recoOpen || selected != null || selectedCircle != null || selectedTask != null
+  const detailOpen = recoOpen || selected != null || selectedTask != null
   // The Tasks tab renders its list in <main> (the sidebar holds only the
   // scope picker), so treat that tab as "show main" on mobile too.
   const showMainMobile = detailOpen || tab === 'tasks'
   // Back steps up one level: detail → its list, then list → chats.
   const closeMobileDetail = () => {
     if (selected != null) return setSelected(null)
-    if (selectedCircle != null) return setSelectedCircle(null)
     if (recoOpen) return setRecoOpen(false)
     if (selectedTask != null) return setSelectedTask(null)
     if (tab === 'tasks') return setTab('chats')
@@ -588,6 +588,8 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         circleId={focusCircleId}
         circles={circles}
         chats={chats}
+        contacts={contacts}
+        groups={groups}
         nameMap={nameMap}
         mentionIndex={mentionIndex}
         selfDigits={selfDigits}
@@ -598,6 +600,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         consumeChatDraft={consumeChatDraft}
         allTasks={allTasks}
         ownJID={device?.jid || ''}
+        initialManaging={focusManagingIntent}
         pendingJumpId={pendingJumpId}
         onJumpHandled={() => setPendingJumpId(null)}
         onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
@@ -612,13 +615,23 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           setFocusCircleId(null)
           openChatTasks(jid)
         }}
+        onOpenTasks={(id) => {
+          setFocusCircleId(null)
+          openCircleTasks(id)
+        }}
         onOpenChat={(jid, draft) => {
           setFocusCircleId(null)
           openChat(jid, draft)
         }}
-        onOpenCircle={(id) => setFocusCircleId(id)}
+        onOpenCircle={(id) => {
+          setFocusManagingIntent(false)
+          setFocusCircleId(id)
+        }}
         onExit={() => setFocusCircleId(null)}
-        onSwitchCircle={setFocusCircleId}
+        onSwitchCircle={(id) => {
+          setFocusManagingIntent(false)
+          setFocusCircleId(id)
+        }}
       />
     )
 
@@ -895,7 +908,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
         <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
           <span className="text-xs font-medium text-neutral-500">Focus Mode</span>
-          <FocusSwitcher circles={circles} activeCircleId={null} onSelect={setFocusCircleId} />
+          <FocusSwitcher
+            circles={circles}
+            activeCircleId={null}
+            onSelect={(id) => {
+              setFocusManagingIntent(false)
+              setFocusCircleId(id)
+            }}
+          />
         </div>
 
         <div className="flex border-b border-neutral-800 text-sm">
@@ -943,7 +963,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         {tab === 'circles' && (
           <CirclesPanel
             circles={circles}
-            selected={selectedCircle}
+            selected={null}
             recoActive={recoOpen}
             onOpen={openCircle}
             onOpenReco={openReco}
@@ -1055,22 +1075,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             pendingJumpId={pendingJumpId}
             onJumpHandled={() => setPendingJumpId(null)}
             onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
-          />
-        ) : selectedCircle != null ? (
-          <CircleView
-            circleId={selectedCircle}
-            circles={circles}
-            chats={chats}
-            contacts={contacts}
-            groups={groups}
-            nameMap={nameMap}
-            allTags={tags}
-            onTagsChanged={reloadTags}
-            onOpenChat={openChat}
-            onOpenCircle={openCircle}
-            onOpenTasks={openCircleTasks}
-            onChanged={reloadCircles}
-            onDeleted={() => setSelectedCircle(null)}
           />
         ) : (
           <EmptyState />
