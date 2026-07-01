@@ -52,7 +52,19 @@ export function BriefingModal({
 
   let data: BriefingPayload | null = null
   if (row) {
-    try { data = JSON.parse(row.data) as BriefingPayload } catch {}
+    try {
+      const parsed = JSON.parse(row.data) as BriefingPayload
+      // Defense-in-depth: a briefing with zero matches on a field serializes
+      // it as JSON null (Go nil-slice), not []. Normalize so render code can
+      // safely call .length/.map.
+      data = {
+        ...parsed,
+        today: parsed.today ?? [],
+        overdue: parsed.overdue ?? [],
+        signal_chats: parsed.signal_chats ?? [],
+        awaiting_reply: parsed.awaiting_reply ?? [],
+      }
+    } catch {}
   }
 
   return (

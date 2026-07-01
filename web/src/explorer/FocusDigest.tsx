@@ -42,7 +42,20 @@ export function FocusDigest({
         .circleDigest(circleId)
         .then((r) => {
           if (cancelled) return
-          setDigest(r.digest)
+          // Defense-in-depth: a backend digest with zero matches serializes
+          // array fields as JSON null (Go nil-slice), not []. Normalize once
+          // here so render code can safely call .length/.map.
+          setDigest(
+            r.digest
+              ? {
+                  ...r.digest,
+                  today: r.digest.today ?? [],
+                  overdue: r.digest.overdue ?? [],
+                  signal_chats: r.digest.signal_chats ?? [],
+                  awaiting_reply: r.digest.awaiting_reply ?? [],
+                }
+              : null,
+          )
           setRefreshing(r.refreshing)
           setLoading(false)
           if (r.refreshing) {

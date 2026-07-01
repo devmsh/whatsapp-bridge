@@ -204,7 +204,7 @@ func (s *Server) regenerateCircleDigest(id int64, jids []string, existing *db.Ci
 	// 24h/7d window — a circle can go quiet for days between count-based
 	// regenerations, so a hardcoded floor would silently return an empty
 	// digest despite real content existing) ──────────────────────────
-	var signalChats []briefingChat
+	signalChats := []briefingChat{}
 	if len(jids) > 0 {
 		placeholders := make([]string, len(jids))
 		args := make([]any, 0, len(jids)+1)
@@ -252,7 +252,7 @@ func (s *Server) regenerateCircleDigest(id int64, jids []string, existing *db.Ci
 	if floor < weekAgo {
 		floor = weekAgo
 	}
-	var awaiting []briefingAwaiting
+	awaiting := []briefingAwaiting{}
 	if len(jids) > 0 {
 		placeholders := make([]string, len(jids))
 		args := make([]any, 0, len(jids)+1)

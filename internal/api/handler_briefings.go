@@ -118,7 +118,12 @@ func (s *Server) buildBriefing() (*briefingPayload, error) {
 	dayAgo := now.Add(-24 * time.Hour).Unix()
 	weekAgo := now.Add(-7 * 24 * time.Hour).Unix()
 
-	out := &briefingPayload{ForDate: today, GeneratedAt: now.Unix()}
+	out := &briefingPayload{
+		ForDate:       today,
+		GeneratedAt:   now.Unix(),
+		SignalChats:   []briefingChat{},
+		AwaitingReply: []briefingAwaiting{},
+	}
 
 	// ── tasks_open count ─────────────────────────────────────────────
 	s.store.DB.QueryRow(`SELECT COUNT(*) FROM tasks
