@@ -82,6 +82,38 @@ export function FocusMode({
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
           {circle?.name || `Circle ${circleId}`}
         </h1>
+        {((circle?.parent_ids?.length ?? 0) > 0 || (circle?.child_circles?.length ?? 0) > 0) && (
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-1.5">
+            {circle?.parent_ids?.map((parentId) => {
+              const parent = circles.find((c) => c.id === parentId)
+              if (!parent) return null
+              return (
+                <button
+                  key={`parent-${parentId}`}
+                  onClick={() => onSwitchCircle(parentId)}
+                  className="shrink-0 rounded-full border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                  title={`Go to parent circle: ${parent.name}`}
+                >
+                  ↑ {parent.name}
+                </button>
+              )
+            })}
+            {circle?.child_circles?.map((childId) => {
+              const child = circles.find((c) => c.id === childId)
+              if (!child) return null
+              return (
+                <button
+                  key={`child-${childId}`}
+                  onClick={() => onSwitchCircle(childId)}
+                  className="shrink-0 rounded-full border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+                  title={`Go to sub-circle: ${child.name}`}
+                >
+                  ↳ {child.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
         <FocusSwitcher circles={circles} activeCircleId={circleId} onSelect={onSwitchCircle} />
         <button
           onClick={onExit}
