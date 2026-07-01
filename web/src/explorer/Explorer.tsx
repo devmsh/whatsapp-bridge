@@ -64,7 +64,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // Circle currently in full-screen Focus Mode takeover; non-null replaces the
   // entire normal UI (tab bar, aside, main) with <FocusMode>. Set from the
   // persistent FocusSwitcher (sidebar or FocusMode's own header).
-  const [focusCircleId, setFocusCircleId] = useState<number | null>(null)
+  const [focusCircleId, setFocusCircleId] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem('wa.focus-circle-id')
+      return saved ? Number(saved) : null
+    } catch {
+      return null
+    }
+  })
   const [recoOpen, setRecoOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<number | null>(null)
   const [taskVersion, setTaskVersion] = useState(0)
@@ -400,6 +407,28 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       }
     } catch {}
   }, [chats, selected, openChat])
+
+  // Persist the last-focused circle (Focus Mode) across reloads, mirroring
+  // the wa.last-chat-jid idiom above.
+  useEffect(() => {
+    try {
+      if (focusCircleId != null) localStorage.setItem('wa.focus-circle-id', String(focusCircleId))
+      else localStorage.removeItem('wa.focus-circle-id')
+    } catch {}
+  }, [focusCircleId])
+
+  // Once circles have loaded, drop a restored focusCircleId that no longer
+  // maps to a real circle so a deleted circle isn't resurrected into a
+  // broken Focus Mode view.
+  useEffect(() => {
+    if (
+      circles.length > 0 &&
+      focusCircleId != null &&
+      !circles.some((c) => c.id === focusCircleId)
+    ) {
+      setFocusCircleId(null)
+    }
+  }, [circles])
 
   // Global keyboard shortcuts:
   //   ⌘/Ctrl + K          → focus + select the universal search bar
