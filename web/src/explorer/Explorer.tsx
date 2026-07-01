@@ -176,15 +176,16 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     api.circles().then((c) => setCircles(c || [])).catch(() => {})
   }, [])
 
-  // Keep allTasks fresh whenever the Tasks tab is visible or tasks change.
-  // Used by the new TasksSidebar (for counts) + TasksView (for the list).
+  // Keep allTasks fresh whenever the Tasks tab is visible, tasks change, or
+  // Focus Mode is active (its task board needs allTasks too, even though its
+  // own `tab` is not 'tasks').
   useEffect(() => {
-    if (tab !== 'tasks') return
+    if (tab !== 'tasks' && focusCircleId == null) return
     api
       .tasks({})
       .then((t) => setAllTasks(t || []))
       .catch(() => setAllTasks([]))
-  }, [tab, taskVersion])
+  }, [tab, taskVersion, focusCircleId])
 
   const reloadTags = useCallback(() => {
     api.tags().then((t) => setTags(t || [])).catch(() => {})
@@ -547,10 +548,34 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         circles={circles}
         chats={chats}
         nameMap={nameMap}
+        mentionIndex={mentionIndex}
+        selfDigits={selfDigits}
+        liveMsg={liveMsg}
+        allTags={tags}
+        contactTags={contactTags}
+        chatDrafts={chatDrafts}
+        consumeChatDraft={consumeChatDraft}
+        allTasks={allTasks}
+        ownJID={device?.jid || ''}
+        pendingJumpId={pendingJumpId}
+        onJumpHandled={() => setPendingJumpId(null)}
+        onSent={(m) => setChats((prev) => bumpChat(prev, m, selectedRef.current))}
+        onCirclesChanged={reloadCircles}
+        onTagsChanged={reloadTags}
+        onTasksChanged={bumpTasks}
+        onOpenTask={(id) => {
+          setFocusCircleId(null)
+          openTask(id)
+        }}
+        onOpenChatTasks={(jid) => {
+          setFocusCircleId(null)
+          openChatTasks(jid)
+        }}
         onOpenChat={(jid) => {
           setFocusCircleId(null)
           openChat(jid)
         }}
+        onOpenCircle={(id) => setFocusCircleId(id)}
         onExit={() => setFocusCircleId(null)}
         onSwitchCircle={setFocusCircleId}
       />
