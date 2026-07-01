@@ -51,7 +51,7 @@ export function FocusMode({
   consumeChatDraft: (jid: string) => void
   allTasks: Task[]
   ownJID: string
-  onOpenChat: (jid: string) => void
+  onOpenChat: (jid: string, draft?: string) => void
   onExit: () => void
   onSwitchCircle: (id: number) => void
   onCirclesChanged: () => void

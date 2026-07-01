@@ -179,13 +179,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // Keep allTasks fresh whenever the Tasks tab is visible, tasks change, or
   // Focus Mode is active (its task board needs allTasks too, even though its
   // own `tab` is not 'tasks').
+  const focusModeActive = focusCircleId != null
   useEffect(() => {
-    if (tab !== 'tasks' && focusCircleId == null) return
+    if (tab !== 'tasks' && !focusModeActive) return
     api
       .tasks({})
       .then((t) => setAllTasks(t || []))
       .catch(() => setAllTasks([]))
-  }, [tab, taskVersion, focusCircleId])
+  }, [tab, taskVersion, focusModeActive])
 
   const reloadTags = useCallback(() => {
     api.tags().then((t) => setTags(t || [])).catch(() => {})
@@ -571,9 +572,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           setFocusCircleId(null)
           openChatTasks(jid)
         }}
-        onOpenChat={(jid) => {
+        onOpenChat={(jid, draft) => {
           setFocusCircleId(null)
-          openChat(jid)
+          openChat(jid, draft)
         }}
         onOpenCircle={(id) => setFocusCircleId(id)}
         onExit={() => setFocusCircleId(null)}
