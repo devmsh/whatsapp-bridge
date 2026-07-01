@@ -1,0 +1,166 @@
+schema_version: 1
+task_brief: |
+  I need to develop a "FOCUS MODE" where I can choose a Circle or Sub-circle, and see a fully redesigned home page that keeps me on top of everything — not the chat list normally shown in the main tab.
+
+  Decided requirements (from prior user brainstorming — do not re-litigate, these are fixed constraints):
+
+  1. NAMING COLLISION TO RESOLVE: the string "focus mode" is already used in web/src/explorer/WorkingHours.tsx (~line 167) to describe the working-hours auto-mute feature ("Selected chats are muted during working hours (focus mode)"). Rename that existing label (e.g. to "quiet hours" or "auto-mute") so "Focus Mode" refers only to the new per-circle dashboard feature.
+
+  2. DASHBOARD CONTENT (all four required for v1, combined into one custom layout):
+     a. Circle-scoped digest/briefing: reuse the existing global Briefing engine (internal/api/handler_briefings.go: buildBriefing/enrichBriefing) but scoped to just this circle's chats (via FlattenCircleChats in internal/circles.go) — overdue tasks, today's tasks, signal-rich chats, DMs awaiting reply, for this circle only.
+     b. Filtered chat list: this circle's chats (via FlattenCircleChats) with unread/mention state preserved, same semantics as web/src/explorer/ChatList.tsx today.
+     c. Task board: this circle's extracted tasks (existing pipeline: internal/api/handler_extract.go, tasks/task_circles tables), grouped parent/child, with inline accept/reject/mark-done actions (reuse/adapt web/src/explorer/TasksPanel.tsx and TasksSidebar.tsx which already support circle filtering).
+     d. AI profile/purpose panel: the circle's entity_profiles "purpose" description, tags, and member list (reuse the pattern from web/src/explorer/Dashboard.tsx's DashboardModal, which today only shows this per-contact).
+
+  3. ENTRY POINT: a persistent, always-visible top-level switcher control near the tab bar (not buried in the Circles tab) that lets the user (a) enter Focus Mode for any circle from anywhere in the app, and (b) switch which circle they're focused on WITHOUT leaving Focus Mode.
+
+  4. TAKEOVER SCOPE: full takeover. While Focus Mode is active, the normal tab bar (chats|contacts|circles|tasks|calls in web/src/explorer/Explorer.tsx) is hidden/replaced by an "Exit Focus" control. Exiting returns to whichever normal tab was active before.
+
+  5. SUB-CIRCLE HIERARCHY: circles can nest (circle_members with member_type='circle'; FlattenCircleChats resolves a circle + all descendants). Focusing a parent circle shows the FLATTENED view by default. Add a breadcrumb/drill-down control to narrow into one specific sub-circle's own narrower view without leaving Focus Mode.
+
+  6. PERSISTENCE: remember the last-focused circle (e.g. localStorage) so relaunching the app reopens Focus Mode on that same circle. The switcher (#3) must make it trivial to change circles at any time.
+
+  7. CIRCLE MANAGEMENT FOLD-IN: the existing web/src/explorer/CircleView.tsx (rename circle, members list, keyword-based member suggestions, create sub-circle, run task extraction + history, export-as-zip via internal/api/handler_circle_export.go, CircleSettings.tsx keywords/notes) becomes a "Manage" panel/icon reachable from inside Focus Mode. CircleView.tsx as a standalone screen goes away; its functionality is absorbed into Focus Mode.
+
+  8. CHAT THREAD INTERACTION: tapping a chat in the Focus Mode chat list opens the thread INLINE, split-view alongside the dashboard (dashboard/list as a sidebar, thread rendered next to it) — you never fully leave Focus Mode to read/reply to a chat.
+
+  9. DIGEST FRESHNESS (INCREMENTAL, NOT DAILY-BATCH): unlike the existing global Briefing (runs once daily), the circle-scoped digest must refresh incrementally: after ~10 new messages have arrived in the circle's chats since the last digest run, trigger a refresh. Do NOT reanalyze the whole circle history from scratch — feed the LLM enrichment step the PREVIOUS digest output + the new messages (optionally overlapping a few prior messages for context continuity). Needs new backend logic (per-circle "last digest" cache + message-count-since-last-digest tracking + incremental prompt construction), likely adapting internal/api/handler_briefings.go's enrichBriefing.
+
+  Media understanding surfacing (image/voice transcripts) was explicitly considered and NOT selected as a v1 dashboard block — do not add it as a feature.
+slug: i-need-to-develop-a-focus-mode-where-i-can-choose
+created: 2026-07-01
+strategy: |
+  Four iterations, weight-bound (39 total sized weight, 12/iter cap forces at least four). The plan is anchored on the two genuinely hot React files — Explorer.tsx (its four writers shell / switcher / persistence / foldin) and FocusMode.tsx (its four writers shell / inline-thread / persistence / drilldown) — assigning exactly one writer of each hot file per iteration so no wave ever collides on them. Iter 1 lands the takeover shell plus two low-risk dashboard blocks (filtered chat list, profile panel) and the naming rename, giving an immediately demoable v1; each later iter plugs new panels and interactions onto the already-merged shell seam, so iter N+1 always compiles against iter N. The heavy Go-only incremental-digest backend is paired with its UI in one iter (they share no files) and the circle-management fold-in is sequenced last so it retires CircleView.tsx against a stable Focus Mode surface.
+constraints_honored:
+  - "At most 4 features per iteration (max is 3 in every iter)."
+  - "Total sized weight <= 12 per iteration (i1=8, i2=12, i3=10, i4=9)."
+  - "Exactly one writer of hot file Explorer.tsx per iter: shell(i1), switcher(i2), persistence(i3), foldin(i4)."
+  - "Exactly one writer of hot file FocusMode.tsx per iter: shell(i1), inline-thread(i2), persistence(i3), drilldown(i4)."
+  - "Exactly one writer of FocusSwitcher.tsx per iter: switcher(i2), drilldown(i4)."
+  - "Dependency order respected: shell first; chat-list before inline-thread; digest-backend before/with digest-ui; switcher before drilldown; foldin after a stable shell."
+  - "Every iteration is a demoable v1 within one turbo cycle; no stretch/filler iter; no external integrations added; media-understanding block deliberately excluded."
+  - "Each iter compiles against the merged output of the previous iter (no N depends-on N+2)."
+iterations:
+  - id: iter-01-focus-shell-foundation
+    name: "Focus Mode takeover shell + first dashboard blocks"
+    rationale: "Establish the full-takeover shell seam plus two collision-free panels so Focus Mode is demoable end to end from day one."
+    features:
+      - id: naming-collision-fix
+        description: Rename the WorkingHours.tsx "(focus mode)" auto-mute label so "Focus Mode" refers only to the new dashboard.
+        size: small
+        projected_files_write:
+          - web/src/explorer/WorkingHours.tsx
+      - id: focus-mode-shell
+        description: Full-takeover Focus Mode screen + Explorer.tsx state machine (hide tab bar, Exit Focus control, restore prior tab) with a minimal built-in entry affordance so it is demoable before the polished switcher lands.
+        size: medium
+        projected_files_write:
+          - web/src/explorer/Explorer.tsx
+          - web/src/explorer/FocusMode.tsx
+      - id: focus-chat-list-panel
+        description: Filtered chat-list panel scoped to the circle's flattened chats (FlattenCircleChats), preserving unread/mention state like ChatList.tsx.
+        size: medium
+        projected_files_write:
+          - web/src/explorer/FocusChatList.tsx
+          - web/src/explorer/ChatList.tsx
+      - id: focus-profile-panel
+        description: Circle-level AI profile/purpose panel (purpose text, tags, member list) adapting Dashboard.tsx's DashboardModal from per-contact to per-circle.
+        size: small
+        projected_files_write:
+          - web/src/explorer/FocusProfile.tsx
+          - web/src/explorer/Dashboard.tsx
+    estimated_weight: 8
+    status: in_progress
+    branch: worktree-turbo+iter-01-focus-shell-foundation-2026-07-01
+    spec_path: null
+    plan_path: null
+    merge_commit: null
+    completed_at: null
+    notes: "Worktree at .claude/worktrees/turbo+iter-01-focus-shell-foundation-2026-07-01; cwd probe confirmed isolation holds."
+  - id: iter-02-switcher-thread-tasks
+    name: "Persistent switcher, inline thread, task board"
+    rationale: "Turn the shell into the real product surface: enter/switch circles from anywhere, read/reply inline, and act on tasks."
+    features:
+      - id: focus-entry-switcher
+        description: Persistent, always-visible top-level circle switcher near the tab bar to enter Focus Mode from anywhere and switch focused circle without leaving it.
+        size: medium
+        projected_files_write:
+          - web/src/explorer/Explorer.tsx
+          - web/src/explorer/FocusSwitcher.tsx
+      - id: focus-inline-thread-view
+        description: Inline split-view chat thread rendered alongside the dashboard sidebar (reuse MessageThread.tsx) so tapping a chat never leaves Focus Mode.
+        size: large
+        projected_files_write:
+          - web/src/explorer/FocusMode.tsx
+          - web/src/explorer/MessageThread.tsx
+      - id: focus-task-board
+        description: Circle-scoped task board with parent/child grouping and inline accept/reject/mark-done, adapting TasksPanel.tsx / TasksSidebar.tsx circle filtering.
+        size: medium
+        projected_files_write:
+          - web/src/explorer/FocusTasks.tsx
+          - web/src/explorer/TasksPanel.tsx
+    estimated_weight: 12
+    status: pending
+    branch: null
+    spec_path: null
+    plan_path: null
+    merge_commit: null
+    completed_at: null
+    notes: null
+  - id: iter-03-incremental-digest-persistence
+    name: "Incremental circle digest (backend + UI) and last-circle persistence"
+    rationale: "Ship the incremental per-circle digest engine with its dashboard panel, plus remember the last-focused circle across reloads."
+    features:
+      - id: circle-scoped-digest-backend
+        description: New backend for circle-scoped incremental digest — per-circle last-digest cache, message-count-since-last-digest tracking, and delta LLM enrichment adapting enrichBriefing.
+        size: large
+        projected_files_write:
+          - internal/api/handler_briefings.go
+          - internal/db/briefings.go
+          - internal/db/schema.go
+          - internal/api/server.go
+      - id: circle-scoped-digest-ui
+        description: Digest panel component rendering the circle-scoped incremental digest inside Focus Mode, wired through the typed API client.
+        size: medium
+        projected_files_write:
+          - web/src/explorer/FocusDigest.tsx
+          - web/src/api.ts
+      - id: focus-persistence
+        description: Remember the last-focused circle in localStorage and reopen Focus Mode on it at launch.
+        size: small
+        projected_files_write:
+          - web/src/explorer/Explorer.tsx
+          - web/src/explorer/FocusMode.tsx
+    estimated_weight: 10
+    status: pending
+    branch: null
+    spec_path: null
+    plan_path: null
+    merge_commit: null
+    completed_at: null
+    notes: null
+  - id: iter-04-drilldown-management-foldin
+    name: "Sub-circle drill-down and circle management fold-in"
+    rationale: "Complete the hierarchy navigation and absorb standalone CircleView management into a Manage panel, retiring CircleView.tsx as a screen."
+    features:
+      - id: sub-circle-drilldown
+        description: Breadcrumb/drill-down navigation between a parent circle's flattened view and a specific sub-circle's narrower view without leaving Focus Mode.
+        size: medium
+        projected_files_write:
+          - web/src/explorer/FocusMode.tsx
+          - web/src/explorer/FocusSwitcher.tsx
+      - id: circle-management-foldin
+        description: Fold CircleView.tsx management (rename, members, keyword suggestions, create sub-circle, task extraction + history, export-as-zip, keywords/notes) into a Manage panel inside Focus Mode and retire CircleView.tsx as a standalone screen.
+        size: large
+        projected_files_write:
+          - web/src/explorer/FocusManage.tsx
+          - web/src/explorer/CircleView.tsx
+          - web/src/explorer/CircleSettings.tsx
+          - web/src/explorer/Explorer.tsx
+    estimated_weight: 9
+    status: pending
+    branch: null
+    spec_path: null
+    plan_path: null
+    merge_commit: null
+    completed_at: null
+    notes: null

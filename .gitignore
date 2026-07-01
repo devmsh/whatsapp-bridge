@@ -22,3 +22,4 @@ agent/node_modules/
 # Claude: commit shared project settings, ignore only local/runtime files
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+.claude/worktrees/
