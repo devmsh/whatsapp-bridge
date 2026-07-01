@@ -15,7 +15,6 @@ export function CirclesPanel({
   onOpenReco,
   onCreated,
   onChanged,
-  onFocusCircle,
 }: {
   circles: Circle[]
   selected: number | null
@@ -24,7 +23,6 @@ export function CirclesPanel({
   onOpenReco: () => void
   onCreated: (c: Circle) => void
   onChanged: () => void
-  onFocusCircle: (id: number) => void
 }) {
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
@@ -175,16 +173,6 @@ export function CirclesPanel({
             className="w-5 shrink-0 text-neutral-500 opacity-0 transition hover:text-emerald-300 group-hover:opacity-100"
           >
             +
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onFocusCircle(c.id)
-            }}
-            title="Focus on this circle"
-            className="shrink-0 rounded px-1.5 py-0.5 text-[11px] text-neutral-500 opacity-0 transition hover:text-emerald-300 group-hover:opacity-100"
-          >
-            Focus
           </button>
           <span className="w-5 shrink-0 text-center text-[11px] text-neutral-500">{c.member_count}</span>
         </div>

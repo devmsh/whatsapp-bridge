@@ -1,6 +1,7 @@
 import type { Chat, Circle } from '../api'
 import { FocusChatList } from './FocusChatList'
 import { FocusProfile } from './FocusProfile'
+import { FocusSwitcher } from './FocusSwitcher'
 
 // FocusMode is a full-screen, per-circle takeover: when active, Explorer
 // renders ONLY this component (tab bar, aside, and main are not rendered).
@@ -13,6 +14,7 @@ export function FocusMode({
   nameMap,
   onOpenChat,
   onExit,
+  onSwitchCircle,
 }: {
   circleId: number
   circles: Circle[]
@@ -20,6 +22,7 @@ export function FocusMode({
   nameMap: Map<string, string>
   onOpenChat: (jid: string) => void
   onExit: () => void
+  onSwitchCircle: (id: number) => void
 }) {
   const circle = circles.find((c) => c.id === circleId)
 
@@ -33,6 +36,7 @@ export function FocusMode({
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">
           {circle?.name || `Circle ${circleId}`}
         </h1>
+        <FocusSwitcher circles={circles} activeCircleId={circleId} onSelect={onSwitchCircle} />
         <button
           onClick={onExit}
           className="shrink-0 rounded-lg border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"

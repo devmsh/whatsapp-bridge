@@ -39,6 +39,7 @@ import { QuickRepliesPanel } from './QuickRepliesPanel'
 import { WorkingHours } from './WorkingHours'
 import { CallsPanel } from './CallsPanel'
 import { FocusMode } from './FocusMode'
+import { FocusSwitcher } from './FocusSwitcher'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
 import { useScheduledAutopilot } from '../hooks/useScheduledMessages'
@@ -62,7 +63,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [selectedCircle, setSelectedCircle] = useState<number | null>(null)
   // Circle currently in full-screen Focus Mode takeover; non-null replaces the
   // entire normal UI (tab bar, aside, main) with <FocusMode>. Set from the
-  // per-row "Focus" button in CirclesPanel.
+  // persistent FocusSwitcher (sidebar or FocusMode's own header).
   const [focusCircleId, setFocusCircleId] = useState<number | null>(null)
   const [recoOpen, setRecoOpen] = useState(false)
   const [selectedTask, setSelectedTask] = useState<number | null>(null)
@@ -551,6 +552,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           openChat(jid)
         }}
         onExit={() => setFocusCircleId(null)}
+        onSwitchCircle={setFocusCircleId}
       />
     )
 
@@ -825,6 +827,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           />
         </div>
 
+        <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
+          <span className="text-xs font-medium text-neutral-500">Focus Mode</span>
+          <FocusSwitcher circles={circles} activeCircleId={null} onSelect={setFocusCircleId} />
+        </div>
+
         <div className="flex border-b border-neutral-800 text-sm">
           <TabButton active={tab === 'chats'} onClick={() => setTab('chats')}>
             Chats
@@ -879,7 +886,6 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               reloadCircles()
               openCircle(c.id)
             }}
-            onFocusCircle={setFocusCircleId}
           />
         )}
         {tab === 'tasks' && (
