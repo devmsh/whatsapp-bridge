@@ -43,6 +43,10 @@ func NewStore(path string) (*Store, error) {
 		// refinement pass. 0 = raw whisper output, 1 = refined (or N/A for
 		// image descriptions which don't need refinement).
 		`ALTER TABLE media_understanding ADD COLUMN refined INTEGER NOT NULL DEFAULT 0`,
+		// "refine_attempts" bounds retries when the refiner returns nothing.
+		// Without a cap the backfill loop re-selects a failing row every 15s
+		// forever, spending an LLM call each cycle.
+		`ALTER TABLE media_understanding ADD COLUMN refine_attempts INTEGER NOT NULL DEFAULT 0`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,
