@@ -17,6 +17,7 @@ type AutoExtractor struct {
 	s            *Server
 	mu           sync.Mutex
 	running      bool   // true while a sidecar is mid-run
+	current      *Run   // the in-flight run, so toggling off can cancel it
 	lastRunID    string // most recent run, for debugging
 	lastTickedAt int64
 }
@@ -25,7 +26,29 @@ const (
 	autoExtractEnabledKey  = "auto_extract_enabled"
 	autoExtractIntervalKey = "auto_extract_interval_hours"
 	autoExtractDefaultHrs  = 8
+	// Per-circle cooldown stamp: "auto_extract_last:<circle_id>" -> unix seconds.
+	// This is the hard floor that makes a runaway loop impossible even if the
+	// per-chat watermarks are missing or stale.
+	autoExtractLastPrefix = "auto_extract_last:"
 )
+
+// lastAutoRun returns the unix time this circle was last picked by the
+// scheduler, or 0 if never.
+func (a *AutoExtractor) lastAutoRun(circleID int64) int64 {
+	v, _, _ := a.s.store.GetSyncState(autoExtractLastPrefix + strconv.FormatInt(circleID, 10))
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// markAutoRun stamps the cooldown for a circle. Called when a run *starts*, not
+// when it finishes, so a crashed or task-less run still burns the cooldown.
+func (a *AutoExtractor) markAutoRun(circleID int64) {
+	a.s.store.PutSyncState(autoExtractLastPrefix+strconv.FormatInt(circleID, 10),
+		strconv.FormatInt(time.Now().Unix(), 10))
+}
 
 func newAutoExtractor(s *Server) *AutoExtractor { return &AutoExtractor{s: s} }
 
@@ -74,20 +97,33 @@ func (a *AutoExtractor) tick() {
 	if !ok {
 		return
 	}
+	// Re-check: picking scans every circle and can take a moment, during which
+	// the user may have switched the toggle off.
+	if !a.enabled() {
+		return
+	}
+
+	// Burn the cooldown before starting. If the run dies, crashes, or marks no
+	// watermarks at all, this circle still waits a full interval before it can
+	// be picked again.
+	a.markAutoRun(circleID)
 
 	// Mirror the manual handler: start an async run via RunManager.
+	run, ctx := a.s.runs.Start("circle", strconv.FormatInt(circleID, 10), name+" (auto)")
+
 	a.mu.Lock()
 	a.running = true
+	a.current = run
+	a.lastRunID = run.ID
 	a.mu.Unlock()
 
-	run, ctx := a.s.runs.Start("circle", strconv.FormatInt(circleID, 10), name+" (auto)")
-	a.lastRunID = run.ID
 	fmt.Printf("auto-extract: circle %d (%s) run=%s\n", circleID, name, run.ID)
 
 	go func() {
 		defer func() {
 			a.mu.Lock()
 			a.running = false
+			a.current = nil
 			a.mu.Unlock()
 		}()
 		a.s.executeExtraction(ctx, run, 30*time.Minute, "extract-circle.mjs",
@@ -95,10 +131,34 @@ func (a *AutoExtractor) tick() {
 	}()
 }
 
-// pickDueCircle returns the circle id + name whose extraction is "most due":
-// it has chats with messages newer than their watermark, and the circle hasn't
-// been extracted in the last interval (rough check via earliest watermark).
-// Returns ok=false if nothing needs a run right now.
+// stop cancels the in-flight auto run, if any. Called when the toggle is
+// switched off so "off" means "stop now", not "stop within 30 minutes".
+func (a *AutoExtractor) stop() {
+	a.mu.Lock()
+	run := a.current
+	a.mu.Unlock()
+	if run != nil {
+		fmt.Printf("auto-extract: disabled, cancelling run=%s\n", run.ID)
+		run.Cancel()
+	}
+}
+
+// pickDueCircle returns the circle that should be extracted next, or ok=false
+// if nothing is due.
+//
+// A circle is due when BOTH hold:
+//   - it has at least one chat with messages newer than that chat's watermark, and
+//   - it has not been extracted within the last interval.
+//
+// "Last extracted" is the newest of (a) the per-circle cooldown stamp and
+// (b) max(chat_extraction_state.updated_at) over the circle's chats. Both are
+// *run* times. Earlier versions compared against min(last_msg_ts) — a *message*
+// timestamp — so a single dormant chat with a months-old last message made the
+// circle look permanently overdue and it re-ran on every 10-minute tick.
+//
+// Among due circles, the one with the most recent activity wins. Ranking by
+// "oldest watermark" let one dead chat pin a circle to the top forever and
+// starve every other circle.
 func (a *AutoExtractor) pickDueCircle() (int64, string, bool) {
 	circles, err := a.s.store.ListCircles()
 	if err != nil {
@@ -108,44 +168,47 @@ func (a *AutoExtractor) pickDueCircle() (int64, string, bool) {
 	nowU := time.Now().Unix()
 
 	var best struct {
-		id        int64
-		name      string
-		gap       int64 // seconds since last watermark (older = more due)
-		hasNew    bool
+		id     int64
+		name   string
+		newest int64 // newest message in the circle (more recent = higher priority)
+		found  bool
 	}
 	for _, c := range circles {
 		jids, _ := a.s.store.FlattenCircleChats(c.ID)
 		if len(jids) == 0 {
 			continue
 		}
-		// For each chat in the circle: find max(timestamp) and watermark.
-		// If max(timestamp) > watermark for any chat, this circle has new messages.
-		var minWatermark int64 = nowU
+
+		// lastRun = when this circle was last actually extracted.
+		lastRun := a.lastAutoRun(c.ID)
+		var newestMsg int64
 		hasNew := false
 		for _, jid := range jids {
-			var maxTS, wmTS int64
+			var maxTS, wmTS, updatedAt int64
 			a.s.store.DB.QueryRow(`SELECT COALESCE(MAX(timestamp),0) FROM messages WHERE chat_jid = ?`, jid).Scan(&maxTS)
-			a.s.store.DB.QueryRow(`SELECT COALESCE(last_msg_ts,0) FROM chat_extraction_state WHERE chat_jid = ?`, jid).Scan(&wmTS)
+			a.s.store.DB.QueryRow(`SELECT COALESCE(last_msg_ts,0), COALESCE(updated_at,0) FROM chat_extraction_state WHERE chat_jid = ?`, jid).Scan(&wmTS, &updatedAt)
 			if maxTS > wmTS {
 				hasNew = true
 			}
-			if wmTS > 0 && wmTS < minWatermark {
-				minWatermark = wmTS
+			if maxTS > newestMsg {
+				newestMsg = maxTS
+			}
+			if updatedAt > lastRun {
+				lastRun = updatedAt
 			}
 		}
 		if !hasNew {
 			continue
 		}
-		// Older than interval?
-		gap := nowU - minWatermark
-		if gap < intervalSec {
+		// Cooldown: never re-run a circle inside one interval.
+		if lastRun > 0 && nowU-lastRun < intervalSec {
 			continue
 		}
-		if gap > best.gap {
-			best.id, best.name, best.gap, best.hasNew = c.ID, c.Name, gap, true
+		if !best.found || newestMsg > best.newest {
+			best.id, best.name, best.newest, best.found = c.ID, c.Name, newestMsg, true
 		}
 	}
-	if !best.hasNew {
+	if !best.found {
 		return 0, "", false
 	}
 	return best.id, best.name, true
@@ -161,8 +224,9 @@ type autoStatus struct {
 }
 
 // handleAutoExtract returns/updates the auto-extractor status + toggle.
-//   GET  /api/v2/extractions/auto         -> current status
-//   POST /api/v2/extractions/auto         -> {enabled?, interval_hours?}
+//
+//	GET  /api/v2/extractions/auto         -> current status
+//	POST /api/v2/extractions/auto         -> {enabled?, interval_hours?}
 func (s *Server) handleAutoExtract(w http.ResponseWriter, r *http.Request) {
 	if s.autoExtract == nil {
 		jsonError(w, 503, "auto-extract not initialised")
@@ -195,6 +259,8 @@ func (s *Server) handleAutoExtract(w http.ResponseWriter, r *http.Request) {
 			s.store.PutSyncState(autoExtractEnabledKey, val)
 			if *req.Enabled {
 				go a.tick() // give the user immediate feedback
+			} else {
+				a.stop() // kill any in-flight sidecar immediately
 			}
 		}
 		if req.IntervalHours != nil && *req.IntervalHours >= 1 {
