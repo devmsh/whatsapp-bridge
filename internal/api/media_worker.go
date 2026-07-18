@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"whatsapp-bridge-v2/internal/db"
 )
@@ -81,6 +82,53 @@ func (m *MediaUnderstandingManager) Start() {
 // so the history backfill stays gentle on the ChatGPT quota.
 const refineBackfillParallel = 2
 
+// minRefinableLen is the shortest transcript (in runes) worth sending to the
+// refiner. Below this there is nothing to punctuate or clean, so the call is
+// pure cost — and its unchanged output used to re-queue the row forever.
+const minRefinableLen = 16
+
+// refineAction is what to do with a refiner result.
+type refineAction int
+
+const (
+	refineStore    refineAction = iota // the refiner rewrote the text — persist it
+	refineComplete                     // the pass ran and found nothing to change
+	refineRetry                        // the refiner produced nothing — a real failure
+)
+
+func (a refineAction) String() string {
+	switch a {
+	case refineStore:
+		return "store"
+	case refineComplete:
+		return "complete"
+	default:
+		return "retry"
+	}
+}
+
+// classifyRefineResult decides the outcome of one refine pass.
+//
+// "Unchanged" is success, not failure: a cleaner handed a transcript with
+// nothing to clean returns it as-is. Treating that as failure left refined=0
+// and the 15s backfill loop re-selected the row every cycle forever.
+func classifyRefineResult(raw, refined string) refineAction {
+	r := strings.TrimSpace(refined)
+	if r == "" {
+		return refineRetry
+	}
+	if r == strings.TrimSpace(raw) {
+		return refineComplete
+	}
+	return refineStore
+}
+
+// worthRefining reports whether a transcript is long enough that the refiner
+// could plausibly improve it.
+func worthRefining(raw string) bool {
+	return utf8.RuneCountInString(strings.TrimSpace(raw)) >= minRefinableLen
+}
+
 func (m *MediaUnderstandingManager) refineBackfillLoop() {
 	time.Sleep(60 * time.Second) // let initial transcription work settle
 	t := time.NewTicker(15 * time.Second)
@@ -110,11 +158,22 @@ func (m *MediaUnderstandingManager) processRefineBatch(batch []db.RefineTarget) 
 				if !m.enabledFor("audio") {
 					return
 				}
-				refined := m.refineTranscript(target.ChatJID, target.MessageID, target.Raw)
-				if strings.TrimSpace(refined) == "" || strings.TrimSpace(refined) == strings.TrimSpace(target.Raw) {
+				// Too short to improve — settle the row without an LLM call.
+				if !worthRefining(target.Raw) {
+					m.s.store.MarkTranscriptRefined(target.ChatJID, target.MessageID)
 					continue
 				}
-				m.s.store.SetTranscriptRefined(target.ChatJID, target.MessageID, refined)
+				refined := m.refineTranscript(target.ChatJID, target.MessageID, target.Raw)
+				switch classifyRefineResult(target.Raw, refined) {
+				case refineStore:
+					m.s.store.SetTranscriptRefined(target.ChatJID, target.MessageID, refined)
+				case refineComplete:
+					// Nothing to change. The pass is done; leave the text alone.
+					m.s.store.MarkTranscriptRefined(target.ChatJID, target.MessageID)
+				case refineRetry:
+					// Real failure. Retry later, but bounded by MaxRefineAttempts.
+					m.s.store.BumpRefineAttempt(target.ChatJID, target.MessageID)
+				}
 			}
 		}()
 	}
@@ -237,14 +296,28 @@ func (m *MediaUnderstandingManager) processOne(p db.PendingMediaMessage) {
 			// refinement pass with chat context so the stored transcript
 			// reads as proper Arabic with punctuation, correct English
 			// spelling for tech terms, and (when natural) markdown bullets.
-			refined := m.refineTranscript(p.ChatJID, p.MessageID, text)
 			muRow.Status = db.MUOK
-			muRow.Content = strings.TrimSpace(refined)
-			// Mark refined=1 only if the refiner actually changed the text.
-			// (If it returned the raw text unchanged because of an API blip,
-			// the backfill pass will retry it later.)
-			if strings.TrimSpace(refined) != strings.TrimSpace(text) {
+			muRow.Content = strings.TrimSpace(text)
+			if !worthRefining(text) {
+				// Too short to improve — don't spend an LLM call, and don't
+				// leave it queued for the backfill loop either.
 				muRow.Refined = 1
+			} else {
+				refined := m.refineTranscript(p.ChatJID, p.MessageID, text)
+				switch classifyRefineResult(text, refined) {
+				case refineStore:
+					muRow.Content = strings.TrimSpace(refined)
+					muRow.Refined = 1
+				case refineComplete:
+					// The pass ran and found nothing to change. That is done —
+					// keep the whisper text and stop queueing the row.
+					muRow.Refined = 1
+				case refineRetry:
+					// Refiner produced nothing. Keep the raw whisper text rather
+					// than storing an empty transcript, and leave refined=0 so
+					// the backfill retries — bounded by db.MaxRefineAttempts.
+					muRow.Refined = 0
+				}
 			}
 		}
 		m.s.store.UpsertMU(muRow)

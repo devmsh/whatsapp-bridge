@@ -31,10 +31,10 @@ type MediaUnderstanding struct {
 // GetMU returns the row for (chat,message,kind) or nil.
 func (s *Store) GetMU(chatJID, messageID, kind string) (*MediaUnderstanding, error) {
 	mu := &MediaUnderstanding{}
-	err := s.DB.QueryRow(`SELECT chat_jid, message_id, kind, content, status, error, generated_at
+	err := s.DB.QueryRow(`SELECT chat_jid, message_id, kind, content, status, error, refined, generated_at
 		FROM media_understanding WHERE chat_jid = ? AND message_id = ? AND kind = ?`,
 		chatJID, messageID, kind).
-		Scan(&mu.ChatJID, &mu.MessageID, &mu.Kind, &mu.Content, &mu.Status, &mu.Error, &mu.GeneratedAt)
+		Scan(&mu.ChatJID, &mu.MessageID, &mu.Kind, &mu.Content, &mu.Status, &mu.Error, &mu.Refined, &mu.GeneratedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -69,6 +69,12 @@ type RefineTarget struct {
 	Raw       string
 }
 
+// MaxRefineAttempts caps how many times a single transcript may be sent to the
+// refiner before the row is left alone. Only genuine failures (empty refiner
+// output) consume an attempt — a pass that completes and changes nothing marks
+// the row refined instead, via MarkTranscriptRefined.
+const MaxRefineAttempts = 5
+
 func (s *Store) PendingTranscriptsToRefine(limit int) []RefineTarget {
 	if limit <= 0 {
 		limit = 25
@@ -76,7 +82,8 @@ func (s *Store) PendingTranscriptsToRefine(limit int) []RefineTarget {
 	rows, err := s.DB.Query(`SELECT chat_jid, message_id, content
 		FROM media_understanding
 		WHERE kind = ? AND status = ? AND refined = 0 AND content != ''
-		ORDER BY generated_at DESC LIMIT ?`, MUTranscript, MUOK, limit)
+		  AND refine_attempts < ?
+		ORDER BY generated_at DESC LIMIT ?`, MUTranscript, MUOK, MaxRefineAttempts, limit)
 	if err != nil {
 		return nil
 	}
@@ -99,6 +106,35 @@ func (s *Store) SetTranscriptRefined(chatJID, messageID, refined string) error {
 		 SET content = ?, refined = 1, generated_at = ?
 		 WHERE chat_jid = ? AND message_id = ? AND kind = ?`,
 		refined, time.Now().Unix(), chatJID, messageID, MUTranscript,
+	)
+	return err
+}
+
+// MarkTranscriptRefined records that the refine pass completed without changing
+// the text, leaving the content untouched.
+//
+// A cleaner handed a transcript with nothing to clean ("ok", "ده") legitimately
+// returns it unchanged. That is success. Treating it as failure — the original
+// bug — left refined=0 and the 15s backfill loop re-selected the row forever,
+// spending an LLM call every cycle.
+func (s *Store) MarkTranscriptRefined(chatJID, messageID string) error {
+	_, err := s.DB.Exec(
+		`UPDATE media_understanding
+		 SET refined = 1
+		 WHERE chat_jid = ? AND message_id = ? AND kind = ?`,
+		chatJID, messageID, MUTranscript,
+	)
+	return err
+}
+
+// BumpRefineAttempt records one failed refine attempt. Once the count reaches
+// MaxRefineAttempts the row stops being queued.
+func (s *Store) BumpRefineAttempt(chatJID, messageID string) error {
+	_, err := s.DB.Exec(
+		`UPDATE media_understanding
+		 SET refine_attempts = refine_attempts + 1
+		 WHERE chat_jid = ? AND message_id = ? AND kind = ?`,
+		chatJID, messageID, MUTranscript,
 	)
 	return err
 }
