@@ -23,3 +23,6 @@ agent/node_modules/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 .claude/worktrees/
+
+# Older turbo runs used a top-level worktree dir; keep it out of the repo too
+.worktrees/
