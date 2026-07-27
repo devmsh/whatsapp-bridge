@@ -18,27 +18,36 @@ const typingFreshSec = 10
 //
 // Stored in-memory only: typing is purely ephemeral and would be misleading
 // across restarts anyway.
+// typer is one live 'composing' beacon.
+type typer struct {
+	at int64 // Unix seconds of the last beacon
+	// audio is true when the peer is recording a voice note rather than
+	// typing text. WhatsApp shows these as different states, so we keep the
+	// distinction rather than collapsing both to "typing…".
+	audio bool
+}
+
 type typingState struct {
 	mu sync.Mutex
-	// by chat JID -> by sender JID -> Unix seconds of last 'composing' beacon
-	m map[string]map[string]int64
+	// by chat JID -> by sender JID -> latest beacon
+	m map[string]map[string]typer
 }
 
 func newTypingState() *typingState {
-	return &typingState{m: map[string]map[string]int64{}}
+	return &typingState{m: map[string]map[string]typer{}}
 }
 
 // Set marks `sender` as typing in `chatJID` now. Replaces any previous beacon
 // from that sender — beacons arrive every few seconds while typing continues.
-func (t *typingState) Set(chatJID, sender string) {
+func (t *typingState) Set(chatJID, sender string, audio bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	inner, ok := t.m[chatJID]
 	if !ok {
-		inner = map[string]int64{}
+		inner = map[string]typer{}
 		t.m[chatJID] = inner
 	}
-	inner[sender] = time.Now().Unix()
+	inner[sender] = typer{at: time.Now().Unix(), audio: audio}
 }
 
 // Clear removes `sender` from the typing set for `chatJID` — called on the
@@ -64,16 +73,33 @@ func (t *typingState) Clear(chatJID, sender string) {
 func (t *typingState) Snapshot() map[string][]string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.snapshot(false)
+}
+
+// SnapshotAudio is Snapshot restricted to senders recording a voice note.
+// The client uses it to render "recording audio…" instead of "typing…".
+func (t *typingState) SnapshotAudio() map[string][]string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.snapshot(true)
+}
+
+// snapshot must be called with the lock held. audioOnly filters to voice-note
+// beacons; either way stale entries are GC'd inline.
+func (t *typingState) snapshot(audioOnly bool) map[string][]string {
 	cutoff := time.Now().Unix() - typingFreshSec
 	out := make(map[string][]string, len(t.m))
 	for chat, inner := range t.m {
 		live := make([]string, 0, len(inner))
-		for sender, ts := range inner {
-			if ts >= cutoff {
-				live = append(live, sender)
-			} else {
+		for sender, e := range inner {
+			if e.at < cutoff {
 				delete(inner, sender)
+				continue
 			}
+			if audioOnly && !e.audio {
+				continue
+			}
+			live = append(live, sender)
 		}
 		if len(inner) == 0 {
 			delete(t.m, chat)
@@ -98,8 +124,8 @@ func (t *typingState) Typers(chatJID string) []string {
 	}
 	cutoff := time.Now().Unix() - typingFreshSec
 	out := make([]string, 0, len(inner))
-	for sender, ts := range inner {
-		if ts >= cutoff {
+	for sender, e := range inner {
+		if e.at >= cutoff {
 			out = append(out, sender)
 		} else {
 			delete(inner, sender)

@@ -34,9 +34,20 @@ func (s *Store) GetPresence(jid string) (*PresenceEntry, error) {
 // ActiveComposers returns every DM contact whose last presence beacon was
 // 'composing' within freshSec. Used by the chat-list "typing…" preview so a
 // single request covers every visible DM row at once.
+// ActiveRecorders is ActiveComposers for voice notes — peers whose latest
+// beacon said they are recording audio rather than typing.
+func (s *Store) ActiveRecorders(freshSec int64) ([]string, error) {
+	return s.activeWithStatus("recording", freshSec)
+}
+
 func (s *Store) ActiveComposers(freshSec int64) ([]string, error) {
+	return s.activeWithStatus("composing", freshSec)
+}
+
+func (s *Store) activeWithStatus(status string, freshSec int64) ([]string, error) {
 	cutoff := time.Now().Unix() - freshSec
-	rows, err := s.DB.Query(`SELECT jid FROM presence_cache WHERE status = 'composing' AND updated_at >= ?`, cutoff)
+	rows, err := s.DB.Query(
+		`SELECT jid FROM presence_cache WHERE status = ? AND updated_at >= ?`, status, cutoff)
 	if err != nil {
 		return nil, err
 	}

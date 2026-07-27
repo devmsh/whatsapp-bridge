@@ -3,6 +3,7 @@ package wa
 import (
 	"time"
 
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
 	"whatsapp-bridge-v2/internal/db"
@@ -40,8 +41,17 @@ func handleChatPresence(c *Client, evt *events.ChatPresence) {
 	sender := evt.Sender.String()
 	status := string(evt.State) // "composing" or "paused"
 
+	// WhatsApp distinguishes typing text from recording a voice note, and
+	// shows them as different states ("typing…" vs "recording audio…").
+	// evt.Media carries which one; collapsing both to "composing" is what
+	// made every voice note look like typing.
+	audio := evt.Media == types.ChatPresenceMediaAudio
+
 	if status == "composing" {
-		c.Typing.Set(chat, sender)
+		c.Typing.Set(chat, sender, audio)
+		if audio {
+			status = "recording"
+		}
 	} else {
 		// Any non-composing state ('paused', empty) clears the entry.
 		c.Typing.Clear(chat, sender)

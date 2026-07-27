@@ -3025,6 +3025,8 @@ function formatPresence(p: PresenceEntry): string {
   // sending 'composing' once they pause, so an old composing entry isn't
   // really 'still typing'. WA itself ages these out in ~10s.
   if (p.status === 'composing' && age < 10) return 'typing…'
+  // Voice notes are their own state in WhatsApp, not a flavour of typing.
+  if (p.status === 'recording' && age < 10) return 'recording audio…'
   // 'available' (online) is also a beacon — peers send periodic refreshes;
   // assume offline after ~90s of silence.
   if (p.status === 'available' && age < 90) return 'online'

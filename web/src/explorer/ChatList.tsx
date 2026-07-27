@@ -39,7 +39,7 @@ export function ChatList({
   // 'composing' beacon for. Drives the WA-style "typing…" preview that
   // replaces the last-message line. One poll per tick covers every visible
   // row (groups + DMs combined) — see /api/v2/typing on the bridge.
-  const typing = useTypingSnapshot()
+  const { typing, audio: recording } = useTypingSnapshot()
   // WA Business labels → colored dots on each row. Read once here (hook can't
   // run inside the row map) and resolve ids to {name,color} per row.
   const { labels: chatLabels, assignments: labelAssignments } = useChatLabels()
@@ -145,6 +145,24 @@ export function ChatList({
   }, [normalRows, filter, drafts, labelFilter, labelAssignments])
 
   const rows = view === 'archived' ? archivedRows : filteredNormalRows
+
+  // WhatsApp only pushes typing/online for peers you have subscribed to, and
+  // subscriptions expire. Re-subscribe the visible rows periodically so the
+  // list can show "typing…" for chats the user has not opened — previously
+  // only the open chat was ever subscribed.
+  const visibleJIDs = useMemo(
+    () => rows.slice(0, 60).map((r) => r.chat.jid),
+    [rows],
+  )
+  const visibleKey = visibleJIDs.join(',')
+  usePoll(
+    async () => {
+      if (visibleJIDs.length === 0) return
+      await api.presenceSubscribeBulk(visibleJIDs).catch(() => {})
+    },
+    60_000,
+    [visibleKey],
+  )
 
   // If the user exhausts the archived view (e.g. unarchives the last one),
   // bounce back to the normal list so they're not stranded on an empty screen.
@@ -362,7 +380,12 @@ export function ChatList({
                   // one, mirroring the header line — falls back to a generic
                   // "typing…" for DMs and multi-typer groups.
                   <span className="truncate font-medium text-emerald-400">
-                    {typingPreview(chat.jid, typing.get(chat.jid) || [], nameMap)}
+                    {typingPreview(
+                      chat.jid,
+                      typing.get(chat.jid) || [],
+                      nameMap,
+                      recording.has(chat.jid),
+                    )}
                   </span>
                 ) : (
                   <span className="truncate">
@@ -494,22 +517,33 @@ export function ChatList({
 // Polling stays at 3 s regardless of list size — typing is the kind of
 // signal users notice fast, and the request is a single tiny in-memory
 // + indexed-DB lookup on the bridge.
-function useTypingSnapshot(): Map<string, string[]> {
+function useTypingSnapshot(): {
+  typing: Map<string, string[]>
+  audio: Map<string, string[]>
+} {
   const [snap, setSnap] = useState<Map<string, string[]>>(() => new Map())
+  const [audio, setAudio] = useState<Map<string, string[]>>(() => new Map())
   // usePoll, not setInterval: this is the one poller that is always mounted,
   // so leaving it running while the macOS window is hidden was keeping the
   // web view awake around the clock.
   usePoll(async () => {
-    const obj = await api.typingSnapshot().catch(() => ({}) as Record<string, string[]>)
+    const res = await api
+      .typingSnapshot()
+      .catch(() => ({ chats: {}, audio: {} }))
     // Only swap when the shape actually changed — avoids re-rendering
     // every row every 3 s when nobody's typing (the common case).
     setSnap((prev) => {
-      const next = new Map(Object.entries(obj))
+      const next = new Map(Object.entries(res.chats))
+      if (mapEqual(prev, next)) return prev
+      return next
+    })
+    setAudio((prev) => {
+      const next = new Map(Object.entries(res.audio))
       if (mapEqual(prev, next)) return prev
       return next
     })
   }, 3000)
-  return snap
+  return { typing: snap, audio }
 }
 
 // mapEqual: shallow set-equality for the typing snapshot. Same JIDs typing
@@ -540,13 +574,19 @@ function mapEqual(a: Map<string, string[]>, b: Map<string, string[]>): boolean {
 //
 // nameMap resolves a JID to a display name; falls back to the bare phone
 // when unknown so the row is never "@lid:1234" garbage.
-function typingPreview(chatJID: string, typers: string[], nameMap: Map<string, string>): string {
-  if (!isGroup(chatJID)) return 'typing…'
-  if (typers.length === 0) return 'typing…'
+function typingPreview(
+  chatJID: string,
+  typers: string[],
+  nameMap: Map<string, string>,
+  recording = false,
+): string {
+  // WhatsApp shows recording a voice note as its own state.
+  const verb = recording ? 'recording audio…' : 'typing…'
+  if (!isGroup(chatJID) || typers.length === 0) return verb
   const first = nameMap.get(typers[0]) || ('+' + (typers[0].split('@')[0] || '').split(':')[0])
   const firstName = first.split(/\s+/)[0]
-  if (typers.length === 1) return `${firstName} is typing…`
-  return `${firstName} +${typers.length - 1} is typing…`
+  if (typers.length === 1) return `${firstName} is ${verb}`
+  return `${firstName} +${typers.length - 1} is ${verb}`
 }
 
 // WallpaperPickerForChat thinly wraps WallpaperPicker so the picker's

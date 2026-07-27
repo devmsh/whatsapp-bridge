@@ -1082,12 +1082,29 @@ export const api = {
   // typingSnapshot returns every chat with at least one fresh 'composing'
   // beacon — groups + DMs in one response, keyed by chat JID. Used by the
   // chat list to render "typing…" previews without per-row polling.
-  typingSnapshot: async (): Promise<Record<string, string[]>> => {
+  // `audio` marks the chats where someone is recording a voice note rather
+  // than typing — WhatsApp shows those as "recording audio…".
+  typingSnapshot: async (): Promise<{
+    chats: Record<string, string[]>
+    audio: Record<string, string[]>
+  }> => {
     const res = await fetch('/api/v2/typing')
-    if (!res.ok) return {}
-    const body = (await res.json()) as { chats?: Record<string, string[]> }
-    return body.chats || {}
+    if (!res.ok) return { chats: {}, audio: {} }
+    const body = (await res.json()) as {
+      chats?: Record<string, string[]>
+      audio?: Record<string, string[]>
+    }
+    return { chats: body.chats || {}, audio: body.audio || {} }
   },
+  // Subscribe to presence for many chats at once. WhatsApp only pushes
+  // typing/online for peers you have subscribed to, so the chat list has to
+  // ask for the rows it is showing — subscribing only to the open chat is
+  // why the list could never show "typing…" for an unopened chat.
+  presenceSubscribeBulk: (jids: string[]) =>
+    postBody<{ subscribed: number; failed: number }>(
+      '/api/v2/presence/subscribe-bulk',
+      { jids },
+    ),
   // calls returns the most recent call events the bridge has seen, newest
   // first. limit caps the row count (default 100 server-side). One real
   // call shows up as several rows (offer/accept/terminate/...); the UI

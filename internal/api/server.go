@@ -114,6 +114,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/presence", s.handlePresenceSet)
 	s.mux.HandleFunc("/api/v2/presence/typing", s.handlePresenceTyping)
 	s.mux.HandleFunc("/api/v2/presence/subscribe", s.handlePresenceSubscribe)
+	s.mux.HandleFunc("/api/v2/presence/subscribe-bulk", s.handlePresenceSubscribeBulk)
 	s.mux.HandleFunc("/api/v2/presence/", s.handlePresenceGet)
 	// Single-shot typing snapshot for the chat list — every chat with a
 	// fresh 'composing' beacon, returned in one call. See handler doc.

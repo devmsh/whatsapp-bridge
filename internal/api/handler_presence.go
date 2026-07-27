@@ -61,6 +61,58 @@ func (s *Server) handlePresenceTyping(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]bool{"success": true})
 }
 
+// handlePresenceSubscribeBulk subscribes to presence for many chats at once.
+// POST /api/v2/presence/subscribe-bulk  {"jids": ["...", ...]}
+//
+// WhatsApp only pushes typing/online for peers you have subscribed to, and
+// subscriptions are per-peer. Subscribing only to the OPEN chat is why the
+// chat list could never show "typing…" for a chat you had not opened.
+//
+// Failures are counted, not fatal: a peer that blocks presence, or a group,
+// simply will not report — that is normal and must not fail the batch.
+func (s *Server) handlePresenceSubscribeBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var req struct {
+		JIDs []string `json:"jids"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		jsonError(w, 400, "invalid JSON")
+		return
+	}
+	// Cap the batch: with 250+ chats an unbounded loop would hammer the
+	// socket on every reconnect for no benefit — only visible rows matter.
+	const maxBulk = 128
+	if len(req.JIDs) > maxBulk {
+		req.JIDs = req.JIDs[:maxBulk]
+	}
+
+	wa := s.client.GetWhatsmeowClient()
+	ok, failed := 0, 0
+	for _, raw := range req.JIDs {
+		// parseJID accepts a bare word as a user with an empty server, so
+		// check for a server part explicitly — otherwise garbage counts as
+		// a success and the failed tally lies.
+		if !strings.Contains(raw, "@") {
+			failed++
+			continue
+		}
+		jid, err := parseJID(raw)
+		if err != nil {
+			failed++
+			continue
+		}
+		if err := wa.SubscribePresence(context.Background(), jid); err != nil {
+			failed++
+			continue
+		}
+		ok++
+	}
+	jsonOK(w, map[string]any{"subscribed": ok, "failed": failed})
+}
+
 func (s *Server) handlePresenceSubscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -121,7 +173,20 @@ func (s *Server) handleTypingSnapshot(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	jsonOK(w, map[string]any{"chats": out})
+	// Voice notes are a separate state in WhatsApp ("recording audio…"), so
+	// report them alongside rather than folding them into "typing…".
+	audio := map[string][]string{}
+	for chat, senders := range s.client.Typing.SnapshotAudio() {
+		audio[chat] = senders
+	}
+	if recorders, err := s.store.ActiveRecorders(10); err == nil {
+		for _, jid := range recorders {
+			if _, exists := audio[jid]; !exists {
+				audio[jid] = []string{jid}
+			}
+		}
+	}
+	jsonOK(w, map[string]any{"chats": out, "audio": audio})
 }
 
 func (s *Server) handlePresenceGet(w http.ResponseWriter, r *http.Request) {
