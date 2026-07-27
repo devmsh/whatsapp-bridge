@@ -32,6 +32,7 @@ import { ContactInfoModal } from './ContactInfoModal'
 import { ClickToChatModal } from './ClickToChatModal'
 import { ChatLabelPicker } from './ChatLabelPicker'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
+import { usePoll } from '../hooks/usePoll'
 import { useBlocklist } from '../hooks/useBlocklist'
 import { usePinnedMessages } from '../hooks/usePinnedMessages'
 
@@ -1155,7 +1156,10 @@ export function MessageThread({
           div handles all the actual scrolling. Inline background carries the
           per-chat wallpaper tint (cycle 37); empty when no wallpaper picked. */}
       <div
-        className="relative min-h-0 flex-1"
+        // .wa-wallpaper paints WhatsApp's warm off-white plus the tiled doodle
+        // pattern. A per-chat tint still wins when the user picked one, in
+        // which case the doodle rides on top of their colour.
+        className={'relative min-h-0 flex-1' + (wallpaper ? '' : ' wa-wallpaper')}
         style={wallpaper ? { backgroundColor: wallpaper } : undefined}
         // Drag-and-drop: any file dropped onto the thread becomes the
         // composer's next attachment (same staging path as paperclip /
@@ -2992,21 +2996,21 @@ function useDmPresence(jid: string | null): PresenceEntry | null {
       setEntry(null)
       return
     }
-    let cancelled = false
     // Subscribe is fire-and-forget — failures (e.g. peer blocks presence)
     // are normal and shouldn't pollute the UI with errors.
     api.presenceSubscribe(jid).catch(() => {})
-    async function tick() {
-      const p = await api.presenceGet(jid as string).catch(() => null)
-      if (!cancelled) setEntry(p)
-    }
-    void tick()
-    const h = setInterval(tick, 3000)
-    return () => {
-      cancelled = true
-      clearInterval(h)
-    }
   }, [jid])
+  // Polling is visibility-gated: a hidden window must not keep asking the
+  // bridge for presence every 3 s.
+  usePoll(
+    async () => {
+      if (!jid) return
+      const p = await api.presenceGet(jid).catch(() => null)
+      setEntry(p)
+    },
+    3000,
+    [jid],
+  )
   return entry
 }
 
@@ -3044,18 +3048,16 @@ function useGroupTyping(jid: string | null): string[] {
       setTypers([])
       return
     }
-    let cancelled = false
-    async function tick() {
-      const list = await api.chatTyping(jid as string).catch(() => [] as string[])
-      if (!cancelled) setTypers(list)
-    }
-    void tick()
-    const h = setInterval(tick, 3000)
-    return () => {
-      cancelled = true
-      clearInterval(h)
-    }
   }, [jid])
+  usePoll(
+    async () => {
+      if (!jid) return
+      const list = await api.chatTyping(jid).catch(() => [] as string[])
+      setTypers(list)
+    },
+    3000,
+    [jid],
+  )
   return typers
 }
 

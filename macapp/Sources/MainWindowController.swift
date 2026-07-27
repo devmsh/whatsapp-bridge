@@ -62,6 +62,7 @@ final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelega
     func show() {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        setPageVisible(true)
     }
 
     func load() {
@@ -88,6 +89,23 @@ final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelega
         webView.reload()
     }
 
+    /// Tells the page whether it is actually on screen.
+    ///
+    /// We do not rely on WKWebView's own `document.visibilityState` for a
+    /// window that has been ordered out — WebKit does not reliably report a
+    /// hidden window as hidden, which would leave every poller in the React
+    /// app running all day for a window nobody can see. This is the explicit
+    /// signal; `usePoll` listens for it.
+    private func setPageVisible(_ visible: Bool) {
+        let js = """
+            window.__WA_APP_VISIBLE__ = \(visible);
+            window.dispatchEvent(new CustomEvent('wa-visibility', {
+              detail: { visible: \(visible) }
+            }));
+            """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
     // MARK: WKNavigationDelegate
 
     func webView(
@@ -105,6 +123,8 @@ final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelega
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         retryTimer?.invalidate()
         retryTimer = nil
+        // A reload resets window.__WA_APP_VISIBLE__ — restate it.
+        setPageVisible(window.isVisible && !window.isMiniaturized)
     }
 
     // MARK: WKScriptMessageHandler
@@ -126,9 +146,20 @@ final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelega
 
     /// Hide instead of close — the bridge and its notifications stay alive.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // Park the web app before hiding: with the window ordered out its
+        // pollers would otherwise keep the WebContent process busy all day.
+        setPageVisible(false)
         window.orderOut(nil)
         NSApp.setActivationPolicy(.accessory)  // drop the dock icon while hidden
         return false
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        setPageVisible(false)
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        setPageVisible(true)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {

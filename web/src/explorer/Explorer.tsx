@@ -331,6 +331,44 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     alert('This chat is locked or not available.')
   }, [contacts, extraChats, device?.jid])
 
+  // Deep links into a chat, from two sources:
+  //
+  //   - 'wa-open-chat', dispatched by the macOS shell (macapp/) when a
+  //     notification banner is clicked. FocusMode listens for the same event;
+  //     this handles the normal (non-focus) layout.
+  //   - a '#chat=<jid>' fragment, so a chat can be opened by URL the way
+  //     WhatsApp Web supports.
+  //
+  // Both are no-ops in a plain browser session with no hash.
+  useEffect(() => {
+    const onOpenChatEvent = (e: Event) => {
+      const jid = (e as CustomEvent<string>).detail
+      if (typeof jid === 'string' && jid) openChat(jid)
+    }
+    window.addEventListener('wa-open-chat', onOpenChatEvent)
+
+    const fromHash = () => {
+      const m = /(?:^|[#&])chat=([^&]+)/.exec(window.location.hash)
+      if (m) openChat(decodeURIComponent(m[1]))
+    }
+    fromHash()
+    window.addEventListener('hashchange', fromHash)
+
+    return () => {
+      window.removeEventListener('wa-open-chat', onOpenChatEvent)
+      window.removeEventListener('hashchange', fromHash)
+    }
+  }, [openChat])
+
+  // Tell the macOS shell which chat is on screen so it can suppress banners
+  // for the thread the user is already reading.
+  useEffect(() => {
+    ;(window as any).webkit?.messageHandlers?.app?.postMessage({
+      type: 'visible-chat',
+      jid: selected,
+    })
+  }, [selected])
+
   // Called by ChatUnlockModal once Touch ID succeeded and a per-chat token
   // was stored. We fetch the chat row (now authorised by the new token via
   // the global fetch interceptor) and place it into extraChats so the rest

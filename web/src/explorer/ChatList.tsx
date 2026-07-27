@@ -6,6 +6,7 @@ import { ContextMenu, type MenuItem } from './ContextMenu'
 import { useDrafts } from '../hooks/useDrafts'
 import { useChatWallpaper } from '../hooks/useChatWallpaper'
 import { useChatLabels } from '../hooks/useChatLabels'
+import { usePoll } from '../hooks/usePoll'
 import { WallpaperPicker } from './WallpaperPicker'
 
 // ChatList shows the time-ordered list of chats. Search is handled by the
@@ -311,14 +312,16 @@ export function ChatList({
               setMenu({ jid: chat.jid, title, x: e.clientX, y: e.clientY })
             }}
             className={
-              'flex w-full items-center gap-3 px-3 py-2.5 text-left transition ' +
+              // WA row: 49px avatar, 13px gutter, and the hairline divider
+              // inset to the text column (drawn on the inner block below).
+              'flex w-full items-center gap-3 pl-[13px] pr-[15px] text-left transition ' +
               (selected === chat.jid ? 'bg-neutral-800' : 'hover:bg-neutral-900')
             }
           >
-            <ChatAvatar jid={chat.jid} title={title} group={isGroup(chat.jid)} size={40} />
-            <div className="min-w-0 flex-1">
+            <ChatAvatar jid={chat.jid} title={title} group={isGroup(chat.jid)} size={49} />
+            <div className="min-w-0 flex-1 border-b border-neutral-800 py-[11px]">
               <div className="flex items-baseline justify-between gap-2">
-                <span dir="auto" className="truncate text-sm font-medium">
+                <span dir="auto" className="truncate text-[15px] text-neutral-100">
                   {title}
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
@@ -335,12 +338,12 @@ export function ChatList({
                       />
                     )
                   })}
-                  <span className="text-[11px] text-neutral-500">
+                  <span className="text-[12px] text-neutral-400">
                     {chatListTime(chat.last_message_at)}
                   </span>
                 </span>
               </div>
-              <div dir="auto" className="flex items-center gap-1.5 truncate text-xs text-neutral-500">
+              <div dir="auto" className="mt-[2px] flex items-center gap-1.5 truncate text-[14px] text-neutral-400">
                 {drafts.has(chat.jid) ? (
                   // WA shows "Draft: <preview>" in red whenever the composer
                   // has typed-but-unsent text — replaces the last-message
@@ -493,26 +496,19 @@ export function ChatList({
 // + indexed-DB lookup on the bridge.
 function useTypingSnapshot(): Map<string, string[]> {
   const [snap, setSnap] = useState<Map<string, string[]>>(() => new Map())
-  useEffect(() => {
-    let cancelled = false
-    async function tick() {
-      const obj = await api.typingSnapshot().catch(() => ({}) as Record<string, string[]>)
-      if (cancelled) return
-      // Only swap when the shape actually changed — avoids re-rendering
-      // every row every 3 s when nobody's typing (the common case).
-      setSnap((prev) => {
-        const next = new Map(Object.entries(obj))
-        if (mapEqual(prev, next)) return prev
-        return next
-      })
-    }
-    void tick()
-    const h = setInterval(tick, 3000)
-    return () => {
-      cancelled = true
-      clearInterval(h)
-    }
-  }, [])
+  // usePoll, not setInterval: this is the one poller that is always mounted,
+  // so leaving it running while the macOS window is hidden was keeping the
+  // web view awake around the clock.
+  usePoll(async () => {
+    const obj = await api.typingSnapshot().catch(() => ({}) as Record<string, string[]>)
+    // Only swap when the shape actually changed — avoids re-rendering
+    // every row every 3 s when nobody's typing (the common case).
+    setSnap((prev) => {
+      const next = new Map(Object.entries(obj))
+      if (mapEqual(prev, next)) return prev
+      return next
+    })
+  }, 3000)
   return snap
 }
 

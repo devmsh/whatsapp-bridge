@@ -202,8 +202,13 @@ export function MessageBubble({
       )}
       <div
         className={
-          'group max-w-[78%] rounded-2xl px-3 py-2 text-sm transition ' +
-          (mine ? 'bg-emerald-700/40' : 'bg-neutral-800') +
+          // WA bubble: 7.5px radius + 1px shadow (see .wa-bubble), with a
+          // tail only on the first message of a run so a burst reads as one
+          // block. Colours come from the sampled bubble tokens.
+          'group wa-bubble max-w-[78%] px-[9px] py-[6px] text-[14.2px] leading-[19px] transition ' +
+          (mine
+            ? 'wa-bubble-out' + (firstInGroup ? ' wa-tail-out' : '')
+            : 'wa-bubble-in' + (firstInGroup ? ' wa-tail-in' : '')) +
           (highlighted
             ? ' ring-2 ring-amber-400/80 shadow-lg shadow-amber-500/20'
             : selfMentioned ? ' ring-1 ring-emerald-400/60' : '')
@@ -319,14 +324,14 @@ export function MessageBubble({
               }}
               title="Jump to the original message"
               style={stripeStyle}
-              className="mb-1 block w-full border-l-2 bg-black/20 px-2 py-1 text-start text-xs text-neutral-300 transition hover:bg-black/40"
+              className="mb-1 block w-full overflow-hidden rounded-[4px] border-l-[3px] bg-black/[0.045] px-2 py-1 text-start text-xs text-neutral-400 transition hover:bg-black/[0.08]"
             >
               {quoteBody}
             </button>
           ) : (
             <div
               style={stripeStyle}
-              className="mb-1 border-l-2 bg-black/20 px-2 py-1 text-xs text-neutral-300"
+              className="mb-1 overflow-hidden rounded-[4px] border-l-[3px] bg-black/[0.045] px-2 py-1 text-xs text-neutral-400"
             >
               {quoteBody}
             </div>

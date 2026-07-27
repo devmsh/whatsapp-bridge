@@ -107,6 +107,59 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
+   Message bubbles
+   ---------------------------------------------------------------------------
+   WhatsApp bubbles are barely rounded (7.5px, not the 16px of a typical chat
+   UI) and carry a 1px shadow rather than a border. The first bubble in a run
+   grows a tail; subsequent ones do not, which is what makes a burst of
+   messages read as one block.
+--------------------------------------------------------------------------- */
+.wa-bubble {
+  position: relative;
+  border-radius: 7.5px;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+}
+
+.wa-bubble-in {
+  background-color: var(--color-wa-bubble-in);
+}
+
+.wa-bubble-out {
+  background-color: var(--color-wa-bubble-out);
+}
+
+/* Tails: a small triangle filling the squared-off top corner. */
+.wa-tail-in {
+  border-top-left-radius: 0;
+}
+
+.wa-tail-in::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 8px;
+  height: 13px;
+  background-color: var(--color-wa-bubble-in);
+  clip-path: polygon(100% 0, 100% 100%, 0 0);
+}
+
+.wa-tail-out {
+  border-top-right-radius: 0;
+}
+
+.wa-tail-out::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 8px;
+  height: 13px;
+  background-color: var(--color-wa-bubble-out);
+  clip-path: polygon(0 0, 0 100%, 100% 0);
+}
+
+/* ---------------------------------------------------------------------------
    Thread wallpaper
    ---------------------------------------------------------------------------
    WhatsApp tiles a doodle pattern over a warm off-white. Recreated as an inline
@@ -117,5 +170,10 @@ body {
   background-color: var(--color-wa-wallpaper);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='none' stroke='%23e9e1d6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 30c6-6 14-6 20 0M30 22v16'/%3E%3Ccircle cx='96' cy='34' r='9'/%3E%3Cpath d='M150 24h20v14h-8l-5 6v-6h-7z'/%3E%3Cpath d='M214 26l6 12-6 12-6-12z'/%3E%3Cpath d='M36 92h18v12H36zM40 88v4M50 88v4'/%3E%3Cpath d='M104 84l8 16h-16z'/%3E%3Ccircle cx='168' cy='94' r='8'/%3E%3Cpath d='M168 86v16M160 94h16'/%3E%3Cpath d='M222 84c8 0 12 6 12 12s-8 10-12 6'/%3E%3Cpath d='M26 156c6-8 16-8 22 0-4 8-18 8-22 0z'/%3E%3Cpath d='M92 148h22v16H92zM96 164v6M110 164v6'/%3E%3Cpath d='M156 152l10 6-10 6z'/%3E%3Ccircle cx='222' cy='158' r='10'/%3E%3Cpath d='M30 214l8-10 8 10z'/%3E%3Cpath d='M88 206h24M88 214h16'/%3E%3Ccircle cx='164' cy='212' r='7'/%3E%3Cpath d='M158 220c4 4 8 4 12 0'/%3E%3Cpath d='M212 204h16v16h-16z'/%3E%3C/g%3E%3C/svg%3E");
   background-repeat: repeat;
-  background-size: 260px 260px;
+  /* Tiled well below the 260px viewBox: WhatsApp's doodles are small and
+     dense, and at 1:1 the shapes read as decoration instead of texture.
+     Shrinking the tile also drops their visual weight, which is what makes
+     the pattern sit behind the bubbles rather than compete with them. */
+  background-size: 170px 170px;
+  opacity: 1;
 }

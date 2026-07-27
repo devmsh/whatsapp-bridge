@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { isAppVisible } from './usePoll'
 
 // useScheduledMessages — purely client-side "schedule send" queue.
 //
@@ -144,7 +145,17 @@ export function useScheduledMessages(): {
 export function useScheduledAutopilot() {
   useEffect(() => {
     void flushDue()
-    const h = window.setInterval(flushDue, POLL_MS)
+    // Gated the same way as every other poller — see usePoll.
+    let h: number | undefined
+    const start = () => {
+      if (h === undefined) h = window.setInterval(flushDue, POLL_MS)
+    }
+    const halt = () => {
+      if (h !== undefined) { window.clearInterval(h); h = undefined }
+    }
+    const onAppVis = () => (isAppVisible() ? start() : halt())
+    onAppVis()
+    window.addEventListener('wa-visibility', onAppVis)
     // Also flush on visibility regain — the user just came back to the
     // tab, fires anything due immediately rather than waiting for the
     // next 30s tick.
@@ -153,7 +164,8 @@ export function useScheduledAutopilot() {
     }
     document.addEventListener('visibilitychange', onVis)
     return () => {
-      window.clearInterval(h)
+      halt()
+      window.removeEventListener('wa-visibility', onAppVis)
       document.removeEventListener('visibilitychange', onVis)
     }
   }, [])
