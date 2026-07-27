@@ -40,24 +40,39 @@ struct IncomingMessage: Decodable {
         return ChatDirectory.prettyJID(sender)
     }
 
-    /// Body text for a banner: the message, its caption, or a media placeholder.
-    var preview: String {
-        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { return text }
-
-        let caption = (mediaCaption ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !caption.isEmpty { return caption }
-
-        switch (mediaType ?? "").lowercased() {
+    /// Human label for a media kind, used for both the `media_type` field and
+    /// the bridge's own "[audio]"-style content placeholders.
+    private static func mediaLabel(_ kind: String) -> String? {
+        switch kind.lowercased() {
         case "image": return "📷 Photo"
         case "video": return "🎥 Video"
-        case "audio", "ptt": return "🎤 Voice message"
+        case "audio", "ptt", "voice_note": return "🎤 Voice message"
         case "document": return "📄 Document"
         case "sticker": return "🌟 Sticker"
         case "location": return "📍 Location"
         case "contact", "vcard": return "👤 Contact"
-        default: return "New message"
+        default: return nil
         }
+    }
+
+    /// Body text for a banner: the message, its caption, or a media label.
+    var preview: String {
+        let text = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            // handler_messages.go stores bare placeholders like "[audio]" as
+            // the content of a media-only message — show a real label instead.
+            if text.hasPrefix("["), text.hasSuffix("]"),
+                let label = Self.mediaLabel(String(text.dropFirst().dropLast()))
+            {
+                return label
+            }
+            return text
+        }
+
+        let caption = (mediaCaption ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !caption.isEmpty { return caption }
+
+        return Self.mediaLabel(mediaType ?? "") ?? "New message"
     }
 }
 

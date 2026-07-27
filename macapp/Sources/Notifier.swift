@@ -66,9 +66,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         if msg.isGroup {
             content.title = chat?.name ?? ChatDirectory.prettyJID(msg.chatJID)
-            content.subtitle = msg.displaySender
+            // Contact book first, then whatever name rode along with the message.
+            content.subtitle = directory.knownName(for: msg.sender) ?? msg.displaySender
         } else {
-            content.title = chat?.name ?? msg.displaySender
+            content.title =
+                directory.knownName(for: msg.chatJID)
+                ?? (msg.displaySender.isEmpty ? (chat?.name ?? "") : msg.displaySender)
         }
         content.body = msg.preview
         content.sound = .default
