@@ -31,7 +31,12 @@ import { SearchBar } from './Search'
 import Rail, { type RailItem } from './Rail'
 import { HiddenLockModal } from './HiddenLock'
 import { HideChatDialog } from './HideChatDialog'
-import { setUnlockToken as setHiddenUnlockToken } from '../hidden'
+import {
+  setUnlockToken as setHiddenUnlockToken,
+  isUnlocked,
+  hasAnyChatUnlock,
+  clearAllChatUnlocks,
+} from '../hidden'
 import { HiddenBadge } from './HiddenBadge'
 import { ChatUnlockModal } from './ChatUnlockModal'
 import { StarredPanel } from './StarredPanel'
@@ -330,6 +335,49 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     // Fallthrough B: still unknown — we genuinely can't route here.
     alert('This chat is locked or not available.')
   }, [contacts, extraChats, device?.jid])
+
+  // Esc = panic relock.
+  //
+  // While private mode is on (the list shows only locked chats) or a single
+  // locked chat is open via a per-chat unlock, Esc locks everything and drops
+  // you back on the normal list. This is a privacy gesture, so it deliberately
+  // fires even from the composer — a draft survives in useDrafts, an
+  // over-the-shoulder glance does not.
+  //
+  // Modals still get first refusal: if one is open, Esc closes it and this
+  // does nothing, so a single Esc never both closes a dialog AND relocks.
+  useEffect(() => {
+    const anyOverlayOpen = () =>
+      showSettings || showPrivacy || showSelfProfile || showStatuses ||
+      showNewsletters || showShortcuts || showCompose || dndOpen ||
+      showProfiling || showBriefing || showStarred || showQuickReplies ||
+      showWorkingHours || showUnlock || recoOpen ||
+      hideTarget !== null || unlockPrompt !== null || selectedTask !== null
+
+    async function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (anyOverlayOpen()) return
+      if (!isUnlocked() && !hasAnyChatUnlock()) return
+
+      e.preventDefault()
+      // Revoke server-side first so the token is dead even if the reload below
+      // races; then clear both token flavours and return to the normal list.
+      await api.hiddenLock().catch(() => {})
+      setHiddenUnlockToken(null)
+      clearAllChatUnlocks()
+      setExtraChats({})
+      setSelected(null)
+      setTab('chats')
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [
+    showSettings, showPrivacy, showSelfProfile, showStatuses, showNewsletters,
+    showShortcuts, showCompose, dndOpen, showProfiling, showBriefing,
+    showStarred, showQuickReplies, showWorkingHours, showUnlock, recoOpen,
+    hideTarget, unlockPrompt, selectedTask,
+  ])
 
   // Deep links into a chat, from two sources:
   //

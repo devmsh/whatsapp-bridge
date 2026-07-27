@@ -50,6 +50,26 @@ export function clearChatUnlock(chatJID: string) {
   }
 }
 
+/** True when at least one chat is open via a per-chat unlock. */
+export function hasAnyChatUnlock(): boolean {
+  const now = Date.now()
+  for (const [jid, e] of chatTokens) {
+    if (e.expiry < now) chatTokens.delete(jid)
+    else return true
+  }
+  return false
+}
+
+/** Drops every per-chat unlock at once — used by the Esc panic-relock. */
+export function clearAllChatUnlocks() {
+  if (chatTokens.size === 0) return
+  const jids = [...chatTokens.keys()]
+  chatTokens.clear()
+  for (const chatJID of jids) {
+    window.dispatchEvent(new CustomEvent('wa.chat-unlock-changed', { detail: { chatJID } }))
+  }
+}
+
 export function getChatUnlockToken(chatJID: string): string | null {
   const e = chatTokens.get(chatJID)
   if (!e) return null
