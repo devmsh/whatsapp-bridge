@@ -98,7 +98,10 @@ export function ProfileCard({
     profile?.source === 'manual' ? 'Edited' : profile?.status === 'error' ? 'Failed' : 'Auto'
 
   return (
-    <div className="border-b border-neutral-800 bg-neutral-900/40 px-4 py-2 text-xs">
+    // WhatsApp has no bar here, so this one earns its place by being quiet:
+    // no tinted background, a hairline rule, and collapsed to a single line
+    // that reads as part of the header rather than a panel of its own.
+    <div className="border-b border-neutral-800 px-4 py-1.5 text-xs">
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-2 text-left text-neutral-400 hover:text-neutral-200"
