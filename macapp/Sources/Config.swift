@@ -51,8 +51,22 @@ enum Config {
         ].joined(separator: ":")
     }
 
-    static var baseURL: URL { URL(string: "http://127.0.0.1:\(port)")! }
+    /// The page the web view loads. MUST be "localhost", not "127.0.0.1".
+    ///
+    /// WebAuthn (Touch ID for locked chats) derives its Relying Party ID from
+    /// the document's origin, and the spec requires that to be a valid DOMAIN.
+    /// An IP address is not one, so an origin of http://127.0.0.1:8082 makes
+    /// the browser reject the ceremony with "The effective domain of the
+    /// document is not a valid domain" — client-side, before the bridge is
+    /// ever contacted. "localhost" is a valid domain, is treated as a secure
+    /// context, and is already whitelisted in RPOrigins on the Go side.
+    static var baseURL: URL { URL(string: "http://localhost:\(port)")! }
 
+    /// The shell's own HTTP calls (health probe, SSE stream, chat directory).
+    ///
+    /// Deliberately the literal loopback address rather than "localhost":
+    /// these carry no Origin header and never touch WebAuthn, and the
+    /// notification stream should not depend on name resolution working.
     static func api(_ path: String) -> URL {
         URL(string: "http://127.0.0.1:\(port)/api/v2/\(path)")!
     }

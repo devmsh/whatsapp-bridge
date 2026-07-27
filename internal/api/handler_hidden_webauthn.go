@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -89,6 +90,16 @@ func rpForRequest(r *http.Request) (*webauthn.WebAuthn, error) {
 		return nil, err
 	}
 	rpID := u.Hostname()
+	// WebAuthn requires the Relying Party ID to be a valid domain; an IP
+	// address is not one. A browser pointed at http://127.0.0.1:<port> fails
+	// the ceremony itself with "The effective domain of the document is not a
+	// valid domain", so we would never normally be reached — but if we are,
+	// say why instead of letting a vaguer error surface downstream.
+	if net.ParseIP(rpID) != nil {
+		return nil, fmt.Errorf(
+			"WebAuthn needs a domain origin, got the IP %q — open the GUI on "+
+				"http://localhost:%s (or whatsapp-bridge.test) instead", rpID, u.Port())
+	}
 	cfg := &webauthn.Config{
 		RPID:          rpID,
 		RPDisplayName: "WhatsApp Bridge",
