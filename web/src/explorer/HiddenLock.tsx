@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type HiddenStatus } from '../api'
+import { isNativeShell, nativeUnlock } from '../nativeBridge'
 import {
   setUnlockToken,
   webauthnAssert,
@@ -115,6 +116,17 @@ export function HiddenLockModal({
     try {
       const r = await api.hiddenUnlockPin(pin)
       setPinPassed(r.pin_passed_token)
+      if (isNativeShell()) {
+        // macOS app: WebAuthn can't run in a WKWebView (Apple requires the
+        // relying party to be an associated domain, which needs a paid Team
+        // ID). The shell does a real Touch ID check instead and exchanges
+        // the pin-passed handle for an unlock token.
+        setStep('biometric')
+        const token = await nativeUnlock(r.pin_passed_token)
+        setUnlockToken(token)
+        onUnlocked()
+        return
+      }
       if (!r.webauthn_registered) {
         // Touch ID not yet registered — register it now.
         setStep('biometric')

@@ -192,6 +192,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/hidden/list", s.handleHiddenList)
 	s.mux.HandleFunc("/api/v2/hidden/pin/setup", s.handleHiddenPinSetup)
 	s.mux.HandleFunc("/api/v2/hidden/unlock/pin", s.handleHiddenUnlockPin)
+	// macOS app second factor — see handler_hidden_native.go for why the
+	// browser's WebAuthn path cannot work inside a WKWebView.
+	s.mux.HandleFunc("/api/v2/hidden/unlock/native", s.handleHiddenUnlockNative)
+	s.mux.HandleFunc("/api/v2/hidden/native/key-path", s.handleHiddenNativeKeyPath)
 	s.mux.HandleFunc("/api/v2/hidden/webauthn/register/options", s.handleHiddenWARegisterOptions)
 	s.mux.HandleFunc("/api/v2/hidden/webauthn/register/verify", s.handleHiddenWARegisterVerify)
 	s.mux.HandleFunc("/api/v2/hidden/webauthn/auth/options", s.handleHiddenWAAuthOptions)

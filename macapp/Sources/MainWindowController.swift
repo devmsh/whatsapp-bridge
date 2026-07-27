@@ -7,7 +7,7 @@ import WebKit
 /// (usually as the LaunchAgent) and notifications keep arriving — the same
 /// behaviour as Mail or Messages.
 final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelegate,
-    WKScriptMessageHandler
+    WKScriptMessageHandler, WKScriptMessageHandlerWithReply
 {
     private(set) var window: NSWindow!
     private var webView: WKWebView!
@@ -28,6 +28,11 @@ final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelega
         config.websiteDataStore = .default()
         // Lets the React app tell us which chat is on screen.
         config.userContentController.add(self, name: "app")
+
+        // Reply-capable channel: the page awaits a value back. Used for the
+        // Touch ID unlock, which must return a token (or an error) to JS.
+        config.userContentController.addScriptMessageHandler(
+            self, contentWorld: .page, name: "appAsync")
 
         // Tells the web UI it is running inside the native shell, so it stops
         // offering its own web-notification prompt (see useDesktopNotifications).
@@ -140,6 +145,52 @@ final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelega
         _ controller: WKUserContentController, didReceive message: WKScriptMessage
     ) {
         userContentMessage(message.body)
+    }
+
+    /// Async channel. Returns a value to the awaiting JS promise.
+    func userContentController(
+        _ controller: WKUserContentController,
+        didReceive message: WKScriptMessage,
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) {
+        guard let dict = message.body as? [String: Any],
+            let type = dict["type"] as? String
+        else {
+            replyHandler(nil, "malformed message")
+            return
+        }
+
+        switch type {
+        case "biometrics-available":
+            replyHandler(NativeUnlock.available(), nil)
+
+        case "native-unlock":
+            let pinToken = (dict["pin_passed_token"] as? String) ?? ""
+            guard !pinToken.isEmpty else {
+                replyHandler(nil, "missing pin_passed_token")
+                return
+            }
+            NativeUnlock.unlock(pinPassedToken: pinToken) { result in
+                switch result {
+                case .success(let token):
+                    replyHandler(["unlock_token": token], nil)
+                case .failure(let f):
+                    switch f {
+                    case .cancelled:
+                        replyHandler(nil, "cancelled")
+                    case .biometricsUnavailable(let m),
+                        .authFailed(let m),
+                        .keyUnavailable(let m),
+                        .bridge(let m):
+                        log("native unlock failed: \(m)")
+                        replyHandler(nil, m)
+                    }
+                }
+            }
+
+        default:
+            replyHandler(nil, "unknown message type \(type)")
+        }
     }
 
     // MARK: NSWindowDelegate
