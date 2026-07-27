@@ -1,9 +1,12 @@
 import Foundation
 import LocalAuthentication
 
-/// Touch ID second factor for hidden chats, for the macOS app.
+/// Touch ID unlock for hidden chats, for the macOS app.
 ///
-/// The web UI's own second factor is a WebAuthn assertion, which cannot work
+/// Touch ID is the PRIMARY credential here, as on macOS itself; the PIN is
+/// only the fallback when biometrics are unavailable or dismissed.
+///
+/// The web UI instead uses a WebAuthn assertion, which cannot work
 /// here: Apple requires an app hosting a WKWebView to declare the relying
 /// party as an associated domain before passkeys are usable, and that needs a
 /// paid Team ID plus an apple-app-site-association file over HTTPS — neither
@@ -56,7 +59,9 @@ enum NativeUnlock {
         }
 
         let ctx = LAContext()
-        ctx.localizedFallbackTitle = "" // no "Enter Password" — PIN was step one
+        // Suppress the system "Enter Password" fallback: our own fallback is
+        // the app's PIN pane, which the caller shows when this fails.
+        ctx.localizedFallbackTitle = ""
 
         var policyErr: NSError?
         guard ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &policyErr)
