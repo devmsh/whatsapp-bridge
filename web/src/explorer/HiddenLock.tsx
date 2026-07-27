@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type HiddenStatus } from '../api'
-import { isNativeShell, nativeUnlock } from '../nativeBridge'
+import { biometricsAvailable, isNativeShell, nativeUnlock } from '../nativeBridge'
 import {
   setUnlockToken,
   webauthnAssert,
@@ -29,7 +29,12 @@ export function HiddenLockModal({
   const [pin, setPin] = useState(prefilledPin || '')
   const [pin2, setPin2] = useState('')
   const [busy, setBusy] = useState(false)
-  const [step, setStep] = useState<'pin' | 'biometric' | 'done'>('pin')
+  const [step, setStep] = useState<'touchid' | 'pin' | 'biometric' | 'done'>(
+    // In the macOS app Touch ID is the primary credential, as on macOS
+    // itself; the PIN is only the fallback when Touch ID cannot be used.
+    isNativeShell() ? 'touchid' : 'pin',
+  )
+  const [canUseTouchID, setCanUseTouchID] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pinPassed, setPinPassed] = useState<string | null>(null)
 
@@ -40,6 +45,30 @@ export function HiddenLockModal({
       if (!initialMode) setMode(st.pin_set ? 'unlock' : 'setup')
     })
   }, [initialMode])
+
+  // Ask the shell whether Touch ID is usable, and if so prompt straight away
+  // rather than making the user click a button to get to the same place.
+  const touchTried = useRef(false)
+  useEffect(() => {
+    if (mode !== 'unlock' || !isNativeShell()) return
+    let cancelled = false
+    void biometricsAvailable().then((ok) => {
+      if (cancelled) return
+      setCanUseTouchID(ok)
+      if (!ok) {
+        setStep('pin') // no Touch ID on this Mac — go straight to the PIN
+        return
+      }
+      if (!touchTried.current) {
+        touchTried.current = true
+        void unlockWithTouchID()
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
 
   // If we were given a prefilled PIN (search-bar typing flow), auto-submit.
   const autoTried = useRef(false)
@@ -106,6 +135,24 @@ export function HiddenLockModal({
     }
   }
 
+  /// Primary path in the app: Touch ID alone unlocks.
+  async function unlockWithTouchID() {
+    setError(null)
+    setBusy(true)
+    try {
+      const token = await nativeUnlock() // no PIN handle = biometric path
+      setUnlockToken(token)
+      onUnlocked()
+    } catch (e) {
+      const msg = (e as Error).message
+      // A cancel is a choice, not a failure — offer the PIN quietly.
+      setError(msg === 'Touch ID cancelled' ? null : msg)
+      setStep('pin')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function submitPin() {
     if (pin.length < 4) {
       setError('Enter your PIN')
@@ -117,11 +164,10 @@ export function HiddenLockModal({
       const r = await api.hiddenUnlockPin(pin)
       setPinPassed(r.pin_passed_token)
       if (isNativeShell()) {
-        // macOS app: WebAuthn can't run in a WKWebView (Apple requires the
-        // relying party to be an associated domain, which needs a paid Team
-        // ID). The shell does a real Touch ID check instead and exchanges
-        // the pin-passed handle for an unlock token.
-        setStep('biometric')
+        // macOS app, PIN fallback. Touch ID is the primary credential here,
+        // so reaching this point means it was unavailable, failed, or was
+        // dismissed — the PIN stands on its own rather than chaining a
+        // second factor that cannot run in a WKWebView anyway.
         const token = await nativeUnlock(r.pin_passed_token)
         setUnlockToken(token)
         onUnlocked()
@@ -192,8 +238,8 @@ export function HiddenLockModal({
   const title =
     mode === 'setup'
       ? 'Set up locked chats'
-      : step === 'biometric'
-        ? 'Approve with Touch ID'
+      : step === 'biometric' || step === 'touchid'
+        ? 'Unlock with Touch ID'
         : 'Unlock locked chats'
 
   return (
@@ -248,10 +294,40 @@ export function HiddenLockModal({
           </div>
         )}
 
+        {mode === 'unlock' && step === 'touchid' && (
+          <div className="space-y-4 py-4 text-center">
+            <div className="text-3xl">👆</div>
+            <p className="text-sm text-neutral-300">
+              {busy ? 'Waiting for Touch ID…' : 'Touch the sensor to unlock your locked chats.'}
+            </p>
+            <div className="flex flex-col items-center gap-2">
+              {!busy && (
+                <button
+                  onClick={unlockWithTouchID}
+                  className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-neutral-950 hover:bg-emerald-400"
+                >
+                  Try Touch ID again
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setError(null)
+                  setStep('pin')
+                }}
+                className="text-xs text-neutral-500 underline-offset-2 hover:text-neutral-300 hover:underline"
+              >
+                Use PIN instead
+              </button>
+            </div>
+          </div>
+        )}
+
         {mode === 'unlock' && step === 'pin' && (
           <div className="space-y-3">
             <p className="text-xs text-neutral-400">
-              Enter your PIN. You'll be asked for Touch ID right after.
+              {isNativeShell()
+                ? 'Enter your PIN to unlock.'
+                : "Enter your PIN. You'll be asked for Touch ID right after."}
             </p>
             <input
               autoFocus
@@ -270,8 +346,20 @@ export function HiddenLockModal({
               disabled={busy}
               className="w-full rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-neutral-950 hover:bg-emerald-400 disabled:opacity-50"
             >
-              {busy ? 'Checking…' : 'Continue'}
+              {busy ? 'Checking…' : 'Unlock'}
             </button>
+            {canUseTouchID && (
+              <button
+                onClick={() => {
+                  setError(null)
+                  setStep('touchid')
+                  void unlockWithTouchID()
+                }}
+                className="w-full text-xs text-neutral-500 underline-offset-2 hover:text-neutral-300 hover:underline"
+              >
+                Use Touch ID instead
+              </button>
+            )}
           </div>
         )}
 

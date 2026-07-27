@@ -32,11 +32,29 @@ enum NativeUnlock {
             .deviceOwnerAuthenticationWithBiometrics, error: &err)
     }
 
-    /// Prompts for Touch ID, then exchanges the PIN handle for an unlock token.
+    /// Prompts for Touch ID and returns an unlock token.
+    ///
+    /// Touch ID is the primary credential, as on macOS itself. `pinPassedToken`
+    /// is only supplied on the fallback path, when Touch ID was unavailable and
+    /// the user entered their PIN instead; passing it skips the biometric
+    /// prompt entirely.
     static func unlock(
-        pinPassedToken: String,
+        pinPassedToken: String? = nil,
         completion: @escaping (Result<String, Failure>) -> Void
     ) {
+        // PIN fallback: the user already proved themselves, don't ask again.
+        if let pinToken = pinPassedToken, !pinToken.isEmpty {
+            readKey { keyResult in
+                switch keyResult {
+                case .failure(let f): completion(.failure(f))
+                case .success(let key):
+                    exchange(method: "pin", pinPassedToken: pinToken, key: key,
+                             completion: completion)
+                }
+            }
+            return
+        }
+
         let ctx = LAContext()
         ctx.localizedFallbackTitle = "" // no "Enter Password" — PIN was step one
 
@@ -68,7 +86,8 @@ enum NativeUnlock {
                 case .failure(let f):
                     completion(.failure(f))
                 case .success(let key):
-                    exchange(pinPassedToken: pinPassedToken, key: key, completion: completion)
+                    exchange(method: "biometric", pinPassedToken: "", key: key,
+                             completion: completion)
                 }
             }
         }
@@ -103,6 +122,7 @@ enum NativeUnlock {
     }
 
     private static func exchange(
+        method: String,
         pinPassedToken: String,
         key: String,
         completion: @escaping (Result<String, Failure>) -> Void
@@ -112,6 +132,7 @@ enum NativeUnlock {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.timeoutInterval = 15
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "method": method,
             "pin_passed_token": pinPassedToken,
             "key": key,
         ])

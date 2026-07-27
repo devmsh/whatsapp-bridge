@@ -35,22 +35,27 @@ export async function biometricsAvailable(): Promise<boolean> {
 }
 
 /**
- * Runs the shell's Touch ID prompt and returns a hidden-chat unlock token.
+ * Returns a hidden-chat unlock token from the macOS shell.
  *
- * Replaces the browser's WebAuthn assertion, which cannot run in a WKWebView.
- * Throws with the shell's message on failure; 'cancelled' when the user
- * dismissed the Touch ID sheet.
+ * With no argument this runs the Touch ID prompt — the primary credential in
+ * the app, since WebAuthn cannot run in a WKWebView. Passing a pin-passed
+ * handle takes the fallback path instead and skips the biometric prompt,
+ * for when Touch ID is unavailable or was dismissed.
+ *
+ * Throws with the shell's message on failure; 'Touch ID cancelled' when the
+ * user dismissed the sheet.
  */
-export async function nativeUnlock(pinPassedToken: string): Promise<string> {
+export async function nativeUnlock(pinPassedToken?: string): Promise<string> {
   const ch = asyncChannel()
   if (!ch) throw new Error('Not running in the macOS app')
 
   let reply: unknown
   try {
-    reply = await ch.postMessage({
-      type: 'native-unlock',
-      pin_passed_token: pinPassedToken,
-    })
+    reply = await ch.postMessage(
+      pinPassedToken
+        ? { type: 'native-unlock', pin_passed_token: pinPassedToken }
+        : { type: 'native-unlock' },
+    )
   } catch (e) {
     const msg = (e as Error)?.message || String(e)
     throw new Error(msg === 'cancelled' ? 'Touch ID cancelled' : msg)

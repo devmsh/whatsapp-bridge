@@ -165,11 +165,9 @@ final class MainWindowController: NSObject, NSWindowDelegate, WKNavigationDelega
             replyHandler(NativeUnlock.available(), nil)
 
         case "native-unlock":
-            let pinToken = (dict["pin_passed_token"] as? String) ?? ""
-            guard !pinToken.isEmpty else {
-                replyHandler(nil, "missing pin_passed_token")
-                return
-            }
+            // No pin_passed_token means "use Touch ID" (the normal path);
+            // supplying one means Touch ID failed and the user fell back.
+            let pinToken = dict["pin_passed_token"] as? String
             NativeUnlock.unlock(pinPassedToken: pinToken) { result in
                 switch result {
                 case .success(let token):

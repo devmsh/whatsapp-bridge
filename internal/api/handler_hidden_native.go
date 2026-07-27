@@ -84,6 +84,10 @@ func (s *Server) handleHiddenUnlockNative(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req struct {
+		// "biometric" — the shell already passed Touch ID.
+		// "pin"       — Touch ID was unavailable, so the user fell back to the
+		//               PIN and PinPassedToken carries proof of it.
+		Method         string `json:"method"`
 		PinPassedToken string `json:"pin_passed_token"`
 		Key            string `json:"key"`
 	}
@@ -92,9 +96,18 @@ func (s *Server) handleHiddenUnlockNative(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Consume, don't just validate: one PIN entry buys exactly one unlock.
-	if !consumePinPassed(req.PinPassedToken) {
-		jsonError(w, 401, "pin not verified (or the token expired)")
+	// The PIN is a FALLBACK, not a second factor, mirroring how macOS itself
+	// treats Touch ID vs the login password: either one alone opens the door.
+	// Both paths still require the local key below, so both still prove the
+	// caller is the app on this machine.
+	if req.Method == "pin" {
+		// Consume, don't merely validate: one PIN entry buys one unlock.
+		if !consumePinPassed(req.PinPassedToken) {
+			jsonError(w, 401, "pin not verified (or the token expired)")
+			return
+		}
+	} else if req.Method != "biometric" {
+		jsonError(w, 400, `method must be "biometric" or "pin"`)
 		return
 	}
 
