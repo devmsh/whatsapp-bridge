@@ -28,6 +28,7 @@ import { NewslettersPanel } from './NewslettersPanel'
 import { ProfilingStatusModal } from './ProfilingStatus'
 import { BriefingModal } from './BriefingView'
 import { SearchBar } from './Search'
+import Rail, { type RailItem } from './Rail'
 import { HiddenLockModal } from './HiddenLock'
 import { HideChatDialog } from './HideChatDialog'
 import { setUnlockToken as setHiddenUnlockToken } from '../hidden'
@@ -38,7 +39,6 @@ import { QuickRepliesPanel } from './QuickRepliesPanel'
 import { WorkingHours } from './WorkingHours'
 import { CallsPanel } from './CallsPanel'
 import { FocusMode } from './FocusMode'
-import { FocusSwitcher } from './FocusSwitcher'
 import { useDesktopNotifications } from '../hooks/useDesktopNotifications'
 import { useUnreadBadge } from '../hooks/useUnreadBadge'
 import { useScheduledAutopilot } from '../hooks/useScheduledMessages'
@@ -635,6 +635,35 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       />
     )
 
+  // Maps a rail pick onto whichever piece of existing state owns that surface.
+  // Some rail entries are tabs, some are overlay panels — the rail hides that.
+  const railActive: RailItem =
+    tab === 'contacts' ? 'chats' : (tab as RailItem)
+
+  const onRailPick = (id: RailItem) => {
+    switch (id) {
+      case 'status':
+        setShowStatuses(true)
+        return
+      case 'starred':
+        setShowStarred(true)
+        return
+      case 'archived':
+        // The Archived screen lives inside ChatList's own mode, reached from
+        // the "Archived (N)" row at the top of the list.
+        setTab('chats')
+        return
+      case 'focus':
+        // Focus Mode needs a circle; fall back to the Circles picker when we
+        // have no last-focused one to resume.
+        if (focusCircleId != null) setFocusCircleId(focusCircleId)
+        else setTab('circles')
+        return
+      default:
+        setTab(id as Tab)
+    }
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-neutral-950 text-neutral-100">
       {showSettings && <MediaSettings onClose={() => setShowSettings(false)} />}
@@ -714,34 +743,54 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       {showQuickReplies && <QuickRepliesPanel onClose={() => setShowQuickReplies(false)} />}
       {showWorkingHours && <WorkingHours onClose={() => setShowWorkingHours(false)} />}
 
+      {/* WhatsApp's left icon column. Hidden on mobile widths, where the
+          list already occupies the whole screen. */}
+      <div className={showMainMobile ? 'hidden md:flex' : 'hidden md:flex'}>
+        <Rail
+          active={railActive}
+          onPick={onRailPick}
+          onSettings={() => setShowSettings(true)}
+          unreadChats={chats.reduce(
+            (n, c) => n + (!c.is_archived && !c.is_hidden && c.unread_count > 0 ? 1 : 0),
+            0,
+          )}
+          openTasks={allTasks.filter((t) => t.status !== 'done').length}
+        />
+      </div>
+
       <aside
         className={
           'w-full shrink-0 flex-col border-r border-neutral-800 md:flex md:w-80 ' +
           (showMainMobile ? 'hidden' : 'flex')
         }
       >
-        <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-neutral-950">
-              W
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">WhatsApp Bridge</div>
-              <div className="truncate text-xs text-neutral-500">
-                {device?.push_name || device?.jid || 'Connected'}
-              </div>
-            </div>
-          </div>
-          {/* Header cluster — 11 actions don't fit in the 320 px sidebar.
-              Keep the 5 most-tapped visible as SVG icon buttons (matches
-              the rest of the app — emoji glyphs render inconsistently
-              across OSes), fold the rest into a "⋮ More" overflow menu.
-              HiddenBadge + DndButton stay outside because they have their
-              own per-state rendering. */}
-          <div className="flex items-center gap-0.5">
+        {/* WhatsApp's list header: a large title on the left, actions on the
+            right. The account identity moved to the rail's settings area —
+            WA does not repeat it above every list. */}
+        <header className="flex items-center justify-between gap-2 px-4 pb-1 pt-3">
+          <h1
+            className="truncate text-[26px] font-bold leading-tight tracking-[-0.02em] text-neutral-100"
+            title={device?.push_name || device?.jid || 'Connected'}
+          >
+            {tab === 'chats'
+              ? 'Chats'
+              : tab === 'calls'
+                ? 'Calls'
+                : tab === 'circles'
+                  ? 'Circles'
+                  : tab === 'tasks'
+                    ? 'Tasks'
+                    : 'Contacts'}
+          </h1>
+          {/* WhatsApp keeps this header to a compose button and an overflow
+              menu, so the title has room to breathe. Starred and Status moved
+              to the rail; Channels folded into the overflow. Only the compose
+              button, the DND toggle and the hidden-chats badge stay out —
+              the last two render per-state and are worth one glance. */}
+          <div className="flex shrink-0 items-center gap-0.5">
             <HiddenBadge onClick={() => setShowUnlock(true)} />
             <IconButton title="New chat" onClick={() => setShowCompose(true)}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 20h9" />
                 <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" />
               </svg>
@@ -752,25 +801,18 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               open={dndOpen}
               setOpen={setDndOpen}
             />
-            <IconButton title="Starred messages" onClick={() => setShowStarred(true)}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-                <path d="M12 2 14.78 8.63 22 9.24l-5.5 4.73L18.18 21 12 17.27 5.82 21l1.68-7.03L2 9.24l7.22-.61L12 2z" />
-              </svg>
-            </IconButton>
-            <IconButton title="Status updates" onClick={() => setShowStatuses(true)}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="9" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-            </IconButton>
-            <IconButton title="Channels" onClick={() => setShowNewsletters(true)}>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 11l18-5v12L3 13v-2z" />
-                <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-              </svg>
-            </IconButton>
             <MoreMenu
               items={[
+                {
+                  label: 'Channels',
+                  icon: (
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 11l18-5v12L3 13v-2z" />
+                      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+                    </svg>
+                  ),
+                  onClick: () => setShowNewsletters(true),
+                },
                 {
                   label: 'Your profile',
                   icon: (
@@ -906,35 +948,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
           />
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
-          <span className="text-xs font-medium text-neutral-500">Focus Mode</span>
-          <FocusSwitcher
-            circles={circles}
-            activeCircleId={null}
-            onSelect={(id) => {
-              setFocusManagingIntent(false)
-              setFocusCircleId(id)
-            }}
-          />
-        </div>
-
-        <div className="flex border-b border-neutral-800 text-sm">
-          <TabButton active={tab === 'chats'} onClick={() => setTab('chats')}>
-            Chats
-          </TabButton>
-          <TabButton active={tab === 'contacts'} onClick={() => setTab('contacts')}>
-            Contacts
-          </TabButton>
-          <TabButton active={tab === 'circles'} onClick={() => setTab('circles')}>
-            Circles
-          </TabButton>
-          <TabButton active={tab === 'tasks'} onClick={() => setTab('tasks')}>
-            Tasks
-          </TabButton>
-          <TabButton active={tab === 'calls'} onClick={() => setTab('calls')}>
-            Calls
-          </TabButton>
-        </div>
+        {/* No tab row and no Focus switcher here: the left rail owns
+            navigation now, which is how WhatsApp does it. Contacts is reached
+            through the compose button in the header ("New chat"), and Focus
+            Mode through the rail — it falls back to the Circles list when
+            there is no circle to resume. */}
 
         {tab === 'chats' && (
           <ChatList
@@ -1321,29 +1339,6 @@ function DndButton({
   )
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={
-        'flex-1 py-2.5 font-medium transition ' +
-        (active
-          ? 'border-b-2 border-emerald-500 text-neutral-100'
-          : 'text-neutral-500 hover:text-neutral-300')
-      }
-    >
-      {children}
-    </button>
-  )
-}
 
 function EmptyState() {
   return (

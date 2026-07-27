@@ -597,10 +597,12 @@ function FilterPill<T extends string>({
     <button
       onClick={() => onPick(id)}
       className={
+        // WhatsApp's pill: pale green fill with deep green text when active,
+        // flat grey chip otherwise. No ring — WA uses fill alone.
         'flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition ' +
         (active
-          ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/40'
-          : 'bg-neutral-800/70 text-neutral-300 hover:bg-neutral-700/70')
+          ? 'bg-[#d9fdd3] text-[#017561]'
+          : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700')
       }
     >
       <span>{children}</span>
@@ -608,7 +610,7 @@ function FilterPill<T extends string>({
         <span
           className={
             'tabular-nums text-[10px] ' +
-            (active ? 'text-emerald-300' : 'text-neutral-400')
+            (active ? 'text-[#017561]' : 'text-neutral-500')
           }
         >
           {count}

@@ -1,7 +1,74 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   WhatsApp light theme
+   ---------------------------------------------------------------------------
+   The UI was written dark, with ~1,600 hardcoded `neutral-*` utilities across
+   22k lines. Rather than rewrite every call site, we redefine what the neutral
+   ramp MEANS: Tailwind v4 resolves `bg-neutral-900` to `--color-neutral-900`,
+   so inverting the ramp flips the whole app to light in one place.
+
+   The mental model is a mirror:
+
+       dark theme            light theme
+       neutral-950  bg  →    #ffffff   panel      (lightest)
+       neutral-900  bg  →    #f0f2f5   panel alt
+       neutral-800  bg/br →  #e9edef   divider
+       ...
+       neutral-200  text →   #3b4a54   secondary
+       neutral-100  text →   #111b21   primary    (darkest)
+
+   So "950 = the background you sit on" and "100 = the text you read" stay true
+   in both themes; only the pigment changes. Values below marked SAMPLED were
+   pulled pixel-wise from the macOS WhatsApp app; the rest are WhatsApp's
+   published web tokens.
+--------------------------------------------------------------------------- */
+
+@theme {
+  /* Inverted neutral ramp — light by default. */
+  --color-neutral-950: #ffffff; /* app / panel background */
+  --color-neutral-900: #f0f2f5; /* raised panel, input wells */
+  --color-neutral-800: #e9edef; /* dividers, hover fills, chips */
+  --color-neutral-700: #d1d7db; /* stronger borders */
+  --color-neutral-600: #aebac1; /* disabled text, heavy borders */
+  --color-neutral-500: #8696a0; /* tertiary / meta text */
+  --color-neutral-400: #667781; /* secondary text */
+  --color-neutral-300: #54656f;
+  --color-neutral-200: #3b4a54;
+  --color-neutral-100: #111b21; /* primary text */
+  --color-neutral-50: #0a0a0a; /* SAMPLED — strongest ink */
+
+  /* Accent. The app uses emerald-* for anything interactive or "unread";
+     remap it onto WhatsApp's greens so those 294 usages land correctly. */
+  --color-emerald-200: #d9fdd3;
+  --color-emerald-300: #a5e3b8;
+  --color-emerald-400: #25d366; /* brand green — badges, FAB */
+  --color-emerald-500: #25d366;
+  --color-emerald-600: #00a884; /* teal — links, active states */
+  --color-emerald-700: #008069; /* pressed */
+
+  /* Semantic WhatsApp surfaces. Prefer these in new code over neutral-*. */
+  --color-wa-rail: #f4f4f4; /* SAMPLED — left icon rail */
+  --color-wa-panel: #ffffff; /* SAMPLED — chat list, composer */
+  --color-wa-hover: #f6f5f4; /* SAMPLED — row hover / selected */
+  --color-wa-header: #f4f4f4; /* SAMPLED — list + thread headers */
+  --color-wa-wallpaper: #f4f1ec; /* SAMPLED — thread background */
+  --color-wa-doodle: #e9e1d6; /* SAMPLED — wallpaper pattern ink */
+  --color-wa-bubble-in: #ffffff; /* SAMPLED — incoming bubble */
+  --color-wa-bubble-out: #e0fcd7; /* SAMPLED — outgoing bubble */
+  --color-wa-ink: #111b21;
+  --color-wa-ink-soft: #667781;
+  --color-wa-border: #e9edef;
+
+  /* NOT sampled — no unread badge or read receipt was on screen at a
+     usable size. These are WhatsApp's published brand values; verify
+     against a live badge before treating them as exact. */
+  --color-wa-accent: #25d366; /* unread pill, brand green */
+  --color-wa-tick: #53bdeb; /* read receipt blue */
+}
+
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -12,4 +79,43 @@ body,
 
 body {
   margin: 0;
+}
+
+/* WhatsApp's thin, unobtrusive scrollbars. The dark UI relied on the OS
+   default being invisible against black; on light panels it is not. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral-700) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-neutral-700);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-neutral-600);
+}
+
+/* ---------------------------------------------------------------------------
+   Thread wallpaper
+   ---------------------------------------------------------------------------
+   WhatsApp tiles a doodle pattern over a warm off-white. Recreated as an inline
+   SVG so it ships with the bundle — no binary asset, and the ink colour follows
+   the token, so a dark theme repaints it for free.
+--------------------------------------------------------------------------- */
+.wa-wallpaper {
+  background-color: var(--color-wa-wallpaper);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='none' stroke='%23e9e1d6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 30c6-6 14-6 20 0M30 22v16'/%3E%3Ccircle cx='96' cy='34' r='9'/%3E%3Cpath d='M150 24h20v14h-8l-5 6v-6h-7z'/%3E%3Cpath d='M214 26l6 12-6 12-6-12z'/%3E%3Cpath d='M36 92h18v12H36zM40 88v4M50 88v4'/%3E%3Cpath d='M104 84l8 16h-16z'/%3E%3Ccircle cx='168' cy='94' r='8'/%3E%3Cpath d='M168 86v16M160 94h16'/%3E%3Cpath d='M222 84c8 0 12 6 12 12s-8 10-12 6'/%3E%3Cpath d='M26 156c6-8 16-8 22 0-4 8-18 8-22 0z'/%3E%3Cpath d='M92 148h22v16H92zM96 164v6M110 164v6'/%3E%3Cpath d='M156 152l10 6-10 6z'/%3E%3Ccircle cx='222' cy='158' r='10'/%3E%3Cpath d='M30 214l8-10 8 10z'/%3E%3Cpath d='M88 206h24M88 214h16'/%3E%3Ccircle cx='164' cy='212' r='7'/%3E%3Cpath d='M158 220c4 4 8 4 12 0'/%3E%3Cpath d='M212 204h16v16h-16z'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 260px 260px;
 }
