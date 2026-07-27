@@ -194,6 +194,13 @@ function readDndUntil(): number {
 }
 
 function currentPermission(): Permission {
+  // Inside the macOS app (macapp/), the native shell posts real
+  // UNUserNotifications off the same SSE stream. WKWebView still exposes a
+  // Notification object whose permission never leaves 'default', which would
+  // otherwise show a dead "Enable" banner and risk double-notifying.
+  if (typeof window !== 'undefined' && (window as any).__WA_NATIVE_SHELL__) {
+    return 'unsupported'
+  }
   if (typeof Notification === 'undefined') return 'unsupported'
   return Notification.permission as Permission
 }

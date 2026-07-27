@@ -100,6 +100,24 @@ export function FocusMode({
   // stale thread open for a chat that may not belong to the new circle.
   useEffect(() => setActiveChatJid(null), [circleId])
 
+  // macOS app integration. The native shell (macapp/) dispatches
+  // 'wa-open-chat' when a notification banner is clicked, and reads the
+  // reported chat back so it can suppress banners for the thread already on
+  // screen. Both are no-ops in a plain browser.
+  useEffect(() => {
+    const onOpenChat = (e: Event) => {
+      const jid = (e as CustomEvent<string>).detail
+      if (typeof jid === 'string' && jid) setActiveChatJid(jid)
+    }
+    window.addEventListener('wa-open-chat', onOpenChat)
+    return () => window.removeEventListener('wa-open-chat', onOpenChat)
+  }, [])
+
+  useEffect(() => {
+    const handler = (window as any).webkit?.messageHandlers?.app
+    handler?.postMessage({ type: 'visible-chat', jid: activeChatJid })
+  }, [activeChatJid])
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-neutral-950 text-neutral-100">
       <header className="flex shrink-0 items-center gap-3 border-b border-neutral-800 px-4 py-3">

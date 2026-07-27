@@ -26,3 +26,6 @@ agent/node_modules/
 
 # Older turbo runs used a top-level worktree dir; keep it out of the repo too
 .worktrees/
+
+# macOS app: build output (the .app, helper copy and generated iconset)
+macapp/build/

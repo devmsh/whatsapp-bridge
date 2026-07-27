@@ -3,12 +3,18 @@ package config
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 // Config holds all configuration for the bridge.
 type Config struct {
+	// Home is the resolved absolute base directory. Load() chdir's here, so
+	// every relative path in the codebase ("store/...", "agent/...",
+	// "./models/...", the whatsapp-mcp binary) keeps resolving as before.
+	Home string
+
 	Port              int
 	BindAddr          string
 	DBPath            string
@@ -76,10 +82,68 @@ func loadEnvFile(path string) {
 	}
 }
 
+// looksLikeHome reports whether dir holds the bridge's data layout.
+func looksLikeHome(dir string) bool {
+	for _, marker := range []string{"store", ".env", "agent"} {
+		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveHome picks the base directory the bridge runs from.
+//
+// Order: explicit BRIDGE_HOME, then the current directory (how the LaunchAgent
+// and `go run .` have always worked), then the executable's directory, and
+// finally ~/Library/Application Support/WhatsAppBridge.
+//
+// The .app shell sets BRIDGE_HOME explicitly, because a bundled process starts
+// with "/" as its working directory.
+func resolveHome() string {
+	if v := strings.TrimSpace(os.Getenv("BRIDGE_HOME")); v != "" {
+		if strings.HasPrefix(v, "~/") {
+			if h, err := os.UserHomeDir(); err == nil {
+				v = filepath.Join(h, v[2:])
+			}
+		}
+		if abs, err := filepath.Abs(v); err == nil {
+			return abs
+		}
+		return v
+	}
+
+	if cwd, err := os.Getwd(); err == nil && looksLikeHome(cwd) {
+		return cwd
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		if exe, err = filepath.EvalSymlinks(exe); err == nil {
+			if dir := filepath.Dir(exe); looksLikeHome(dir) {
+				return dir
+			}
+		}
+	}
+
+	if h, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(h, "Library", "Application Support", "WhatsAppBridge")
+	}
+
+	cwd, _ := os.Getwd()
+	return cwd
+}
+
 // Load reads configuration from .env file then environment variables.
 func Load() *Config {
-	loadEnvFile(".env")
+	home := resolveHome()
+	// Everything downstream uses relative paths, so anchor the process here
+	// once instead of rewriting each call site.
+	_ = os.MkdirAll(home, 0o755)
+	_ = os.Chdir(home)
+
+	loadEnvFile(filepath.Join(home, ".env"))
 	c := &Config{
+		Home:     home,
 		Port:     8082,
 		BindAddr: "127.0.0.1", // localhost only; set BRIDGE_BIND=0.0.0.0 to expose
 		DBPath:   "store/messages.db",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // handleStream implements GET /api/v2/stream
@@ -45,11 +46,19 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	unlocked := s.isUnlocked(r)
 	isHidden := func(jid string) bool { return s.store.IsChatHidden(jid) }
 
+	// Heartbeat so long-lived subscribers (the macOS app's notification
+	// listener) can tell a quiet stream from a dead one and reconnect.
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
 		case msg, ok := <-ch:
 			if !ok {
 				return
