@@ -47,6 +47,12 @@ func NewStore(path string) (*Store, error) {
 		// Without a cap the backfill loop re-selects a failing row every 15s
 		// forever, spending an LLM call each cycle.
 		`ALTER TABLE media_understanding ADD COLUMN refine_attempts INTEGER NOT NULL DEFAULT 0`,
+		// "left_at" marks when we detected the local account is no longer a
+		// member of a group (left, removed, or the group was deleted). Groups
+		// sync only ever added/updated rows and never noticed a group drop out
+		// of the authoritative GetJoinedGroups() list, so exits from another
+		// device (phone, other companion) were never reflected locally.
+		`ALTER TABLE groups ADD COLUMN left_at INTEGER NOT NULL DEFAULT 0`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,

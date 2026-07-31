@@ -98,9 +98,21 @@ func handleGroupInfo(c *Client, evt *events.GroupInfo) {
 		})
 	}
 	if len(evt.Leave) > 0 {
+		ownJID := ""
+		if c.WA.Store.ID != nil {
+			ownJID = c.WA.Store.ID.ToNonAD().String()
+		}
 		jids := make([]string, 0, len(evt.Leave))
 		for _, l := range evt.Leave {
-			c.Store.RemoveGroupParticipant(jid, l.String())
+			leftJID := l.ToNonAD().String()
+			if leftJID == ownJID {
+				// We were the one who left/got removed — mark the group
+				// itself, not just the participant row, so it stops showing
+				// up as a group the local account is still a member of.
+				c.Store.MarkGroupLeft(jid, ownJID, ts)
+			} else {
+				c.Store.RemoveGroupParticipant(jid, l.String())
+			}
 			jids = append(jids, l.String())
 		}
 		c.Store.StoreEventLog(&db.EventLog{

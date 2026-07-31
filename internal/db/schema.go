@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS groups (
     creator_country_code           TEXT    NOT NULL DEFAULT '',
     participant_count              INTEGER NOT NULL DEFAULT 0,
     suspended                      INTEGER NOT NULL DEFAULT 0,
+    left_at                        INTEGER NOT NULL DEFAULT 0,
     updated_at                     INTEGER NOT NULL DEFAULT 0
 );
 

@@ -89,10 +89,12 @@ func SyncGroups(c *Client) error {
 	}
 
 	now := time.Now().Unix()
+	fresh := make(map[string]bool, len(groups))
 
 	for _, gi := range groups {
 		g := groupInfoToDB(gi)
 		g.UpdatedAt = now
+		fresh[gi.JID.String()] = true
 
 		if err := c.Store.StoreGroup(g); err != nil {
 			c.Log.Warnf("Failed to store group %s: %v", gi.JID.String(), err)
@@ -116,6 +118,35 @@ func SyncGroups(c *Client) error {
 		// GetJoinedGroups response above — so there is nothing to rate-limit.
 		// (A previous 2s sleep here made the initial sync take 30+ min and
 		// blocked SyncContacts behind it.)
+	}
+
+	// GetJoinedGroups is the authoritative "am I still a member" source.
+	// Real-time group-leave notifications only reach us while connected, so
+	// an exit/removal that happens on another device while this bridge is
+	// offline is otherwise never reflected. Diff against what we already
+	// believed was active and mark anything missing as left.
+	active, err := c.Store.GetActiveGroupJIDs()
+	if err != nil {
+		c.Log.Warnf("Failed to load active group JIDs for reconciliation: %v", err)
+	} else {
+		ownJID := ""
+		if c.WA.Store.ID != nil {
+			ownJID = c.WA.Store.ID.ToNonAD().String()
+		}
+		left := 0
+		for _, jid := range active {
+			if fresh[jid] {
+				continue
+			}
+			if err := c.Store.MarkGroupLeft(jid, ownJID, now); err != nil {
+				c.Log.Warnf("Failed to mark group %s as left: %v", jid, err)
+				continue
+			}
+			left++
+		}
+		if left > 0 {
+			c.Log.Infof("Groups sync: detected %d group(s) left/removed from elsewhere", left)
+		}
 	}
 
 	c.Log.Infof("Groups sync complete: %d groups", len(groups))

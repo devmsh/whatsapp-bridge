@@ -30,6 +30,7 @@ type Group struct {
 	CreatorCountryCode           string `json:"creator_country_code,omitempty"`
 	ParticipantCount             int    `json:"participant_count"`
 	Suspended                    bool   `json:"suspended"`
+	LeftAt                       int64  `json:"left_at,omitempty"`
 	UpdatedAt                    int64  `json:"updated_at"`
 }
 
@@ -58,15 +59,15 @@ func (s *Store) StoreGroup(g *Group) error {
 		is_ephemeral, disappearing_timer, is_incognito,
 		is_parent, default_membership_approval_mode, linked_parent_jid, is_default_sub,
 		member_add_mode, join_approval_required,
-		group_created, creator_country_code, participant_count, suspended, updated_at
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		group_created, creator_country_code, participant_count, suspended, left_at, updated_at
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		g.JID, g.OwnerJID, g.Name, g.NameSetAt, g.NameSetBy,
 		g.Topic, g.TopicID, g.TopicSetAt, g.TopicSetBy, g.TopicDeleted,
 		g.IsLocked, g.IsAnnounce, g.AnnounceVersionID,
 		g.IsEphemeral, g.DisappearingTimer, g.IsIncognito,
 		g.IsParent, g.DefaultMembershipApprovalMode, g.LinkedParentJID, g.IsDefaultSub,
 		g.MemberAddMode, g.JoinApprovalRequired,
-		g.GroupCreated, g.CreatorCountryCode, g.ParticipantCount, g.Suspended, g.UpdatedAt,
+		g.GroupCreated, g.CreatorCountryCode, g.ParticipantCount, g.Suspended, g.LeftAt, g.UpdatedAt,
 	)
 	return err
 }
@@ -79,7 +80,7 @@ func (s *Store) GetGroup(jid string) (*Group, error) {
 		is_ephemeral, disappearing_timer, is_incognito,
 		is_parent, default_membership_approval_mode, linked_parent_jid, is_default_sub,
 		member_add_mode, join_approval_required,
-		group_created, creator_country_code, participant_count, suspended, updated_at
+		group_created, creator_country_code, participant_count, suspended, left_at, updated_at
 		FROM groups WHERE jid = ?`, jid)
 	g := &Group{}
 	err := row.Scan(&g.JID, &g.OwnerJID, &g.Name, &g.NameSetAt, &g.NameSetBy,
@@ -88,7 +89,7 @@ func (s *Store) GetGroup(jid string) (*Group, error) {
 		&g.IsEphemeral, &g.DisappearingTimer, &g.IsIncognito,
 		&g.IsParent, &g.DefaultMembershipApprovalMode, &g.LinkedParentJID, &g.IsDefaultSub,
 		&g.MemberAddMode, &g.JoinApprovalRequired,
-		&g.GroupCreated, &g.CreatorCountryCode, &g.ParticipantCount, &g.Suspended, &g.UpdatedAt)
+		&g.GroupCreated, &g.CreatorCountryCode, &g.ParticipantCount, &g.Suspended, &g.LeftAt, &g.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +104,7 @@ func (s *Store) GetGroups() ([]Group, error) {
 		is_ephemeral, disappearing_timer, is_incognito,
 		is_parent, default_membership_approval_mode, linked_parent_jid, is_default_sub,
 		member_add_mode, join_approval_required,
-		group_created, creator_country_code, participant_count, suspended, updated_at
+		group_created, creator_country_code, participant_count, suspended, left_at, updated_at
 		FROM groups ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -118,12 +119,45 @@ func (s *Store) GetGroups() ([]Group, error) {
 			&g.IsEphemeral, &g.DisappearingTimer, &g.IsIncognito,
 			&g.IsParent, &g.DefaultMembershipApprovalMode, &g.LinkedParentJID, &g.IsDefaultSub,
 			&g.MemberAddMode, &g.JoinApprovalRequired,
-			&g.GroupCreated, &g.CreatorCountryCode, &g.ParticipantCount, &g.Suspended, &g.UpdatedAt); err != nil {
+			&g.GroupCreated, &g.CreatorCountryCode, &g.ParticipantCount, &g.Suspended, &g.LeftAt, &g.UpdatedAt); err != nil {
 			return groups, err
 		}
 		groups = append(groups, g)
 	}
 	return groups, rows.Err()
+}
+
+// GetActiveGroupJIDs returns the JIDs of all groups not yet marked as left.
+// Used by SyncGroups to diff against the authoritative GetJoinedGroups()
+// list and detect exits/removals that happened on another device.
+func (s *Store) GetActiveGroupJIDs() ([]string, error) {
+	rows, err := s.DB.Query(`SELECT jid FROM groups WHERE left_at = 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jids []string
+	for rows.Next() {
+		var jid string
+		if err := rows.Scan(&jid); err != nil {
+			return jids, err
+		}
+		jids = append(jids, jid)
+	}
+	return jids, rows.Err()
+}
+
+// MarkGroupLeft flags a group as no longer joined (left, removed, or the
+// group itself was deleted) and drops the local account's own participant
+// row — the roster of other members is left intact as history.
+func (s *Store) MarkGroupLeft(groupJID, ownJID string, ts int64) error {
+	if _, err := s.DB.Exec(`UPDATE groups SET left_at = ? WHERE jid = ?`, ts, groupJID); err != nil {
+		return err
+	}
+	if ownJID == "" {
+		return nil
+	}
+	return s.RemoveGroupParticipant(groupJID, ownJID)
 }
 
 // GroupDiscovery holds a group with activity stats for new group detection.
