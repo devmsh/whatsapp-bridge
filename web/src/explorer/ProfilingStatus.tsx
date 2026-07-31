@@ -33,6 +33,16 @@ export function ProfilingStatusModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function stop() {
+    setBusy(true)
+    try {
+      await api.stopProfiling()
+      setTimeout(refresh, 500)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const s = st?.stats
   const inFlight = s?.queue_size || 0
 
@@ -43,7 +53,22 @@ export function ProfilingStatusModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-semibold">Profiles</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold">Profiles</div>
+            {st && (
+              <button
+                onClick={st.enabled ? stop : start}
+                disabled={busy}
+                title={st.enabled ? 'Stop the background profiler' : 'Start the background profiler'}
+                className={
+                  'rounded-full px-2.5 py-0.5 text-[11px] font-medium disabled:opacity-50 ' +
+                  (st.enabled ? 'bg-emerald-500 text-neutral-950' : 'bg-neutral-700 text-neutral-300')
+                }
+              >
+                {st.enabled ? 'ON' : 'OFF'}
+              </button>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="rounded-lg border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 hover:bg-neutral-800"

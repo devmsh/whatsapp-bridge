@@ -86,13 +86,22 @@ func (s *Server) handleProfileRegenerate(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, map[string]any{"queued": true})
 }
 
-// handleProfilesStatus reports profiling progress and lets the UI trigger a
-// full rescan.
-//   GET  /api/v2/profiles/status   -> stats + queue size + active entity
-//   POST /api/v2/profiles/status   -> rescan all entities for staleness now
+// handleProfilesStatus reports profiling progress and lets the UI turn the
+// background profiler on or off.
+//   GET  /api/v2/profiles/status                 -> stats + queue size + active entity
+//   POST /api/v2/profiles/status                 -> enable + rescan now
+//   POST /api/v2/profiles/status {enabled:false} -> turn it off and drop the backlog
 func (s *Server) handleProfilesStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		// Enable profiling (if not already) and scan for work now.
+		var req struct {
+			Enabled *bool `json:"enabled"`
+		}
+		decodeJSON(r, &req) // empty body is fine: means "enable + rescan"
+		if req.Enabled != nil && !*req.Enabled {
+			s.profiles.Disable()
+			jsonOK(w, map[string]any{"enabled": false, "scanning": false})
+			return
+		}
 		s.profiles.Enable()
 		jsonOK(w, map[string]any{"enabled": true, "scanning": true})
 		return

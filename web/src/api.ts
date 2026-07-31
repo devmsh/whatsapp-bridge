@@ -1388,6 +1388,8 @@ export const api = {
     return res.json()
   },
   startProfiling: () => postBody<{ enabled: boolean }>('/api/v2/profiles/status', {}),
+  stopProfiling: () =>
+    postBody<{ enabled: boolean }>('/api/v2/profiles/status', { enabled: false }),
 
   // Briefings.
   briefingToday: async (): Promise<BriefingRow | null> => {

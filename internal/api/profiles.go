@@ -60,6 +60,28 @@ func (m *ProfileManager) Enable() {
 	go m.EnqueueStale()
 }
 
+// Disable turns off profiling and drops the pending backlog, so the model stops
+// being called within seconds instead of after the queue drains. Generations
+// already in flight finish on their own; manual regeneration still works.
+func (m *ProfileManager) Disable() {
+	m.s.store.PutSyncState(profilesEnabledKey, "0")
+	m.drain()
+}
+
+// drain empties the job channel and forgets the queued set.
+func (m *ProfileManager) drain() {
+	for {
+		select {
+		case job := <-m.jobs:
+			m.mu.Lock()
+			delete(m.inQueue, key(job.entityType, job.ref))
+			m.mu.Unlock()
+		default:
+			return
+		}
+	}
+}
+
 // Start launches the worker pool and the daily refresh scan. Workers always run
 // (to service manual regenerate requests); the daily auto-scan only enqueues
 // once profiling has been enabled.
