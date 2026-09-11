@@ -403,6 +403,120 @@ CREATE TABLE IF NOT EXISTS circle_digests (
     generated_at  INTEGER NOT NULL DEFAULT 0
 );
 
+-- Meetings -------------------------------------------------------------------
+--
+-- A meeting is NOT a task with a date. The difference came out of reading how
+-- meetings actually get arranged over WhatsApp:
+--
+--   * They are negotiated, not set. "هل من ٥-٧ او ٥:٣٠-٧:٣٠ او ٦-٨" — so a
+--     meeting holds proposed options and a status, not just one timestamp.
+--   * They live across several chats at once. The same invite goes out in three
+--     separate DMs with no group anywhere; meeting_messages is what ties those
+--     together, the same way task_messages does for tasks.
+--   * They have a life before and after: requirements that decide whether the
+--     meeting happens at all, an agenda, then notes and next steps.
+--   * Place is often physical ("في مكتبنا بجاده ٣٠"), not a link.
+--
+-- WhatsApp is the first source, not the only one: the source and external_id
+-- leave room for a calendar to be linked later without reshaping the table.
+CREATE TABLE IF NOT EXISTS meetings (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    title               TEXT    NOT NULL DEFAULT '',
+    purpose             TEXT    NOT NULL DEFAULT '',
+    -- proposed | confirmed | held | cancelled
+    status              TEXT    NOT NULL DEFAULT 'proposed',
+    -- 0 when no time is agreed yet, which is the normal state while a meeting
+    -- is still being negotiated.
+    starts_at           INTEGER NOT NULL DEFAULT 0,
+    ends_at             INTEGER NOT NULL DEFAULT 0,
+    tz                  TEXT    NOT NULL DEFAULT '',
+    -- JSON array of slots still on the table, e.g. ["Sat 17:00","Sun 20:30"].
+    time_options        TEXT    NOT NULL DEFAULT '',
+    -- online | in_person | hybrid
+    mode                TEXT    NOT NULL DEFAULT '',
+    -- Offline place, in the three shapes it actually arrives in: free text
+    -- ("مكتبنا بجاده ٣٠"), a Google Maps link (nearly always a maps.app.goo.gl
+    -- short link — there are no long-form maps URLs in the real chats), and a
+    -- native WhatsApp location pin, which carries coordinates and no URL.
+    location            TEXT    NOT NULL DEFAULT '',
+    location_url        TEXT    NOT NULL DEFAULT '',
+    location_lat        REAL    NOT NULL DEFAULT 0,
+    location_lng        REAL    NOT NULL DEFAULT 0,
+    link                TEXT    NOT NULL DEFAULT '',
+    -- Normalised join code (e.g. a Meet code). This is the key that proves two
+    -- chats are talking about ONE meeting, so it is indexed.
+    link_code           TEXT    NOT NULL DEFAULT '',
+    notes               TEXT    NOT NULL DEFAULT '',
+    -- A meeting held to prepare another one: "نجلس الأحد قبل اجتماع xspace".
+    prepares_meeting_id INTEGER REFERENCES meetings(id) ON DELETE SET NULL,
+    -- Free text for now: "اجتماعنا الاسبوعي السبت، ويستثنى السبت القادم".
+    recurrence          TEXT    NOT NULL DEFAULT '',
+    source              TEXT    NOT NULL DEFAULT 'whatsapp',
+    external_id         TEXT    NOT NULL DEFAULT '',
+    origin_chat_jid     TEXT    NOT NULL DEFAULT '',
+    origin_message_id   TEXT    NOT NULL DEFAULT '',
+    confidence          REAL    NOT NULL DEFAULT 0,
+    -- pending | accepted | rejected — AI-found meetings land as pending.
+    review_status       TEXT    NOT NULL DEFAULT 'accepted',
+    created_at          INTEGER NOT NULL DEFAULT 0,
+    updated_at          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_meetings_starts ON meetings(starts_at);
+CREATE INDEX IF NOT EXISTS idx_meetings_status ON meetings(status, review_status);
+CREATE INDEX IF NOT EXISTS idx_meetings_code   ON meetings(link_code);
 
+-- Who is in the meeting. People come from different chats, so this is keyed by
+-- JID and carries the name as seen, for someone with no contact row yet.
+CREATE TABLE IF NOT EXISTS meeting_participants (
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    jid        TEXT    NOT NULL,
+    name       TEXT    NOT NULL DEFAULT '',
+    -- organizer | required | optional | external
+    role       TEXT    NOT NULL DEFAULT 'required',
+    -- unknown | yes | no | maybe  ("العمور مش هيقدر بكره")
+    rsvp       TEXT    NOT NULL DEFAULT 'unknown',
+    note       TEXT    NOT NULL DEFAULT '',
+    added_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (meeting_id, jid)
+);
+
+-- The cross-chat trail. Every message that arranged, prepared or followed up
+-- the meeting, wherever it was said. This is the part a calendar cannot hold.
+CREATE TABLE IF NOT EXISTS meeting_messages (
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    chat_jid   TEXT    NOT NULL,
+    message_id TEXT    NOT NULL,
+    -- origin | scheduling | agenda | requirement | prep | invite | note | next_step | related
+    role       TEXT    NOT NULL DEFAULT 'related',
+    added_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (meeting_id, chat_jid, message_id)
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_msgs_chat ON meeting_messages(chat_jid, message_id);
+
+-- Agenda points, entry requirements and next steps share one shape: a line of
+-- text, someone who owns it, and whether it is done. Keeping them in one table
+-- means "turn this next step into a task" and "tick this requirement" are the
+-- same code path.
+CREATE TABLE IF NOT EXISTS meeting_items (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    -- agenda | requirement | next_step
+    kind       TEXT    NOT NULL,
+    text       TEXT    NOT NULL,
+    done       INTEGER NOT NULL DEFAULT 0,
+    owner_jid  TEXT    NOT NULL DEFAULT '',
+    -- set when a next step has been promoted into the tasks module
+    task_id    INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_items ON meeting_items(meeting_id, kind, position);
+
+CREATE TABLE IF NOT EXISTS meeting_circles (
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    circle_id  INTEGER NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+    added_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (meeting_id, circle_id)
+);
 
 `

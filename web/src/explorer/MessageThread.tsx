@@ -21,6 +21,7 @@ import { EmojiPicker } from './EmojiPicker'
 import { QuickReplyPicker } from './QuickReplyPicker'
 import { MessageInfo } from './MessageInfo'
 import { PollComposer } from './PollComposer'
+import { MeetingBar } from './MeetingBar'
 import { ScheduleSendModal } from './ScheduleSendModal'
 import { SendLocationModal } from './SendLocationModal'
 import { SendContactModal } from './SendContactModal'
@@ -56,6 +57,7 @@ export function MessageThread({
   onCirclesChanged,
   onTagsChanged,
   onOpenTask,
+  onOpenMeeting,
   onTasksChanged,
   onOpenChatTasks,
   onOpenChat,
@@ -81,6 +83,8 @@ export function MessageThread({
   onCirclesChanged: () => void
   onTagsChanged: () => void
   onOpenTask: (id: number) => void
+  /** Open the full meeting page — used by the bar above the composer. */
+  onOpenMeeting?: (id: number) => void
   onTasksChanged: () => void
   onOpenChatTasks: (jid: string) => void
   onOpenChat?: (jid: string, draft?: string) => void
@@ -1263,6 +1267,10 @@ export function MessageThread({
           </div>
         )}
       </div>
+
+      {/* The meeting this chat is about, right above where you type — the one
+          coming up, or the one just held. */}
+      {onOpenMeeting && <MeetingBar chatJID={jid} onOpen={onOpenMeeting} />}
 
       {canSend && !isBlocked && (
         <Composer

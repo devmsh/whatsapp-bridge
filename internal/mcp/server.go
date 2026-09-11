@@ -67,6 +67,13 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 	srv.AddTool(toolLinkTaskMessage(), s.handleLinkTaskMessage)
 	srv.AddTool(toolListTasks(), s.handleListTasks)
 
+	// Meetings: prepared meetings, which can span several chats.
+	srv.AddTool(toolCreateMeeting(), s.handleCreateMeeting)
+	srv.AddTool(toolFindMeeting(), s.handleFindMeeting)
+	srv.AddTool(toolLinkMeetingMessage(), s.handleLinkMeetingMessage)
+	srv.AddTool(toolAddMeetingParticipant(), s.handleAddMeetingParticipant)
+	srv.AddTool(toolAddMeetingItem(), s.handleAddMeetingItem)
+
 	// Circle + profile tools (read DB) for circle-level extraction
 	srv.AddTool(toolCircleInfo(), s.handleCircleInfo)
 	srv.AddTool(toolListCircles(), s.handleListCircles)

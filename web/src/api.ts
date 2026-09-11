@@ -416,6 +416,85 @@ export interface MemberSuggestion {
   keyword: string
 }
 
+// UnassignedChat is one row of the virtual "Unassigned" circle: a live group or
+// person not sorted into a circle yet. `kind` doubles as the member_type to
+// send when filing it. `recent_count` is messages in the last 30 days, which is
+// what the list is ranked by.
+export interface UnassignedChat {
+  kind: 'group' | 'contact'
+  jid: string
+  name: string
+  message_count: number
+  recent_count: number
+  last_message_at?: number
+  participants: number
+}
+
+export interface UnassignedResponse {
+  count: number
+  groups: UnassignedChat[]
+  people: UnassignedChat[]
+}
+
+// A meeting: something arranged in advance, with people, a purpose, and a life
+// before and after it. Not a task with a date — see internal/db/schema.go.
+export interface MeetingParticipant {
+  jid: string
+  name?: string
+  role: string
+  rsvp: string
+  note?: string
+}
+
+export interface MeetingItem {
+  id: number
+  meeting_id: number
+  kind: 'agenda' | 'requirement' | 'next_step'
+  text: string
+  done: boolean
+  owner_jid?: string
+  task_id?: number
+  position: number
+}
+
+export interface MeetingMessage {
+  chat_jid: string
+  message_id: string
+  role: string
+}
+
+export interface Meeting {
+  id: number
+  title: string
+  purpose?: string
+  status: 'proposed' | 'confirmed' | 'held' | 'cancelled'
+  starts_at?: number
+  ends_at?: number
+  /** JSON array of slots still being argued over, when no time is agreed. */
+  time_options?: string
+  mode?: 'online' | 'in_person' | 'hybrid'
+  location?: string
+  location_url?: string
+  location_lat?: number
+  location_lng?: number
+  link?: string
+  link_code?: string
+  notes?: string
+  prepares_meeting_id?: number
+  recurrence?: string
+  source: string
+  origin_chat_jid?: string
+  confidence?: number
+  review_status: string
+  created_at: number
+  updated_at: number
+  participants?: MeetingParticipant[]
+  items?: MeetingItem[]
+  messages?: MeetingMessage[]
+  /** Derived, never set by hand: the circles of the chats and people involved. */
+  circles?: Circle[]
+}
+
 export interface CircleSuggestions {
   context: string
   suggestions: MemberSuggestion[]
@@ -1635,6 +1714,65 @@ export const api = {
     postBody<{ success: boolean }>(`/api/v2/circles/${id}/members`, { member_type, member_ref }),
   removeCircleMember: (id: number, member_type: MemberType, member_ref: string) =>
     del(`/api/v2/circles/${id}/members`, { member_type, member_ref }),
+  meetings: async (params: { status?: string; review?: string; upcoming?: boolean; limit?: number } = {}): Promise<Meeting[]> => {
+    const q = new URLSearchParams()
+    if (params.status) q.set('status', params.status)
+    if (params.review) q.set('review', params.review)
+    if (params.upcoming) q.set('upcoming', '1')
+    if (params.limit) q.set('limit', String(params.limit))
+    const res = await fetch('/api/v2/meetings' + (q.toString() ? '?' + q : ''))
+    return res.json()
+  },
+  // Meetings touching one chat, for the bar above the composer.
+  meetingsForChat: async (chatJID: string, withinDays = 7): Promise<Meeting[]> => {
+    const res = await fetch(
+      `/api/v2/meetings?chat_jid=${encodeURIComponent(chatJID)}&within=${withinDays}`,
+    )
+    return res.json()
+  },
+  // Chats that have a meeting still ahead — one call for the whole list,
+  // rather than asking per chat.
+  meetingChats: async (): Promise<string[]> => {
+    const res = await fetch('/api/v2/meetings/chats')
+    const d = await res.json()
+    return d?.chat_jids || []
+  },
+  meeting: async (id: number): Promise<Meeting> => {
+    const res = await fetch(`/api/v2/meetings/${id}`)
+    return res.json()
+  },
+  createMeeting: (m: Partial<Meeting>) => postBody<Meeting>('/api/v2/meetings', m),
+  updateMeeting: async (id: number, patch: Partial<Meeting>): Promise<Meeting> => {
+    const res = await fetch(`/api/v2/meetings/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
+  deleteMeeting: (id: number) => del(`/api/v2/meetings/${id}`),
+  reviewMeeting: (id: number, status: 'accepted' | 'rejected') =>
+    postBody<{ id: number; review_status: string }>(`/api/v2/meetings/${id}/review`, { status }),
+  addMeetingItem: (id: number, kind: MeetingItem['kind'], text: string) =>
+    postBody<MeetingItem>(`/api/v2/meetings/${id}/items`, { kind, text }),
+  updateMeetingItem: async (id: number, itemID: number, patch: Partial<MeetingItem>) => {
+    const res = await fetch(`/api/v2/meetings/${id}/items/${itemID}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
+  deleteMeetingItem: (id: number, itemID: number) =>
+    del(`/api/v2/meetings/${id}/items/${itemID}`),
+  extractMeetings: (chat_jid: string, chat_name?: string, since?: number) =>
+    postBody<{ run_id: string }>('/api/v2/meetings/extract', { chat_jid, chat_name, since }),
+  unassignedGroups: async (): Promise<UnassignedResponse> => {
+    const res = await fetch('/api/v2/circles/unassigned')
+    return res.json()
+  },
   recommendations: async (limit = 5): Promise<RecsResponse> => {
     const res = await fetch(`/api/v2/circles/recommendations?limit=${limit}`)
     return res.json()

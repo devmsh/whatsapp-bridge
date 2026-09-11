@@ -163,6 +163,13 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/circles/unassigned", s.handleCircleUnassigned)
 	s.mux.HandleFunc("/api/v2/circles/", s.handleCircleByID)
 
+	// Meetings (prepared meetings: agenda, requirements, cross-chat trail)
+	s.mux.HandleFunc("/api/v2/meetings", s.handleMeetings)
+	s.mux.HandleFunc("/api/v2/meetings/extract", s.handleMeetingExtract)
+	s.mux.HandleFunc("/api/v2/meetings/chats", s.handleMeetingChats)
+	s.mux.HandleFunc("/api/v2/meetings/resync-circles", s.handleMeetingsResyncCircles)
+	s.mux.HandleFunc("/api/v2/meetings/", s.handleMeetingByID)
+
 	// Tasks (work items on top of WhatsApp content)
 	s.mux.HandleFunc("/api/v2/tasks", s.handleTasks)
 	s.mux.HandleFunc("/api/v2/tasks/extract", s.handleTaskExtract)

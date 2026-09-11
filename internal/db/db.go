@@ -61,6 +61,11 @@ func NewStore(path string) (*Store, error) {
 		// and the AI leaves it alone. A newer message clears the mark, the same
 		// way WhatsApp brings a deleted conversation back.
 		`ALTER TABLE chats ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0`,
+		// Offline meeting location. Added right after the meetings table shipped,
+		// so existing databases need the columns bolted on.
+		`ALTER TABLE meetings ADD COLUMN location_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE meetings ADD COLUMN location_lat REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE meetings ADD COLUMN location_lng REAL NOT NULL DEFAULT 0`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,

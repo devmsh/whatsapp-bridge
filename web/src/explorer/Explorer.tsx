@@ -16,6 +16,8 @@ import { ChatList } from './ChatList'
 import { ContactsPanel } from './ContactsPanel'
 import { CirclesPanel } from './CirclesPanel'
 import { RecommendationsView } from './RecommendationsView'
+import { UnassignedView } from './UnassignedView'
+import { MeetingsView } from './MeetingsView'
 import { TasksSidebar, type TasksSelection } from './TasksSidebar'
 import { TasksView } from './TasksView'
 import { TaskView } from './TaskView'
@@ -50,7 +52,7 @@ import { useScheduledAutopilot } from '../hooks/useScheduledMessages'
 import { ShortcutsHelp } from './ShortcutsHelp'
 import { NewChatModal } from './NewChatModal'
 
-type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls'
+type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls' | 'meetings'
 
 // Explorer is the main app after onboarding: a chat list / contacts sidebar and
 // a message thread, with live updates over SSE.
@@ -90,6 +92,17 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // haven't loaded yet" from "the user genuinely has zero circles".
   const [circlesLoaded, setCirclesLoaded] = useState(false)
   const [recoOpen, setRecoOpen] = useState(false)
+  const [unassignedOpen, setUnassignedOpen] = useState(false)
+  // Which chat list the sidebar is pointing at. Archived is a destination in
+  // the sidebar now, so the list cannot own this any more.
+  const [chatView, setChatView] = useState<'normal' | 'archived'>('normal')
+  // Which meeting is open on the Meetings screen. Kept here so the bar above a
+  // composer can jump straight to one from inside a chat.
+  const [selectedMeeting, setSelectedMeeting] = useState<number | null>(null)
+  const [pendingMeetings, setPendingMeetings] = useState(0)
+  // Badge count for the sidebar. Refreshed whenever circles change, so filing a
+  // group updates it straight away.
+  const [unassignedCount, setUnassignedCount] = useState(0)
   const [selectedTask, setSelectedTask] = useState<number | null>(null)
   const [taskVersion, setTaskVersion] = useState(0)
   // Sidebar selection for the new Tasks tab. Defaults to "all open".
@@ -179,6 +192,14 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         .then((c) => setCircles(c || []))
         .catch(() => {})
         .finally(() => setCirclesLoaded(true))
+      api
+        .unassignedGroups()
+        .then((r) => setUnassignedCount(r.count || 0))
+        .catch(() => {})
+      api
+        .meetings({ review: 'pending_review' })
+        .then((list) => setPendingMeetings((list || []).length))
+        .catch(() => {})
       api.tags().then((t) => setTags(t || [])).catch(() => {})
       api.contactTagsMap().then((m) => setContactTags(m || {})).catch(() => {})
     }
@@ -202,6 +223,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
   const reloadCircles = useCallback(() => {
     api.circles().then((c) => setCircles(c || [])).catch(() => {})
+    // The Unassigned badge moves with the circles: filing a group into one
+    // takes it out of the list, so refresh both together.
+    api.unassignedGroups().then((r) => setUnassignedCount(r.count || 0)).catch(() => {})
   }, [])
 
   // Keep allTasks fresh whenever the Tasks tab is visible, tasks change, or
@@ -262,6 +286,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     // Case 1 — chat is in the visible sidebar list (normal path).
     if (chatsRef.current.some((c) => c.jid === jid)) {
       setRecoOpen(false)
+      setUnassignedOpen(false)
       setSelectedTask(null)
       setTab('chats')
       setSelected(jid)
@@ -272,6 +297,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     // Case 2 — already temporarily unlocked via the per-chat flow.
     if (extraChats[jid]) {
       setRecoOpen(false)
+      setUnassignedOpen(false)
       setSelectedTask(null)
       setTab('chats')
       setSelected(jid)
@@ -326,6 +352,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             },
       )
       setRecoOpen(false)
+      setUnassignedOpen(false)
       setSelectedTask(null)
       setTab('chats')
       setSelected(jid)
@@ -428,6 +455,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       setExtraChats((prev) => ({ ...prev, [jid]: chat }))
       // Replay openChat for the same JID — extraChats now contains it.
       setRecoOpen(false)
+      setUnassignedOpen(false)
       setSelectedTask(null)
       setTab('chats')
       setSelected(jid)
@@ -450,6 +478,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
   const openTask = useCallback((id: number) => {
     setRecoOpen(false)
+    setUnassignedOpen(false)
     setSelected(null)
     setSelectedTask(id)
     setTab('tasks')
@@ -459,6 +488,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     // From a chat header's "✓ Tasks" — no chat scope in the new layout, so we
     // just open the tasks tab on the default "all open" view.
     setRecoOpen(false)
+    setUnassignedOpen(false)
     setSelected(null)
     setSelectedTask(null)
     setTaskSelection({ kind: 'view', view: 'open' })
@@ -621,6 +651,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
   const openCircleTasks = useCallback((id: number) => {
     setRecoOpen(false)
+    setUnassignedOpen(false)
     setSelected(null)
     setSelectedTask(null)
     setTaskSelection({ kind: 'circle', id })
@@ -639,6 +670,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
   const openCircle = useCallback((id: number) => {
     setRecoOpen(false)
+    setUnassignedOpen(false)
     setSelected(null)
     setSelectedTask(null)
     setFocusManagingIntent(true)
@@ -648,7 +680,23 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const openReco = useCallback(() => {
     setSelected(null)
     setSelectedTask(null)
+    setUnassignedOpen(false)
     setRecoOpen(true)
+  }, [])
+
+  const openMeeting = useCallback((id: number) => {
+    setSelectedMeeting(id)
+    setRecoOpen(false)
+    setUnassignedOpen(false)
+    setTab('meetings')
+  }, [])
+
+  const openUnassigned = useCallback(() => {
+    setSelected(null)
+    setSelectedTask(null)
+    setRecoOpen(false)
+    setUnassignedOpen(false)
+    setUnassignedOpen(true)
   }, [])
 
   // --- Mobile single-pane layout ----------------------------------------
@@ -656,15 +704,20 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // phone, so below `md` we show ONE pane: the list, or — once the user
   // opens something — the main pane full-screen with a Back affordance.
   // detailOpen = the main pane is showing navigated-into content.
-  const detailOpen = recoOpen || selected != null || selectedTask != null
+  const detailOpen = recoOpen || unassignedOpen || selected != null || selectedTask != null
   // The Tasks tab renders its list in <main> (the sidebar holds only the
   // scope picker), so treat that tab as "show main" on mobile too.
-  const showMainMobile = detailOpen || tab === 'tasks'
+  const showMainMobile = detailOpen || tab === 'tasks' || tab === 'meetings'
   // Back steps up one level: detail → its list, then list → chats.
   const closeMobileDetail = () => {
     if (selected != null) return setSelected(null)
     if (recoOpen) return setRecoOpen(false)
+    if (unassignedOpen) return setUnassignedOpen(false)
     if (selectedTask != null) return setSelectedTask(null)
+    if (tab === 'meetings') {
+      if (selectedMeeting != null) return setSelectedMeeting(null)
+      return setTab('chats')
+    }
     if (tab === 'tasks') return setTab('chats')
   }
 
@@ -693,7 +746,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         onCirclesChanged={reloadCircles}
         onTagsChanged={reloadTags}
         onTasksChanged={bumpTasks}
-        onOpenTask={(id) => {
+            onOpenTask={(id) => {
           setFocusCircleId(null)
           openTask(id)
         }}
@@ -724,7 +777,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // Maps a rail pick onto whichever piece of existing state owns that surface.
   // Some rail entries are tabs, some are overlay panels — the rail hides that.
   const railActive: RailItem =
-    tab === 'contacts' ? 'chats' : (tab as RailItem)
+    tab === 'chats' && chatView === 'archived'
+      ? 'archived'
+      : tab === 'contacts'
+        ? 'chats'
+        : (tab as RailItem)
 
   const onRailPick = (id: RailItem) => {
     switch (id) {
@@ -735,8 +792,9 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         setShowStarred(true)
         return
       case 'archived':
-        // The Archived screen lives inside ChatList's own mode, reached from
-        // the "Archived (N)" row at the top of the list.
+        // Archived is the chat list in its archived mode — same list, other
+        // contents, exactly as WhatsApp does it.
+        setChatView('archived')
         setTab('chats')
         return
       case 'focus':
@@ -744,6 +802,10 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         // have no last-focused one to resume.
         if (focusCircleId != null) setFocusCircleId(focusCircleId)
         else setTab('circles')
+        return
+      case 'chats':
+        setChatView('normal')
+        setTab('chats')
         return
       default:
         setTab(id as Tab)
@@ -809,7 +871,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       )}
       {showBriefing && (
         <BriefingModal
-          onOpenTask={(id) => {
+            onOpenTask={(id) => {
             setShowBriefing(false)
             openTask(id)
           }}
@@ -841,12 +903,22 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             0,
           )}
           openTasks={allTasks.filter((t) => t.status !== 'done').length}
+          archivedCount={chats.reduce(
+            (n, c) => n + (c.is_archived && !c.is_hidden ? 1 : 0),
+            0,
+          )}
+          pendingMeetings={pendingMeetings}
+          profileName={device?.push_name || 'You'}
+          onProfile={() => setShowSelfProfile(true)}
         />
       </div>
 
+      {/* Meetings brings its own list column, so the shared sidebar would be a
+          second, empty panel next to it. */}
       <aside
         className={
-          'w-full shrink-0 flex-col border-r border-neutral-800 md:flex md:w-80 ' +
+          'w-full shrink-0 flex-col border-r border-neutral-800 md:w-80 ' +
+          (tab === 'meetings' ? 'hidden md:hidden ' : 'md:flex ') +
           (showMainMobile ? 'hidden' : 'flex')
         }
       >
@@ -1042,6 +1114,8 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
 
         {tab === 'chats' && (
           <ChatList
+            view={chatView}
+            onView={setChatView}
             chats={chats}
             nameMap={nameMap}
             circles={circles}
@@ -1069,8 +1143,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             circles={circles}
             selected={null}
             recoActive={recoOpen}
+            unassignedActive={unassignedOpen}
+            unassignedCount={unassignedCount}
             onOpen={openCircle}
             onOpenReco={openReco}
+            onOpenUnassigned={openUnassigned}
             onChanged={reloadCircles}
             onCreated={(c) => {
               reloadCircles()
@@ -1118,6 +1195,24 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         <div className="min-h-0 flex-1">
         {recoOpen ? (
           <RecommendationsView onChanged={reloadCircles} onOpenCircle={openCircle} />
+        ) : unassignedOpen ? (
+          <UnassignedView
+            circles={circles}
+            onChanged={reloadCircles}
+            onOpenCircle={openCircle}
+            onOpenReco={openReco}
+          />
+        ) : tab === 'meetings' ? (
+          <MeetingsView
+            selectedId={selectedMeeting}
+            nameMap={nameMap}
+            onOpenCircle={openCircle}
+            onSelect={setSelectedMeeting}
+            onOpenChat={(jid) => {
+              setTab('chats')
+              setSelected(jid)
+            }}
+          />
         ) : tab === 'tasks' ? (
           // Tasks tab always shows the tasks main view — never the chat/circle
           // that may still be "selected" from another tab. A selected task
@@ -1151,7 +1246,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
               nameMap={nameMap}
               ownJID={device?.jid || ''}
               selection={taskSelection}
-              onOpenTask={openTask}
+            onOpenTask={openTask}
               onCreated={bumpTasks}
               onChanged={bumpTasks}
             />
@@ -1171,6 +1266,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onDraftConsumed={() => consumeChatDraft(selected)}
             onCirclesChanged={reloadCircles}
             onTagsChanged={reloadTags}
+            onOpenMeeting={openMeeting}
             onOpenTask={openTask}
             onTasksChanged={bumpTasks}
             onOpenChatTasks={openChatTasks}
