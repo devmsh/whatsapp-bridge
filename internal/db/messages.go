@@ -270,14 +270,20 @@ func (s *Store) MarkDeleted(id, chatJID, deletedBy string, deletedAt int64) erro
 	return err
 }
 
-// MarkChatMessagesDeleted bulk-marks every non-deleted message in a chat as
-// deleted. Used when the user clears a chat from another device (DeleteChat
-// app-state event). Returns the count of rows affected.
+// MarkChatMessagesDeleted bulk-marks a chat's messages as deleted, up to and
+// including deletedAt. Used when the user clears a chat from another device
+// (DeleteChat app-state event). Returns the count of rows affected.
+//
+// The time bound is the whole point. Clearing a chat in WhatsApp clears what
+// is there at that moment; messages that arrive later are untouched. Without
+// the bound, every full app-state sync replayed each historical clear-chat over
+// the *current* contents, so a chat cleared months ago swallowed everything
+// sent since — messages ended up stamped as deleted before they were even sent.
 func (s *Store) MarkChatMessagesDeleted(chatJID, deletedBy string, deletedAt int64) (int64, error) {
 	res, err := s.DB.Exec(
 		`UPDATE messages SET is_deleted = 1, deleted_at = ?, deleted_by = ?
-		 WHERE chat_jid = ? AND is_deleted = 0`,
-		deletedAt, deletedBy, chatJID,
+		 WHERE chat_jid = ? AND is_deleted = 0 AND timestamp <= ?`,
+		deletedAt, deletedBy, chatJID, deletedAt,
 	)
 	if err != nil {
 		return 0, err

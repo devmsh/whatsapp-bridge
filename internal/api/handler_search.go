@@ -7,8 +7,8 @@ import (
 
 // searchHit is one result row (any kind).
 type searchHit struct {
-	Kind     string `json:"kind"`     // contact | group | circle | task | message
-	ID       string `json:"id"`       // JID, circle id, or task id (as string)
+	Kind     string `json:"kind"` // contact | group | circle | task | message
+	ID       string `json:"id"`   // JID, circle id, or task id (as string)
 	Title    string `json:"title"`
 	Subtitle string `json:"subtitle,omitempty"`
 	Snippet  string `json:"snippet,omitempty"`
@@ -41,23 +41,77 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	hits := []searchHit{}
 
 	// Contacts.
-	if rows, err := s.store.DB.Query(`SELECT jid,
-		COALESCE(NULLIF(name,''), NULLIF(push_name,''), NULLIF(business_name,''), ''),
-		COALESCE(phone,'')
-		FROM contacts
-		WHERE name LIKE ? ESCAPE '\' OR push_name LIKE ? ESCAPE '\' OR business_name LIKE ? ESCAPE '\' OR phone LIKE ? ESCAPE '\'
-		LIMIT 12`, pat, pat, pat, pat); err == nil {
+	//
+	// One person can hold two contact rows: a phone identity and a @lid one,
+	// with nothing joining them. Searching then returned the same name twice,
+	// and only the phone row was clickable because the chat lives under it.
+	//
+	// Two passes fix it. The query prefers the row that actually has messages,
+	// so the useful identity wins; then LID rows are dropped when the same
+	// person is already present, resolved through whatsmeow's LID mapping and,
+	// failing that, by display name. The LID digits are also never shown as a
+	// phone number, because they are not one.
+	if rows, err := s.store.DB.Query(`SELECT c.jid,
+		COALESCE(NULLIF(c.name,''), NULLIF(c.push_name,''), NULLIF(c.business_name,''), ''),
+		COALESCE(c.phone,''),
+		(SELECT COUNT(*) FROM messages m WHERE m.chat_jid = c.jid) AS msgs
+		FROM contacts c
+		WHERE (c.name LIKE ? ESCAPE '\' OR c.push_name LIKE ? ESCAPE '\' OR c.business_name LIKE ? ESCAPE '\' OR c.phone LIKE ? ESCAPE '\')
+		  -- Drop rows that are a LID wearing a phone server. When the very same
+		  -- digits also exist as "<digits>@lid", the phone-form row is a sync
+		  -- artefact, not a person: a real number cannot collide with a LID.
+		  -- Requiring zero messages too keeps a genuine contact safe if that
+		  -- assumption is ever wrong.
+		  AND NOT (
+		        c.jid LIKE '%@s.whatsapp.net'
+		    AND EXISTS (SELECT 1 FROM contacts l
+		                 WHERE l.jid = REPLACE(c.jid, '@s.whatsapp.net', '@lid'))
+		    AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.chat_jid = c.jid)
+		  )
+		ORDER BY msgs DESC, (c.jid LIKE '%@lid') ASC
+		LIMIT 24`, pat, pat, pat, pat); err == nil {
+		seenID := map[string]bool{}
+		seenName := map[string]bool{}
+		out := 0
 		for rows.Next() {
 			var jid, name, phone string
-			if rows.Scan(&jid, &name, &phone) == nil {
-				if skip(jid) {
-					continue
-				}
-				if name == "" {
-					name = "+" + phone
-				}
-				hits = append(hits, searchHit{Kind: "contact", ID: jid, Title: name, Subtitle: phone})
+			var msgs int
+			if rows.Scan(&jid, &name, &phone, &msgs) != nil {
+				continue
 			}
+			if skip(jid) || out >= 12 {
+				continue
+			}
+			isLID := strings.HasSuffix(jid, "@lid")
+			// Collapse onto the phone identity when one is known.
+			key := jid
+			if isLID {
+				if pn := s.client.ResolvePhoneForLID(jid); pn != "" {
+					key = pn
+				}
+			}
+			if seenID[key] {
+				continue
+			}
+			// Without a mapping, an identical name already shown is the same
+			// person in practice. Only a LID row is dropped this way — two real
+			// numbers sharing a name are genuinely different contacts.
+			if isLID && name != "" && seenName[name] {
+				continue
+			}
+			seenID[key] = true
+			if name != "" {
+				seenName[name] = true
+			}
+			if name == "" {
+				name = "+" + phone
+			}
+			sub := phone
+			if isLID {
+				sub = "" // LID digits are an internal id, not a phone number
+			}
+			hits = append(hits, searchHit{Kind: "contact", ID: jid, Title: name, Subtitle: sub})
+			out++
 		}
 		rows.Close()
 	}

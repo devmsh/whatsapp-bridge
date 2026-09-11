@@ -5,7 +5,6 @@ import (
 
 	"go.mau.fi/whatsmeow/types/events"
 
-	"whatsapp-bridge-v2/internal/db"
 )
 
 func handlePin(c *Client, evt *events.Pin) {
@@ -34,7 +33,7 @@ func handleMarkChatAsRead(c *Client, evt *events.MarkChatAsRead) {
 	jid := evt.JID.String()
 	read := evt.Action.GetRead()
 	if read {
-		c.Store.StoreChat(&db.Chat{JID: jid, UnreadCount: 0})
+		c.Store.SetChatUnread(jid, 0)
 	}
 	c.Log.Debugf("Chat %s marked_as_read=%v", jid, read)
 }
@@ -75,11 +74,11 @@ func handleDeleteForMe(c *Client, evt *events.DeleteForMe) {
 	c.Log.Infof("Message %s deleted-for-me in %s", evt.MessageID, resolvedChat)
 }
 
-// handleDeleteChat mirrors a "Delete chat" the user did on another device.
-// We bulk-mark every message in that chat as deleted, which makes the chat
-// appear cleared in the UI (the chat row itself stays so future messages land
-// naturally; the preview shows the deleted placeholder).
-func handleDeleteChat(c *Client, evt *events.DeleteChat) {
+// handleClearChat mirrors a "Clear chat" the user did on another device: the
+// conversation stays in the list, its messages go. We bulk-mark the messages as
+// deleted up to the moment of the clear — anything sent afterwards is untouched,
+// which is what WhatsApp does.
+func handleClearChat(c *Client, evt *events.ClearChat) {
 	rawChat := evt.JID.String()
 	resolvedChat := resolveLIDToPhone(c, evt.JID, rawChat)
 	ts := evt.Timestamp.Unix()
@@ -103,7 +102,45 @@ func handleDeleteChat(c *Client, evt *events.DeleteChat) {
 		}
 		total += n
 	}
-	c.Log.Infof("Chat %s cleared (delete-chat) — %d messages marked deleted", resolvedChat, total)
+	c.Log.Infof("Chat %s cleared — %d messages marked deleted", resolvedChat, total)
+}
+
+// handleDeleteChat mirrors a "Delete chat" the user did on another device —
+// deleting a conversation, or exiting a group and then deleting it.
+//
+// This is NOT the same as clearing. WhatsApp removes the chat from the list
+// completely; it never shows a chat full of deleted-message placeholders. We
+// used to treat the two the same, so a deleted group stayed in the list with
+// every message struck through. Now the chat itself is marked deleted and
+// disappears, while its rows stay on disk so history and media survive.
+func handleDeleteChat(c *Client, evt *events.DeleteChat) {
+	rawChat := evt.JID.String()
+	resolvedChat := resolveLIDToPhone(c, evt.JID, rawChat)
+	ts := evt.Timestamp.Unix()
+	if ts == 0 {
+		ts = time.Now().Unix()
+	}
+	by := ""
+	if c.WA.Store.ID != nil {
+		by = c.WA.Store.ID.String()
+	}
+	jids := []string{resolvedChat}
+	if rawChat != resolvedChat {
+		jids = append(jids, rawChat)
+	}
+	total := int64(0)
+	for _, j := range jids {
+		if err := c.Store.MarkChatDeleted(j, ts); err != nil {
+			c.Log.Errorf("MarkChatDeleted (%s) failed: %v", j, err)
+		}
+		n, err := c.Store.MarkChatMessagesDeleted(j, by, ts)
+		if err != nil {
+			c.Log.Errorf("MarkChatMessagesDeleted (%s) failed: %v", j, err)
+			continue
+		}
+		total += n
+	}
+	c.Log.Infof("Chat %s deleted — removed from the list, %d messages marked deleted", resolvedChat, total)
 }
 
 func handleAppStateSyncComplete(c *Client, evt *events.AppStateSyncComplete) {

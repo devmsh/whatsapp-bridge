@@ -53,6 +53,14 @@ func NewStore(path string) (*Store, error) {
 		// of the authoritative GetJoinedGroups() list, so exits from another
 		// device (phone, other companion) were never reflected locally.
 		`ALTER TABLE groups ADD COLUMN left_at INTEGER NOT NULL DEFAULT 0`,
+		// "deleted_at" marks a chat the user deleted outright (exit + delete a
+		// group, or delete a conversation). WhatsApp removes such a chat from the
+		// list completely — it does not show it full of deleted messages, which
+		// is what we used to do because DeleteChat was handled like ClearChat.
+		// The rows stay so history and media survive; the chat is just not shown
+		// and the AI leaves it alone. A newer message clears the mark, the same
+		// way WhatsApp brings a deleted conversation back.
+		`ALTER TABLE chats ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,

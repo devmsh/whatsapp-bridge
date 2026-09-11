@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS chats (
     is_pinned          INTEGER NOT NULL DEFAULT 0,
     is_muted           INTEGER NOT NULL DEFAULT 0,
     muted_until        INTEGER NOT NULL DEFAULT 0,
-    disappearing_timer INTEGER NOT NULL DEFAULT 0
+    disappearing_timer INTEGER NOT NULL DEFAULT 0,
+    deleted_at         INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_chats_last_msg ON chats(last_message_at);
 
@@ -401,4 +402,7 @@ CREATE TABLE IF NOT EXISTS circle_digests (
     last_msg_ts   INTEGER NOT NULL DEFAULT 0,
     generated_at  INTEGER NOT NULL DEFAULT 0
 );
+
+
+
 `

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 
 	"whatsapp-bridge-v2/internal/wa"
@@ -124,6 +125,82 @@ func (s *Server) handleSyncHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonOK(w, map[string]string{"status": "sync complete"})
+}
+
+// handleSyncAppStateRecover repairs a corrupted app-state collection.
+//
+// Why this exists: `regular_low` carries pin and archive state. Ours had never
+// synced — every fetch died on "failed to verify patch: mismatching LTHash",
+// so is_pinned was 0 for every chat and the chat list could not reproduce
+// WhatsApp's order, where pinned chats sit on top. A replay does not help: the
+// snapshot itself fails verification, so there is nothing to re-apply.
+//
+// The fix is the recovery path WhatsApp itself uses. We ask the primary device
+// (the phone) for an unencrypted copy of the collection. whatsmeow handles the
+// reply in handleAppStateRecovery and applies the snapshot directly, skipping
+// the broken hash chain. The phone must be online to answer.
+//
+// POST /api/v2/sync/app-state-recover   body: {"collection":"regular_low"}
+func (s *Server) handleSyncAppStateRecover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	waClient := s.client.GetWhatsmeowClient()
+	if waClient == nil || !waClient.IsConnected() {
+		jsonError(w, 503, "not connected")
+		return
+	}
+
+	var req struct {
+		Collection string `json:"collection"`
+	}
+	_ = decodeJSON(r, &req)
+	name := appstate.WAPatchName(strings.TrimSpace(req.Collection))
+	if name == "" {
+		name = appstate.WAPatchRegularLow
+	}
+	known := false
+	for _, n := range appstate.AllPatchNames {
+		if n == name {
+			known = true
+			break
+		}
+	}
+	if !known {
+		jsonError(w, 400, "unknown collection: "+string(name))
+		return
+	}
+
+	// The reply is handled as a full sync, and whatsmeow stays silent on full
+	// syncs unless this is set. Without it the snapshot lands inside whatsmeow
+	// but no Pin/Archive/Mute event ever reaches our handlers, so the chats
+	// table keeps its old values and nothing visibly changes.
+	waClient.EmitAppStateEventsOnFullSync = true
+
+	// Wipe the local state of the collection first, so the snapshot the phone
+	// sends is not judged "not newer than what we have" and thrown away, and so
+	// leftover mutation MACs do not collide with the ones it carries.
+	//
+	// It must be a wipe, not a write of version 0: whatsmeow rejects a saved
+	// version of 0 outright ("invalid saved app state version 0") and drops the
+	// recovery reply before applying it.
+	if err := s.client.ResetAppStateCollection(string(name)); err != nil {
+		jsonError(w, 500, fmt.Sprintf("could not reset %s: %v", name, err))
+		return
+	}
+
+	resp, err := waClient.SendPeerMessage(r.Context(), whatsmeow.BuildAppStateRecoveryRequest(name))
+	if err != nil {
+		jsonError(w, 500, fmt.Sprintf("recovery request failed: %v", err))
+		return
+	}
+	jsonOK(w, map[string]any{
+		"status":     "recovery requested",
+		"collection": string(name),
+		"request_id": resp.ID,
+		"note":       "the phone answers out of band; re-check pinned/archived state in a few seconds",
+	})
 }
 
 func (s *Server) handleSyncMigrateLID(w http.ResponseWriter, r *http.Request) {

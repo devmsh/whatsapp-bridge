@@ -225,6 +225,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/sync/contacts", s.handleSyncContacts)
 	s.mux.HandleFunc("/api/v2/sync/history", s.handleSyncHistory)
 	s.mux.HandleFunc("/api/v2/sync/app-state-replay", s.handleSyncAppStateReplay)
+	s.mux.HandleFunc("/api/v2/sync/app-state-recover", s.handleSyncAppStateRecover)
 	s.mux.HandleFunc("/api/v2/sync/migrate-lid", s.handleSyncMigrateLID)
 	s.mux.HandleFunc("/api/v2/sync/state/", s.handleSyncState)
 

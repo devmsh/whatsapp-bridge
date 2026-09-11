@@ -181,10 +181,10 @@ func (s *Server) handleChatAction(w http.ResponseWriter, r *http.Request, jid st
 			wa.MarkRead(context.Background(), []types.MessageID{msgs[0].ID}, time.Now(), chatJID, chatJID)
 		}
 		wa.SendAppState(context.Background(), appstate.BuildMarkChatAsRead(chatJID, true, time.Now(), nil))
-		s.store.StoreChat(&db.Chat{JID: jid, UnreadCount: 0})
+		s.store.SetChatUnread(jid, 0)
 	case "unread":
 		wa.SendAppState(context.Background(), appstate.BuildMarkChatAsRead(chatJID, false, time.Now(), nil))
-		s.store.StoreChat(&db.Chat{JID: jid, UnreadCount: 1})
+		s.store.SetChatUnread(jid, 1)
 	default:
 		jsonError(w, 400, "unknown action: "+req.Action)
 		return

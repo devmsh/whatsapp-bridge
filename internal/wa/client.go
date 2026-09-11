@@ -1,6 +1,7 @@
 package wa
 
 import (
+	"database/sql"
 	"context"
 	"fmt"
 	"sync"
@@ -32,6 +33,10 @@ type Client struct {
 
 	mediaPolicy MediaPolicy
 	policyMu    sync.RWMutex
+
+	// waDBPath is whatsmeow's own store file. Kept so app-state collections
+	// can be reset for recovery — see ResetAppStateCollection.
+	waDBPath string
 }
 
 // NewClient creates a new WhatsApp client backed by the given DB paths.
@@ -57,6 +62,7 @@ func NewClient(waDBPath string, store *db.Store, mediaDir string, logLevel strin
 		WA:          waClient,
 		Store:       store,
 		MediaDir:    mediaDir,
+		waDBPath:    waDBPath,
 		Log:         logger,
 		Broadcaster: NewBroadcaster(),
 		Sync:        NewSyncTracker(),
@@ -167,4 +173,31 @@ func (c *Client) Uptime() time.Duration {
 		return 0
 	}
 	return time.Since(c.startTime)
+}
+
+// ResetAppStateCollection wipes the local state of one app-state collection so
+// the next fetch (or a recovery snapshot from the phone) is applied from
+// scratch.
+//
+// Both tables must go. Clearing only the version row leaves the old mutation
+// MACs behind, and re-applying a snapshot then dies on a UNIQUE constraint —
+// whatsmeow tries to insert MACs it already has, and the recovery blob is
+// thrown away. whatsmeow's store can only delete MACs by explicit index, which
+// we do not have here, so this reaches into its tables directly.
+func (c *Client) ResetAppStateCollection(name string) error {
+	if c.waDBPath == "" {
+		return fmt.Errorf("no whatsmeow store path")
+	}
+	conn, err := sql.Open("sqlite3", fmt.Sprintf("file:%s?_journal_mode=WAL", c.waDBPath))
+	if err != nil {
+		return fmt.Errorf("open wa store: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.Exec(`DELETE FROM whatsmeow_app_state_mutation_macs WHERE name = ?`, name); err != nil {
+		return fmt.Errorf("clear mutation macs: %w", err)
+	}
+	if _, err := conn.Exec(`DELETE FROM whatsmeow_app_state_version WHERE name = ?`, name); err != nil {
+		return fmt.Errorf("clear version: %w", err)
+	}
+	return nil
 }
