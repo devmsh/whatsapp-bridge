@@ -168,37 +168,89 @@ func (n *nameResolver) load() {
 		return
 	}
 	n.ready = true
+
+	type row struct{ jid, lid, phone, display string }
+	var rows_ []row
+	// Digit strings known to be LIDs. Collected first, because the same digits
+	// often ALSO exist as a "<digits>@s.whatsapp.net" row — a sync artefact,
+	// 129 of them in this database — and that row must never be mistaken for
+	// somebody's phone number.
+	lidDigits := map[string]bool{}
+
 	rows, err := n.store.DB.Query(`SELECT jid, COALESCE(lid,''), COALESCE(phone,''),
 		COALESCE(name,''), COALESCE(push_name,''), COALESCE(business_name,'')
 		FROM contacts`)
 	if err != nil {
 		return
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var jid, lid, phone, name, push, biz string
 		if rows.Scan(&jid, &lid, &phone, &name, &push, &biz) != nil {
 			continue
 		}
-		display := firstNonEmpty(name, push, biz)
-		phoneJID := jid
-		if !strings.HasSuffix(jid, "@s.whatsapp.net") && phone != "" {
-			phoneJID = phone + "@s.whatsapp.net"
+		if d := digitsOf(lid); d != "" {
+			lidDigits[d] = true
 		}
-		for _, form := range []string{jid, lid, phone + "@s.whatsapp.net"} {
+		if strings.HasSuffix(jid, "@lid") {
+			lidDigits[digitsOf(jid)] = true
+		}
+		rows_ = append(rows_, row{jid, lid, phone, firstNonEmpty(name, push, biz)})
+	}
+	rows.Close()
+
+	isPhone := func(jid string) bool {
+		return strings.HasSuffix(jid, "@s.whatsapp.net") && !lidDigits[digitsOf(jid)]
+	}
+
+	for _, r := range rows_ {
+		// The identity to file this person under: a real number when one is
+		// known, otherwise whatever we have.
+		phoneJID := ""
+		for _, cand := range []string{r.jid, r.phone + "@s.whatsapp.net"} {
+			if isPhone(cand) {
+				phoneJID = cand
+				break
+			}
+		}
+		if phoneJID == "" {
+			phoneJID = r.jid
+		}
+
+		lidJID := r.lid
+		if lidJID != "" && !strings.Contains(lidJID, "@") {
+			lidJID += "@lid"
+		}
+		for _, form := range []string{r.jid, r.lid, lidJID, r.phone + "@s.whatsapp.net"} {
 			if form == "" || form == "@s.whatsapp.net" {
 				continue
 			}
-			if display != "" {
-				n.byJID[form] = display
+			if r.display != "" {
+				if _, taken := n.byJID[form]; !taken {
+					n.byJID[form] = r.display
+				}
+			}
+			// A mapping that reaches a real number is always the better
+			// answer, so one that does not must never replace it.
+			if prev, ok := n.canon[form]; ok && isPhone(prev) && !isPhone(phoneJID) {
+				continue
 			}
 			n.canon[form] = phoneJID
 		}
 	}
+
 	n.own, _, _ = n.store.GetSyncState("intro_own_name")
 	if n.own == "" {
 		n.own = "Me"
 	}
+}
+
+// digitsOf returns the user part of a JID, or the string itself when it has no
+// server — the lid column stores bare digits.
+func digitsOf(jid string) string {
+	if i := strings.IndexByte(jid, '@'); i >= 0 {
+		return jid[:i]
+	}
+	return jid
 }
 
 func (n *nameResolver) display(jid string) string {

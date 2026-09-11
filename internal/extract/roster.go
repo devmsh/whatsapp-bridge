@@ -23,10 +23,32 @@ func Roster(store *db.Store, chatJID string) ([]RosterPerson, string, bool, erro
 	isGroup := strings.HasSuffix(chatJID, "@g.us")
 	if isGroup {
 		people, err := groupRoster(store, chatJID)
-		return people, own, true, err
+		return canonicalise(store, people), own, true, err
 	}
 	people, err := dmRoster(store, chatJID)
-	return people, own, false, err
+	return canonicalise(store, people), own, false, err
+}
+
+// canonicalise collapses each roster entry onto the phone form of its
+// identity.
+//
+// One person can hold three contact rows — a phone JID, a "@lid", and a junk
+// row where the LID digits were written under the phone server. Left alone,
+// an owner resolved from the roster comes out as "63840813367480@lid", which
+// matches nothing else in the app and reads as a number to a human.
+func canonicalise(store *db.Store, people []RosterPerson) []RosterPerson {
+	names := newNameResolver(store)
+	seen := map[string]bool{}
+	out := make([]RosterPerson, 0, len(people))
+	for _, p := range people {
+		p.JID = names.canonical(p.JID)
+		if seen[p.JID] {
+			continue
+		}
+		seen[p.JID] = true
+		out = append(out, p)
+	}
+	return out
 }
 
 func groupRoster(store *db.Store, chatJID string) ([]RosterPerson, error) {

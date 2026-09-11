@@ -146,8 +146,14 @@ func dayBreakBefore(lines []Line, start, end int, loc *time.Location) int {
 // a wasted model call.
 
 var requestWords = []string{
-	// Arabic, as people actually type it
-	"ابعت", "إبعت", "ابعتلي", "جهز", "جهّز", "راجع", "لازم", "بدي منك", "بدنا",
+	// Arabic, as people actually type it.
+	//
+	// Several of these are deliberately stems rather than whole words. Arabic
+	// verbs take a prefix for person — ابعتلي (I ask you to send), تبعتلي (you
+	// send me), يبعتلي (he sends me) — so matching "بعتل" catches the request
+	// however it was conjugated. Matching only "ابعتلي" missed "ممكن تبعتلي
+	// الملف؟", which is as plain a request as they come.
+	"بعتل", "ابعت", "إبعت", "جهز", "جهّز", "راجع", "لازم", "بدي منك", "بدنا",
 	"ياريت", "رجاء", "من فضلك", "تابع", "ذكرني", "حدد", "اعمل", "سوي", "كمل",
 	"ارسل", "أرسل", "شوف", "اتأكد", "تأكد", "خلص", "مطلوب", "كلف", "سلم",
 	// English

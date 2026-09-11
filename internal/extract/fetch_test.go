@@ -183,3 +183,49 @@ func TestRosterCarriesKunya(t *testing.T) {
 		t.Errorf("admin flag should be visible:\n%s", block)
 	}
 }
+
+// TestNameResolverPrefersRealNumbers guards against the junk identity rows in
+// this database: 129 contacts store a LID under the phone server, so the same
+// digits exist as both "<lid>@lid" and "<lid>@s.whatsapp.net". Whichever row
+// loaded last used to win, and an owner could resolve to a number nothing else
+// in the app knows.
+func TestNameResolverPrefersRealNumbers(t *testing.T) {
+	st := newStore(t)
+	chat := "g@g.us"
+
+	// The real person: a phone number, with their LID recorded.
+	if err := st.StoreContact(&db.Contact{
+		JID: "966535435254@s.whatsapp.net", LID: "63840813367480", Phone: "966535435254",
+		Name: "Mohammed Shurrab",
+	}); err != nil {
+		t.Fatalf("StoreContact: %v", err)
+	}
+	// The artefacts: the same LID as its own contact, twice over.
+	for _, jid := range []string{"63840813367480@lid", "63840813367480@s.whatsapp.net"} {
+		if err := st.StoreContact(&db.Contact{
+			JID: jid, Phone: "63840813367480", Name: "Mohammed Sufian Shurrab",
+		}); err != nil {
+			t.Fatalf("StoreContact(%s): %v", jid, err)
+		}
+	}
+
+	if err := st.StoreMessage(&db.Message{
+		ID: "M1", ChatJID: chat, Sender: "966500000009@s.whatsapp.net",
+		Content: "@63840813367480 جهز العقد", Mentions: `["63840813367480@lid"]`,
+		Timestamp: 1000,
+	}); err != nil {
+		t.Fatalf("StoreMessage: %v", err)
+	}
+
+	lines, err := extract.FetchLines(st, chat, 0, 2000)
+	if err != nil {
+		t.Fatalf("FetchLines: %v", err)
+	}
+	if len(lines) != 1 || len(lines[0].Mentions) != 1 {
+		t.Fatalf("expected one message with one mention, got %+v", lines)
+	}
+	if got := lines[0].Mentions[0]; got != "966535435254@s.whatsapp.net" {
+		t.Errorf("mention resolved to %q, want the real number — a LID under the\n"+
+			"phone server is a sync artefact, not somebody's contact", got)
+	}
+}
