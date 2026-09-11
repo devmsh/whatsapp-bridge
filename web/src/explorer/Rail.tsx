@@ -172,7 +172,7 @@ export default function Rail({
   unreadChats,
   archivedCount,
   openTasks,
-  pendingMeetings,
+  upcomingMeetings,
   hasStatusUpdates,
   profileName,
   avatar,
@@ -184,8 +184,8 @@ export default function Rail({
   unreadChats?: number
   archivedCount?: number
   openTasks?: number
-  /** Meetings the AI found that still need a look. */
-  pendingMeetings?: number
+  /** Meetings still ahead — what the badge counts. */
+  upcomingMeetings?: number
   hasStatusUpdates?: boolean
   profileName?: string
   avatar?: React.ReactNode
@@ -221,7 +221,7 @@ export default function Rail({
   // Bridge-only surfaces. Grouped apart on purpose.
   const ours: Entry[] = [
     { id: 'circles', label: 'Circles', icon: RAIL_ICONS.circles },
-    { id: 'meetings', label: 'Meetings', icon: RAIL_ICONS.meetings, badge: pendingMeetings, quiet: true },
+    { id: 'meetings', label: 'Meetings', icon: RAIL_ICONS.meetings, badge: upcomingMeetings, quiet: true },
     { id: 'tasks', label: 'Tasks', icon: RAIL_ICONS.tasks, badge: openTasks },
   ]
   const filed: Entry[] = [

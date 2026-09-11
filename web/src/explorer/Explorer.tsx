@@ -100,7 +100,11 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // Which meeting is open on the Meetings screen. Kept here so the bar above a
   // composer can jump straight to one from inside a chat.
   const [selectedMeeting, setSelectedMeeting] = useState<number | null>(null)
-  const [pendingMeetings, setPendingMeetings] = useState(0)
+  // The badge counts meetings still AHEAD of you — including ones with no
+  // agreed time, which are the ones waiting on a decision. It used to count
+  // everything awaiting review, which on a full backfill is mostly meetings
+  // that already happened.
+  const [upcomingMeetings, setUpcomingMeetings] = useState(0)
   // Badge count for the sidebar. Refreshed whenever circles change, so filing a
   // group updates it straight away.
   const [unassignedCount, setUnassignedCount] = useState(0)
@@ -198,8 +202,8 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
         .then((r) => setUnassignedCount(r.count || 0))
         .catch(() => {})
       api
-        .meetings({ review: 'pending_review' })
-        .then((list) => setPendingMeetings((list || []).length))
+        .meetings({ upcoming: true })
+        .then((list) => setUpcomingMeetings((list || []).length))
         .catch(() => {})
       api.tags().then((t) => setTags(t || [])).catch(() => {})
       api.contactTagsMap().then((m) => setContactTags(m || {})).catch(() => {})
@@ -915,7 +919,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             (n, c) => n + (c.is_archived && !c.is_hidden ? 1 : 0),
             0,
           )}
-          pendingMeetings={pendingMeetings}
+          upcomingMeetings={upcomingMeetings}
           profileName={device?.push_name || 'You'}
           onProfile={() => setShowSelfProfile(true)}
         />

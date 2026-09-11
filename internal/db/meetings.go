@@ -277,7 +277,10 @@ func (s *Store) ListMeetings(f MeetingFilter) ([]Meeting, error) {
 		args = append(args, f.ReviewStatus)
 	}
 	if f.Upcoming {
-		q += ` AND status NOT IN ('held','cancelled') AND (starts_at = 0 OR starts_at >= ?)`
+		// A meeting you rejected is not ahead of you — it was never a meeting.
+		q += ` AND review_status != 'rejected'
+		       AND status NOT IN ('held','cancelled')
+		       AND (starts_at = 0 OR starts_at >= ?)`
 		args = append(args, time.Now().Unix()-12*3600)
 	}
 	q += ` ORDER BY (starts_at = 0) DESC, starts_at ASC, updated_at DESC`
