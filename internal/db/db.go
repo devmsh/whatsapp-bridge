@@ -70,6 +70,12 @@ func NewStore(path string) (*Store, error) {
 		// how you came to know them. Contact sync never touches either.
 		`ALTER TABLE contacts ADD COLUMN kunya TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE contacts ADD COLUMN how_we_met TEXT NOT NULL DEFAULT ''`,
+		// What the extraction engine found, and how sure it was. The evidence
+		// quote is the reviewer's whole job made easy: it is the words that
+		// caused the task, so accepting or rejecting takes two seconds.
+		`ALTER TABLE tasks ADD COLUMN evidence TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN engine TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE tasks ADD COLUMN confidence REAL NOT NULL DEFAULT 0`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,

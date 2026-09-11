@@ -86,7 +86,7 @@ func (s *Store) UnassignedPeople(ownPhone string) ([]UnassignedChat, error) {
 		LEFT JOIN (SELECT chat_jid, COUNT(*) n FROM messages GROUP BY chat_jid) m
 		       ON m.chat_jid = c.jid
 		LEFT JOIN (SELECT chat_jid, COUNT(*) n FROM messages
-		            WHERE timestamp >= ` + unassignedWindow + ` GROUP BY chat_jid) r
+		            WHERE timestamp >= `+unassignedWindow+` GROUP BY chat_jid) r
 		       ON r.chat_jid = c.jid
 		WHERE (c.jid LIKE '%@s.whatsapp.net' OR c.jid LIKE '%@lid')
 		  AND COALESCE(c.is_archived, 0) = 0
@@ -99,7 +99,7 @@ func (s *Store) UnassignedPeople(ownPhone string) ([]UnassignedChat, error) {
 		        WHERE cm.member_type = 'contact'
 		          AND cm.member_ref IN (c.jid, COALESCE(ct.jid, ''), COALESCE(ct.lid, ''))
 		      )
-		GROUP BY c.jid` + unassignedOrder,
+		GROUP BY c.jid`+unassignedOrder,
 		ownPhone, ownPhone+"@%")
 }
 

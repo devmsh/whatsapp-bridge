@@ -8,51 +8,51 @@ import (
 
 // Message maps to the messages table.
 type Message struct {
-	ID              string  `json:"id"`
-	ChatJID         string  `json:"chat_jid"`
-	Sender          string  `json:"sender"`
-	SenderName      string  `json:"sender_name"`
-	PushName        string  `json:"push_name"`
-	Content         string  `json:"content"`
-	Timestamp       int64   `json:"timestamp"`
-	IsFromMe        bool    `json:"is_from_me"`
-	IsGroup         bool    `json:"is_group"`
-	MessageType     string  `json:"message_type"`
-	DeviceID        string  `json:"device_id"`
-	IsEphemeral     bool    `json:"is_ephemeral"`
-	IsViewOnce      bool    `json:"is_view_once"`
-	IsForwarded     bool    `json:"is_forwarded"`
-	ForwardScore    int     `json:"forward_score"`
-	IsEdit          bool    `json:"is_edit"`
-	EditTimestamp   int64   `json:"edit_timestamp,omitempty"`
-	OriginalID      string  `json:"original_id,omitempty"`
-	IsDeleted       bool    `json:"is_deleted"`
-	DeletedAt       int64   `json:"deleted_at,omitempty"`
-	DeletedBy       string  `json:"deleted_by,omitempty"`
-	MediaType       string  `json:"media_type,omitempty"`
-	MediaPath       string  `json:"media_path,omitempty"`
-	MediaMime       string  `json:"media_mime,omitempty"`
-	MediaSize       int     `json:"media_size,omitempty"`
-	MediaCaption    string  `json:"media_caption,omitempty"`
-	MediaFilename   string  `json:"media_filename,omitempty"`
-	ThumbnailPath   string  `json:"thumbnail_path,omitempty"`
-	ReplyToID       string  `json:"reply_to_id,omitempty"`
-	ReplyToSender   string  `json:"reply_to_sender,omitempty"`
-	ReplyToContent  string  `json:"reply_to_content,omitempty"`
-	Mentions        string  `json:"mentions,omitempty"`
-	Latitude        float64 `json:"latitude,omitempty"`
-	Longitude       float64 `json:"longitude,omitempty"`
-	LocationName    string  `json:"location_name,omitempty"`
-	LocationAddress string  `json:"location_address,omitempty"`
-	VCardName       string  `json:"vcard_name,omitempty"`
-	VCardData       string  `json:"vcard_data,omitempty"`
-	PollID          string  `json:"poll_id,omitempty"`
-	StickerPack     string  `json:"sticker_pack,omitempty"`
-	BroadcastListJID string `json:"broadcast_list_jid,omitempty"`
+	ID               string  `json:"id"`
+	ChatJID          string  `json:"chat_jid"`
+	Sender           string  `json:"sender"`
+	SenderName       string  `json:"sender_name"`
+	PushName         string  `json:"push_name"`
+	Content          string  `json:"content"`
+	Timestamp        int64   `json:"timestamp"`
+	IsFromMe         bool    `json:"is_from_me"`
+	IsGroup          bool    `json:"is_group"`
+	MessageType      string  `json:"message_type"`
+	DeviceID         string  `json:"device_id"`
+	IsEphemeral      bool    `json:"is_ephemeral"`
+	IsViewOnce       bool    `json:"is_view_once"`
+	IsForwarded      bool    `json:"is_forwarded"`
+	ForwardScore     int     `json:"forward_score"`
+	IsEdit           bool    `json:"is_edit"`
+	EditTimestamp    int64   `json:"edit_timestamp,omitempty"`
+	OriginalID       string  `json:"original_id,omitempty"`
+	IsDeleted        bool    `json:"is_deleted"`
+	DeletedAt        int64   `json:"deleted_at,omitempty"`
+	DeletedBy        string  `json:"deleted_by,omitempty"`
+	MediaType        string  `json:"media_type,omitempty"`
+	MediaPath        string  `json:"media_path,omitempty"`
+	MediaMime        string  `json:"media_mime,omitempty"`
+	MediaSize        int     `json:"media_size,omitempty"`
+	MediaCaption     string  `json:"media_caption,omitempty"`
+	MediaFilename    string  `json:"media_filename,omitempty"`
+	ThumbnailPath    string  `json:"thumbnail_path,omitempty"`
+	ReplyToID        string  `json:"reply_to_id,omitempty"`
+	ReplyToSender    string  `json:"reply_to_sender,omitempty"`
+	ReplyToContent   string  `json:"reply_to_content,omitempty"`
+	Mentions         string  `json:"mentions,omitempty"`
+	Latitude         float64 `json:"latitude,omitempty"`
+	Longitude        float64 `json:"longitude,omitempty"`
+	LocationName     string  `json:"location_name,omitempty"`
+	LocationAddress  string  `json:"location_address,omitempty"`
+	VCardName        string  `json:"vcard_name,omitempty"`
+	VCardData        string  `json:"vcard_data,omitempty"`
+	PollID           string  `json:"poll_id,omitempty"`
+	StickerPack      string  `json:"sticker_pack,omitempty"`
+	BroadcastListJID string  `json:"broadcast_list_jid,omitempty"`
 
 	// AI-derived (media_understanding):
-	Transcript      string `json:"transcript,omitempty"`         // voice note text
-	MediaDescription string `json:"media_description,omitempty"`  // image caption
+	Transcript       string `json:"transcript,omitempty"`        // voice note text
+	MediaDescription string `json:"media_description,omitempty"` // image caption
 }
 
 // AttachMediaUnderstanding fills Transcript and MediaDescription on the

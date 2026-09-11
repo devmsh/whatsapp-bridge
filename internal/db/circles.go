@@ -27,7 +27,7 @@ type Circle struct {
 	Keywords    []string `json:"keywords"` // saved terms that keep suggesting matching members
 	CreatedAt   int64    `json:"created_at"`
 	UpdatedAt   int64    `json:"updated_at"`
-	MemberCount int      `json:"member_count"`        // computed
+	MemberCount int      `json:"member_count"`         // computed
 	ParentIDs   []int64  `json:"parent_ids,omitempty"` // computed: direct parents (nested-in)
 }
 

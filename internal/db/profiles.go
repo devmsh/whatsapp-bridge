@@ -189,13 +189,13 @@ func (s *Store) StubEmptyProfiles(entries []ProfileRef) (int, error) {
 
 // ProfileStats summarizes how far profiling has progressed.
 type ProfileStats struct {
-	Total     int `json:"total"`     // profile rows
-	OK        int `json:"ok"`        // generated from content
-	Empty     int `json:"empty"`     // stubs (no content)
-	Error     int `json:"error"`     // failed
-	Pending   int `json:"pending"`   // queued
-	Manual    int `json:"manual"`    // human-edited
-	Stale     int `json:"stale"`     // older than the refresh cadence
+	Total     int `json:"total"`      // profile rows
+	OK        int `json:"ok"`         // generated from content
+	Empty     int `json:"empty"`      // stubs (no content)
+	Error     int `json:"error"`      // failed
+	Pending   int `json:"pending"`    // queued
+	Manual    int `json:"manual"`     // human-edited
+	Stale     int `json:"stale"`      // older than the refresh cadence
 	QueueSize int `json:"queue_size"` // entities waiting to be (re)generated now
 }
 

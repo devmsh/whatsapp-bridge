@@ -2,16 +2,16 @@ package db
 
 // Chat maps to the chats table.
 type Chat struct {
-	JID              string `json:"jid"`
-	Name             string `json:"name"`
-	ChatType         string `json:"chat_type"`
-	LastMessageAt    int64  `json:"last_message_at"`
-	UnreadCount      int    `json:"unread_count"`
-	IsArchived       bool   `json:"is_archived"`
-	IsPinned         bool   `json:"is_pinned"`
-	IsMuted          bool   `json:"is_muted"`
-	MutedUntil       int64  `json:"muted_until,omitempty"`
-	DisappearingTimer int64 `json:"disappearing_timer,omitempty"`
+	JID               string `json:"jid"`
+	Name              string `json:"name"`
+	ChatType          string `json:"chat_type"`
+	LastMessageAt     int64  `json:"last_message_at"`
+	UnreadCount       int    `json:"unread_count"`
+	IsArchived        bool   `json:"is_archived"`
+	IsPinned          bool   `json:"is_pinned"`
+	IsMuted           bool   `json:"is_muted"`
+	MutedUntil        int64  `json:"muted_until,omitempty"`
+	DisappearingTimer int64  `json:"disappearing_timer,omitempty"`
 }
 
 // StoreChat writes a COMPLETE chat record — every field on the struct lands in

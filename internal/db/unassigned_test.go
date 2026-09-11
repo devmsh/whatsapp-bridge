@@ -89,7 +89,6 @@ func TestUnassignedGroups(t *testing.T) {
 	}
 }
 
-
 // TestUnassignedPeople covers the people half of the list: a direct chat you
 // actually use, not yet in any circle. The identity check must see through the
 // LID/phone split — someone filed under their phone JID while the chat sits
@@ -150,8 +149,8 @@ func TestUnassignedRankedByRecentActivity(t *testing.T) {
 	st := newTestStore(t)
 
 	now := time.Now().Unix()
-	recent := now - 2*86400       // inside the 30-day window
-	old := now - 200*86400        // well outside it
+	recent := now - 2*86400 // inside the 30-day window
+	old := now - 200*86400  // well outside it
 
 	mk := func(jid, name string, recentMsgs, oldMsgs int) {
 		if err := st.StoreGroup(&db.Group{JID: jid, Name: name}); err != nil {

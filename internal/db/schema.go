@@ -533,4 +533,40 @@ CREATE TABLE IF NOT EXISTS meeting_circles (
     PRIMARY KEY (meeting_id, circle_id)
 );
 
+
+-- What the extraction engine did, and why.
+--
+-- Quality is invisible without these. A precision problem shows up here as a
+-- rising rejection count with a reason attached, rather than as a vague sense
+-- that the task list has gone noisy.
+CREATE TABLE IF NOT EXISTS extraction_calls (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT    NOT NULL DEFAULT '',
+    chat_jid    TEXT    NOT NULL DEFAULT '',
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    engine      TEXT    NOT NULL DEFAULT '',
+    kind        TEXT    NOT NULL DEFAULT 'extract',   -- extract | completion
+    messages    INTEGER NOT NULL DEFAULT 0,
+    chars       INTEGER NOT NULL DEFAULT 0,
+    latency_ms  INTEGER NOT NULL DEFAULT 0,
+    proposed    INTEGER NOT NULL DEFAULT 0,
+    verified    INTEGER NOT NULL DEFAULT 0,
+    rejected    INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_extraction_calls_run ON extraction_calls(run_id, created_at);
+
+-- Every proposal that did not survive checking, with the reason. This is the
+-- eval signal: a model that starts fabricating shows up as bad_quote climbing.
+CREATE TABLE IF NOT EXISTS extraction_rejections (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT    NOT NULL DEFAULT '',
+    chat_jid    TEXT    NOT NULL DEFAULT '',
+    evidence_id TEXT    NOT NULL DEFAULT '',
+    title       TEXT    NOT NULL DEFAULT '',
+    reason      TEXT    NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_extraction_rejections ON extraction_rejections(reason, created_at);
+
 `

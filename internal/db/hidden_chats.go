@@ -83,15 +83,15 @@ func SQLPlaceholders(n int) string {
 // that will be removed when this chat is hidden. UI uses this for a confirm
 // dialog before the irreversible cleanup.
 type HidePreview struct {
-	JID                     string `json:"jid"`
-	IsGroup                 bool   `json:"is_group"`
-	TasksOriginatedHere     int    `json:"tasks_originated_here"`
-	TasksLinked             int    `json:"tasks_linked"`
-	TaskMessageLinks        int    `json:"task_message_links"`
-	ProfileExists           bool   `json:"profile_exists"`
-	MediaUnderstandingRows  int    `json:"media_understanding_rows"`
-	ExtractionWatermarkSet  bool   `json:"extraction_watermark_set"`
-	CircleMembershipCount   int    `json:"circle_membership_count"`
+	JID                    string `json:"jid"`
+	IsGroup                bool   `json:"is_group"`
+	TasksOriginatedHere    int    `json:"tasks_originated_here"`
+	TasksLinked            int    `json:"tasks_linked"`
+	TaskMessageLinks       int    `json:"task_message_links"`
+	ProfileExists          bool   `json:"profile_exists"`
+	MediaUnderstandingRows int    `json:"media_understanding_rows"`
+	ExtractionWatermarkSet bool   `json:"extraction_watermark_set"`
+	CircleMembershipCount  int    `json:"circle_membership_count"`
 }
 
 // HidePreviewFor returns a HidePreview without changing anything.
@@ -126,13 +126,13 @@ func (s *Store) HidePreviewFor(jid string) HidePreview {
 // HideClearResult reports what HideChatAndClear actually removed.
 type HideClearResult struct {
 	HidePreview
-	TasksDeleted        int `json:"tasks_deleted"` // tasks fully removed (origin or only-linked-here)
-	TaskLinksDeleted    int `json:"task_links_deleted"`
-	ProfileDeleted      bool `json:"profile_deleted"`
-	MediaRowsDeleted    int  `json:"media_rows_deleted"`
-	BriefingsDeleted    int  `json:"briefings_deleted"`    // all current briefings (they may reference the chat)
-	CircleEdgesDeleted  int  `json:"circle_edges_deleted"`
-	WatermarkDeleted    bool `json:"watermark_deleted"`
+	TasksDeleted       int  `json:"tasks_deleted"` // tasks fully removed (origin or only-linked-here)
+	TaskLinksDeleted   int  `json:"task_links_deleted"`
+	ProfileDeleted     bool `json:"profile_deleted"`
+	MediaRowsDeleted   int  `json:"media_rows_deleted"`
+	BriefingsDeleted   int  `json:"briefings_deleted"` // all current briefings (they may reference the chat)
+	CircleEdgesDeleted int  `json:"circle_edges_deleted"`
+	WatermarkDeleted   bool `json:"watermark_deleted"`
 }
 
 // HideChatAndClear marks the chat hidden AND removes every piece of AI-derived

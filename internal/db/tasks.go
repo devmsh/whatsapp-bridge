@@ -27,23 +27,29 @@ const (
 
 // Task is a work item built on WhatsApp content. It may span multiple chats.
 type Task struct {
-	ID              int64   `json:"id"`
-	Title           string  `json:"title"`
-	Description     string  `json:"description"`
-	Status          string  `json:"status"`
-	Priority        string  `json:"priority"`
-	AssigneeJID     string  `json:"assignee_jid"`
-	CreatorJID      string  `json:"creator_jid"`
-	DueAt           int64   `json:"due_at"`
-	CompletedAt     int64   `json:"completed_at"`
-	OriginChatJID   string  `json:"origin_chat_jid"`
-	OriginMessageID string  `json:"origin_message_id"`
-	ReviewStatus    string  `json:"review_status"` // pending_review | accepted | rejected
-	ParentID        *int64  `json:"parent_id,omitempty"` // 2-level hierarchy; nil = top-level
-	CreatedAt       int64   `json:"created_at"`
-	UpdatedAt       int64   `json:"updated_at"`
-	MessageCount    int     `json:"message_count"`         // computed
-	CircleIDs       []int64 `json:"circle_ids,omitempty"`  // computed
+	ID              int64  `json:"id"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	Status          string `json:"status"`
+	Priority        string `json:"priority"`
+	AssigneeJID     string `json:"assignee_jid"`
+	CreatorJID      string `json:"creator_jid"`
+	DueAt           int64  `json:"due_at"`
+	CompletedAt     int64  `json:"completed_at"`
+	OriginChatJID   string `json:"origin_chat_jid"`
+	OriginMessageID string `json:"origin_message_id"`
+	ReviewStatus    string `json:"review_status"` // pending_review | accepted | rejected
+	// Where an extracted task came from. Evidence is the words that caused it:
+	// showing them turns reviewing into a two-second judgement instead of a
+	// trip back into the chat.
+	Evidence     string  `json:"evidence,omitempty"`
+	Engine       string  `json:"engine,omitempty"`
+	Confidence   float64 `json:"confidence,omitempty"`
+	ParentID     *int64  `json:"parent_id,omitempty"` // 2-level hierarchy; nil = top-level
+	CreatedAt    int64   `json:"created_at"`
+	UpdatedAt    int64   `json:"updated_at"`
+	MessageCount int     `json:"message_count"`        // computed
+	CircleIDs    []int64 `json:"circle_ids,omitempty"` // computed
 }
 
 // TaskMessageLink is a linked message, enriched with its content for display.
@@ -67,14 +73,16 @@ type TaskMessageLink struct {
 func taskColumns() string {
 	return `id, title, description, status, priority, assignee_jid, creator_jid,
 		due_at, completed_at, origin_chat_jid, origin_message_id, review_status,
-		parent_id, created_at, updated_at`
+		parent_id, COALESCE(evidence,''), COALESCE(engine,''),
+		COALESCE(confidence,0), created_at, updated_at`
 }
 
 func scanTask(sc scanner, t *Task) error {
 	var parent sql.NullInt64
 	if err := sc.Scan(&t.ID, &t.Title, &t.Description, &t.Status, &t.Priority, &t.AssigneeJID,
 		&t.CreatorJID, &t.DueAt, &t.CompletedAt, &t.OriginChatJID, &t.OriginMessageID,
-		&t.ReviewStatus, &parent, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.ReviewStatus, &parent, &t.Evidence, &t.Engine, &t.Confidence,
+		&t.CreatedAt, &t.UpdatedAt); err != nil {
 		return err
 	}
 	if parent.Valid {
@@ -103,10 +111,12 @@ func (s *Store) CreateTask(t *Task) (*Task, error) {
 	}
 	res, err := s.DB.Exec(`INSERT INTO tasks
 		(title, description, status, priority, assignee_jid, creator_jid, due_at, completed_at,
-		 origin_chat_jid, origin_message_id, review_status, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 origin_chat_jid, origin_message_id, review_status, evidence, engine, confidence,
+		 created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.Title, t.Description, t.Status, t.Priority, t.AssigneeJID, t.CreatorJID, t.DueAt,
-		t.CompletedAt, t.OriginChatJID, t.OriginMessageID, t.ReviewStatus, t.CreatedAt, t.UpdatedAt)
+		t.CompletedAt, t.OriginChatJID, t.OriginMessageID, t.ReviewStatus,
+		t.Evidence, t.Engine, t.Confidence, t.CreatedAt, t.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}

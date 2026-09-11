@@ -4,34 +4,34 @@ import "time"
 
 // Group maps to the groups table, derived from types.GroupInfo.
 type Group struct {
-	JID                          string `json:"jid"`
-	OwnerJID                     string `json:"owner_jid,omitempty"`
-	Name                         string `json:"name"`
-	NameSetAt                    int64  `json:"name_set_at,omitempty"`
-	NameSetBy                    string `json:"name_set_by,omitempty"`
-	Topic                        string `json:"topic,omitempty"`
-	TopicID                      string `json:"topic_id,omitempty"`
-	TopicSetAt                   int64  `json:"topic_set_at,omitempty"`
-	TopicSetBy                   string `json:"topic_set_by,omitempty"`
-	TopicDeleted                 bool   `json:"topic_deleted"`
-	IsLocked                     bool   `json:"is_locked"`
-	IsAnnounce                   bool   `json:"is_announce"`
-	AnnounceVersionID            string `json:"announce_version_id,omitempty"`
-	IsEphemeral                  bool   `json:"is_ephemeral"`
-	DisappearingTimer            int    `json:"disappearing_timer,omitempty"`
-	IsIncognito                  bool   `json:"is_incognito"`
-	IsParent                     bool   `json:"is_parent"`
+	JID                           string `json:"jid"`
+	OwnerJID                      string `json:"owner_jid,omitempty"`
+	Name                          string `json:"name"`
+	NameSetAt                     int64  `json:"name_set_at,omitempty"`
+	NameSetBy                     string `json:"name_set_by,omitempty"`
+	Topic                         string `json:"topic,omitempty"`
+	TopicID                       string `json:"topic_id,omitempty"`
+	TopicSetAt                    int64  `json:"topic_set_at,omitempty"`
+	TopicSetBy                    string `json:"topic_set_by,omitempty"`
+	TopicDeleted                  bool   `json:"topic_deleted"`
+	IsLocked                      bool   `json:"is_locked"`
+	IsAnnounce                    bool   `json:"is_announce"`
+	AnnounceVersionID             string `json:"announce_version_id,omitempty"`
+	IsEphemeral                   bool   `json:"is_ephemeral"`
+	DisappearingTimer             int    `json:"disappearing_timer,omitempty"`
+	IsIncognito                   bool   `json:"is_incognito"`
+	IsParent                      bool   `json:"is_parent"`
 	DefaultMembershipApprovalMode string `json:"default_membership_approval_mode,omitempty"`
-	LinkedParentJID              string `json:"linked_parent_jid,omitempty"`
-	IsDefaultSub                 bool   `json:"is_default_sub"`
-	MemberAddMode                string `json:"member_add_mode,omitempty"`
-	JoinApprovalRequired         bool   `json:"join_approval_required"`
-	GroupCreated                 int64  `json:"group_created,omitempty"`
-	CreatorCountryCode           string `json:"creator_country_code,omitempty"`
-	ParticipantCount             int    `json:"participant_count"`
-	Suspended                    bool   `json:"suspended"`
-	LeftAt                       int64  `json:"left_at,omitempty"`
-	UpdatedAt                    int64  `json:"updated_at"`
+	LinkedParentJID               string `json:"linked_parent_jid,omitempty"`
+	IsDefaultSub                  bool   `json:"is_default_sub"`
+	MemberAddMode                 string `json:"member_add_mode,omitempty"`
+	JoinApprovalRequired          bool   `json:"join_approval_required"`
+	GroupCreated                  int64  `json:"group_created,omitempty"`
+	CreatorCountryCode            string `json:"creator_country_code,omitempty"`
+	ParticipantCount              int    `json:"participant_count"`
+	Suspended                     bool   `json:"suspended"`
+	LeftAt                        int64  `json:"left_at,omitempty"`
+	UpdatedAt                     int64  `json:"updated_at"`
 }
 
 // GroupParticipant maps to the group_participants table.
@@ -171,10 +171,10 @@ func (s *Store) MarkGroupLeft(groupJID, ownJID string, ts int64) error {
 // GroupDiscovery holds a group with activity stats for new group detection.
 type GroupDiscovery struct {
 	Group
-	MessageCount   int    `json:"message_count"`
-	LastMessageAt  int64  `json:"last_message_at,omitempty"`
-	ParticipantNum int    `json:"participant_num"`
-	Tracked        bool   `json:"tracked"`
+	MessageCount   int   `json:"message_count"`
+	LastMessageAt  int64 `json:"last_message_at,omitempty"`
+	ParticipantNum int   `json:"participant_num"`
+	Tracked        bool  `json:"tracked"`
 }
 
 // GetGroupsDiscovery returns all groups with activity stats, marking which are tracked.
