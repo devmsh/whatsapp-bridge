@@ -11,11 +11,11 @@ import (
 
 // dashContact is the "everything in one screen" payload for a contact.
 type dashContact struct {
-	JID            string       `json:"jid"`
-	Name           string       `json:"name"`
-	Phone          string       `json:"phone,omitempty"`
-	BusinessName   string       `json:"business_name,omitempty"`
-	IsBusiness     bool         `json:"is_business,omitempty"`
+	JID          string `json:"jid"`
+	Name         string `json:"name"`
+	Phone        string `json:"phone,omitempty"`
+	BusinessName string `json:"business_name,omitempty"`
+	IsBusiness   bool   `json:"is_business,omitempty"`
 	// VerifiedName is set on businesses that passed WA's official
 	// verification — the green-check accounts. When non-empty the client
 	// renders a "✓ Verified" badge in the hero card. Empty (the common
@@ -32,18 +32,18 @@ type dashContact struct {
 }
 
 type dashGroup struct {
-	JID              string             `json:"jid"`
-	Name             string             `json:"name"`
-	Topic            string             `json:"topic,omitempty"`
-	ParticipantCount int                `json:"participant_count"`
-	Profile          *db.Profile        `json:"profile"`
-	Circles          []db.Circle        `json:"circles"`
-	TasksOpen        []db.Task          `json:"tasks_open"`
-	TasksDoneCount   int                `json:"tasks_done_count"`
-	LastActive       int64              `json:"last_active"`
-	MessageCount     int                `json:"message_count"`
-	TopContributors  []dashContributor  `json:"top_contributors"`
-	Recent           []dashRecent       `json:"recent"`
+	JID              string            `json:"jid"`
+	Name             string            `json:"name"`
+	Topic            string            `json:"topic,omitempty"`
+	ParticipantCount int               `json:"participant_count"`
+	Profile          *db.Profile       `json:"profile"`
+	Circles          []db.Circle       `json:"circles"`
+	TasksOpen        []db.Task         `json:"tasks_open"`
+	TasksDoneCount   int               `json:"tasks_done_count"`
+	LastActive       int64             `json:"last_active"`
+	MessageCount     int               `json:"message_count"`
+	TopContributors  []dashContributor `json:"top_contributors"`
+	Recent           []dashRecent      `json:"recent"`
 }
 
 type dashContributor struct {

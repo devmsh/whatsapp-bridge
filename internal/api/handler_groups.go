@@ -240,7 +240,9 @@ func (s *Server) handleGroupName(w http.ResponseWriter, r *http.Request, jid str
 		methodNotAllowed(w)
 		return
 	}
-	var req struct{ Name string `json:"name"` }
+	var req struct {
+		Name string `json:"name"`
+	}
 	decodeJSON(r, &req)
 
 	parsedJID, err := types.ParseJID(jid)
@@ -262,7 +264,9 @@ func (s *Server) handleGroupDescription(w http.ResponseWriter, r *http.Request, 
 		methodNotAllowed(w)
 		return
 	}
-	var req struct{ Description string `json:"description"` }
+	var req struct {
+		Description string `json:"description"`
+	}
 	decodeJSON(r, &req)
 
 	parsedJID, err := types.ParseJID(jid)

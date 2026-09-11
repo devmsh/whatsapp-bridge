@@ -61,9 +61,9 @@ func (s *Server) handleChats(w http.ResponseWriter, r *http.Request) {
 
 	type chatWithPreview struct {
 		db.Chat
-		LastMessage     *db.ChatPreview `json:"last_message,omitempty"`
-		IsHidden        bool            `json:"is_hidden,omitempty"`
-		UnreadMentions  int             `json:"unread_mentions,omitempty"`
+		LastMessage    *db.ChatPreview `json:"last_message,omitempty"`
+		IsHidden       bool            `json:"is_hidden,omitempty"`
+		UnreadMentions int             `json:"unread_mentions,omitempty"`
 	}
 	out := make([]chatWithPreview, 0, len(chats))
 	for _, c := range chats {

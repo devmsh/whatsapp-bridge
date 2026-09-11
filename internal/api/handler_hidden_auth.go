@@ -18,9 +18,9 @@ import (
 // Argon2id parameters: balanced for a 4-8 digit PIN. Low memory because PINs
 // are checked one at a time interactively (no need to resist GPU farms).
 const (
-	pinKeyHash       = "hidden_pin_hash"
-	pinKeySalt       = "hidden_pin_salt"
-	pinPassedTTL     = 5 * time.Minute
+	pinKeyHash          = "hidden_pin_hash"
+	pinKeySalt          = "hidden_pin_salt"
+	pinPassedTTL        = 5 * time.Minute
 	argonTime    uint32 = 1
 	argonMem     uint32 = 64 * 1024
 	argonThreads uint8  = 4
@@ -121,10 +121,10 @@ func (s *Server) handleHiddenStatus(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 	}
 	jsonOK(w, map[string]any{
-		"pin_set":              s.pinIsSet(),
-		"webauthn_registered":  credID != "",
-		"unlocked":             s.isUnlocked(r),
-		"hidden_count":         count,
+		"pin_set":             s.pinIsSet(),
+		"webauthn_registered": credID != "",
+		"unlocked":            s.isUnlocked(r),
+		"hidden_count":        count,
 	})
 }
 
@@ -165,7 +165,9 @@ func (s *Server) handleHiddenUnlockPin(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	var req struct{ Pin string `json:"pin"` }
+	var req struct {
+		Pin string `json:"pin"`
+	}
 	if err := decodeJSON(r, &req); err != nil || req.Pin == "" {
 		jsonError(w, 400, "pin required")
 		return
@@ -183,7 +185,7 @@ func (s *Server) handleHiddenUnlockPin(w http.ResponseWriter, r *http.Request) {
 	credID, _, _ := s.store.GetSyncState(waKeyCredID)
 	tok := mintPinPassed()
 	jsonOK(w, map[string]any{
-		"pin_passed_token":   tok,
+		"pin_passed_token":    tok,
 		"webauthn_registered": credID != "",
 	})
 }

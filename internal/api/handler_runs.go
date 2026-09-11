@@ -9,10 +9,10 @@ import (
 
 // handleRunsRoot routes the /api/v2/extractions/runs[/...] family.
 //
-//   GET    /api/v2/extractions/runs              -> active runs
-//   GET    /api/v2/extractions/runs/{id}         -> full state + events
-//   GET    /api/v2/extractions/runs/{id}/stream  -> SSE (live progress)
-//   POST   /api/v2/extractions/runs/{id}/cancel  -> cancel
+//	GET    /api/v2/extractions/runs              -> active runs
+//	GET    /api/v2/extractions/runs/{id}         -> full state + events
+//	GET    /api/v2/extractions/runs/{id}/stream  -> SSE (live progress)
+//	POST   /api/v2/extractions/runs/{id}/cancel  -> cancel
 func (s *Server) handleRunsRoot(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/extractions/runs")
 	path = strings.TrimPrefix(path, "/")

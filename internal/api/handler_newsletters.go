@@ -127,7 +127,9 @@ func (s *Server) handleNewsletterMute(w http.ResponseWriter, r *http.Request, ji
 		methodNotAllowed(w)
 		return
 	}
-	var req struct{ Mute bool `json:"mute"` }
+	var req struct {
+		Mute bool `json:"mute"`
+	}
 	decodeJSON(r, &req)
 
 	parsedJID, err := types.ParseJID(jid)

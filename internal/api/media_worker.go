@@ -66,9 +66,9 @@ func (m *MediaUnderstandingManager) Start() {
 		fmt.Println("media-understanding: disabled (rate-limit guard) — voice + image AI workers not started")
 		return
 	}
-	go m.workerLoop("audio", 2)  // 2 parallel whisper transcribes (local CPU)
-	go m.workerLoop("image", 2)  // 2 parallel Codex image descriptions
-	go m.refineBackfillLoop()    // re-refine old raw transcripts in the background
+	go m.workerLoop("audio", 2) // 2 parallel whisper transcribes (local CPU)
+	go m.workerLoop("image", 2) // 2 parallel Codex image descriptions
+	go m.refineBackfillLoop()   // re-refine old raw transcripts in the background
 }
 
 // refineBackfillLoop continuously walks transcript rows whose `refined` flag
@@ -360,15 +360,16 @@ func detectWhisperBinary() string {
 }
 
 // transcribeAudio handles a WhatsApp voice note end-to-end:
-//   1. ffmpeg-convert the source (typically 48kHz Opus .ogg) to 16kHz mono wav
-//      in a temp file — whisper.cpp expects 16kHz mono.
-//   2. Run whisper-cli on the wav with the user's preferred language (default
-//      Arabic, matching the meeting-scribe convention: -l ar handles mixed
-//      AR/EN best for this user's content).
+//  1. ffmpeg-convert the source (typically 48kHz Opus .ogg) to 16kHz mono wav
+//     in a temp file — whisper.cpp expects 16kHz mono.
+//  2. Run whisper-cli on the wav with the user's preferred language (default
+//     Arabic, matching the meeting-scribe convention: -l ar handles mixed
+//     AR/EN best for this user's content).
 //
 // Model + language are overridable via .env:
-//   WHISPER_MODEL — full path to a ggml-*.bin file
-//   WHISPER_LANG  — language code ("ar", "en", "auto", …). Default: "ar".
+//
+//	WHISPER_MODEL — full path to a ggml-*.bin file
+//	WHISPER_LANG  — language code ("ar", "en", "auto", …). Default: "ar".
 func (m *MediaUnderstandingManager) transcribeAudio(path string) (string, error) {
 	if m.audioBin == "" {
 		return "", fmt.Errorf("no whisper binary detected; install whisper.cpp (brew install whisper-cpp)")
@@ -432,11 +433,11 @@ func (m *MediaUnderstandingManager) transcribeAudio(path string) (string, error)
 
 // findWhisperModel returns the path to a usable whisper.cpp model, or "".
 // Priority order:
-//   1. $WHISPER_MODEL
-//   2. ~/whisper-models/ggml-large-v3{-turbo,}.bin (the meeting-scribe path)
-//   3. ./models/ggml-*.bin under the bridge cwd
-//   4. /opt/homebrew/share/whisper-cpp/models/ggml-*.bin (brew default)
-//   5. ~/.cache/whisper/ggml-*.bin
+//  1. $WHISPER_MODEL
+//  2. ~/whisper-models/ggml-large-v3{-turbo,}.bin (the meeting-scribe path)
+//  3. ./models/ggml-*.bin under the bridge cwd
+//  4. /opt/homebrew/share/whisper-cpp/models/ggml-*.bin (brew default)
+//  5. ~/.cache/whisper/ggml-*.bin
 func findWhisperModel() string {
 	if v := envOr("WHISPER_MODEL", ""); v != "" {
 		if _, err := os.Stat(v); err == nil {
@@ -639,18 +640,19 @@ func (m *MediaUnderstandingManager) describeImage(path string) (string, error) {
 // ── HTTP handler ────────────────────────────────────────────────────
 
 type mediaStatusBody struct {
-	Disabled        bool         `json:"disabled"` // feature parked behind the rate-limit guard
-	AudioEnabled    bool         `json:"audio_enabled"`
-	ImageEnabled    bool         `json:"image_enabled"`
-	WhisperDetected bool         `json:"whisper_detected"`
-	WhisperBinary   string       `json:"whisper_binary,omitempty"`
+	Disabled        bool          `json:"disabled"` // feature parked behind the rate-limit guard
+	AudioEnabled    bool          `json:"audio_enabled"`
+	ImageEnabled    bool          `json:"image_enabled"`
+	WhisperDetected bool          `json:"whisper_detected"`
+	WhisperBinary   string        `json:"whisper_binary,omitempty"`
 	Stats           db.MediaStats `json:"stats"`
 }
 
 // handleMediaStatus is the GET status / POST toggle endpoint for media
 // understanding (voice + image).
-//   GET  /api/v2/media/understanding
-//   POST /api/v2/media/understanding  {audio_enabled?, image_enabled?}
+//
+//	GET  /api/v2/media/understanding
+//	POST /api/v2/media/understanding  {audio_enabled?, image_enabled?}
 func (s *Server) handleMediaUnderstanding(w http.ResponseWriter, r *http.Request) {
 	if s.mediaUnderstanding == nil {
 		jsonError(w, 503, "media worker not initialised")

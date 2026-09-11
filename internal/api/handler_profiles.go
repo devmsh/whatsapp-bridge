@@ -17,9 +17,10 @@ func validProfileType(t string) bool {
 }
 
 // handleProfile reads or edits one entity's profile.
-//   GET    /api/v2/profiles?type=group&ref=JID     -> the profile (or null)
-//   PUT    /api/v2/profiles  {type, ref, description} -> manual edit (pins manual)
-//   POST   /api/v2/profiles/regenerate {type, ref}    -> queue a fresh generation
+//
+//	GET    /api/v2/profiles?type=group&ref=JID     -> the profile (or null)
+//	PUT    /api/v2/profiles  {type, ref, description} -> manual edit (pins manual)
+//	POST   /api/v2/profiles/regenerate {type, ref}    -> queue a fresh generation
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -89,9 +90,10 @@ func (s *Server) handleProfileRegenerate(w http.ResponseWriter, r *http.Request)
 
 // handleProfilesStatus reports profiling progress and lets the UI turn the
 // background profiler on or off.
-//   GET  /api/v2/profiles/status                 -> stats + queue size + active entity
-//   POST /api/v2/profiles/status                 -> enable + rescan now
-//   POST /api/v2/profiles/status {enabled:false} -> turn it off and drop the backlog
+//
+//	GET  /api/v2/profiles/status                 -> stats + queue size + active entity
+//	POST /api/v2/profiles/status                 -> enable + rescan now
+//	POST /api/v2/profiles/status {enabled:false} -> turn it off and drop the backlog
 func (s *Server) handleProfilesStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var req struct {

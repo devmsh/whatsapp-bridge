@@ -22,19 +22,19 @@ const (
 
 // RunEvent is one line of progress for a run.
 type RunEvent struct {
-	TS    int64  `json:"ts"`
-	Seq   int64  `json:"seq"`
-	Kind  string `json:"kind"`           // tool | text | info | result | error
-	Name  string `json:"name,omitempty"` // tool name (without mcp__whatsapp__ prefix)
-	Text  string `json:"text,omitempty"` // free text or summary
+	TS   int64  `json:"ts"`
+	Seq  int64  `json:"seq"`
+	Kind string `json:"kind"`           // tool | text | info | result | error
+	Name string `json:"name,omitempty"` // tool name (without mcp__whatsapp__ prefix)
+	Text string `json:"text,omitempty"` // free text or summary
 }
 
 // Run is the live state of one extraction.
 type Run struct {
 	ID        string     `json:"id"`
-	Kind      string     `json:"kind"`               // chat | circle
-	Subject   string     `json:"subject"`            // chat JID or circle id (string)
-	Label     string     `json:"label"`              // human title
+	Kind      string     `json:"kind"`    // chat | circle
+	Subject   string     `json:"subject"` // chat JID or circle id (string)
+	Label     string     `json:"label"`   // human title
 	Status    RunStatus  `json:"status"`
 	StartedAt int64      `json:"started_at"`
 	EndedAt   int64      `json:"ended_at,omitempty"`

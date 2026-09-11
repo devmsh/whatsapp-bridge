@@ -18,10 +18,10 @@ import (
 
 // WebAuthn keys in sync_state.
 const (
-	waKeyCredID    = "hidden_wa_credential_id"      // hex-encoded raw credential id
-	waKeyPubKey    = "hidden_wa_credential_pubkey"  // hex-encoded CBOR public key
-	waKeyAAGUID    = "hidden_wa_credential_aaguid"  // hex-encoded AAGUID
-	waKeySignCount = "hidden_wa_credential_sign_count"
+	waKeyCredID     = "hidden_wa_credential_id"     // hex-encoded raw credential id
+	waKeyPubKey     = "hidden_wa_credential_pubkey" // hex-encoded CBOR public key
+	waKeyAAGUID     = "hidden_wa_credential_aaguid" // hex-encoded AAGUID
+	waKeySignCount  = "hidden_wa_credential_sign_count"
 	waKeyTransports = "hidden_wa_credential_transports"
 )
 
@@ -31,10 +31,10 @@ type hiddenWAUser struct {
 	creds []webauthn.Credential
 }
 
-func (u *hiddenWAUser) WebAuthnID() []byte            { return []byte("whatsapp-bridge-user") }
-func (u *hiddenWAUser) WebAuthnName() string          { return "you" }
-func (u *hiddenWAUser) WebAuthnDisplayName() string   { return "WhatsApp Bridge" }
-func (u *hiddenWAUser) WebAuthnIcon() string          { return "" }
+func (u *hiddenWAUser) WebAuthnID() []byte                         { return []byte("whatsapp-bridge-user") }
+func (u *hiddenWAUser) WebAuthnName() string                       { return "you" }
+func (u *hiddenWAUser) WebAuthnDisplayName() string                { return "WhatsApp Bridge" }
+func (u *hiddenWAUser) WebAuthnIcon() string                       { return "" }
 func (u *hiddenWAUser) WebAuthnCredentials() []webauthn.Credential { return u.creds }
 
 // In-memory WebAuthn instance (cheap) + sessionStore for the two-step flows.
@@ -147,8 +147,9 @@ func (s *Server) storedCredential() *webauthn.Credential {
 
 // handleHiddenWARegisterOptions starts WebAuthn credential registration.
 // POST /api/v2/hidden/webauthn/register/options
-//   header X-Pin-Passed: token from the pin step
-//   returns { publicKey: <PublicKeyCredentialCreationOptions>, session_id }
+//
+//	header X-Pin-Passed: token from the pin step
+//	returns { publicKey: <PublicKeyCredentialCreationOptions>, session_id }
 func (s *Server) handleHiddenWARegisterOptions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -176,8 +177,9 @@ func (s *Server) handleHiddenWARegisterOptions(w http.ResponseWriter, r *http.Re
 
 // handleHiddenWARegisterVerify completes registration.
 // POST /api/v2/hidden/webauthn/register/verify
-//   header X-Pin-Passed: ...
-//   body { session_id, credential }
+//
+//	header X-Pin-Passed: ...
+//	body { session_id, credential }
 func (s *Server) handleHiddenWARegisterVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -231,7 +233,8 @@ func (s *Server) handleHiddenWARegisterVerify(w http.ResponseWriter, r *http.Req
 
 // handleHiddenWAAuthOptions starts an assertion (unlock).
 // POST /api/v2/hidden/webauthn/auth/options
-//   header X-Pin-Passed: token from the pin step
+//
+//	header X-Pin-Passed: token from the pin step
 func (s *Server) handleHiddenWAAuthOptions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -264,9 +267,10 @@ func (s *Server) handleHiddenWAAuthOptions(w http.ResponseWriter, r *http.Reques
 
 // handleHiddenWAAuthVerify completes the assertion and mints the unlock token.
 // POST /api/v2/hidden/webauthn/auth/verify
-//   header X-Pin-Passed: token
-//   body { session_id, credential }
-//   ->  { unlock_token, expires_at }
+//
+//	header X-Pin-Passed: token
+//	body { session_id, credential }
+//	->  { unlock_token, expires_at }
 func (s *Server) handleHiddenWAAuthVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -376,7 +380,8 @@ func (s *Server) handleHiddenWAChatOptions(w http.ResponseWriter, r *http.Reques
 // handleHiddenWAChatVerify completes the assertion and mints a CHAT-SCOPED
 // unlock token tied to the chat_jid pinned during options.
 // POST /api/v2/hidden/webauthn/chat/verify   body: {session_id, credential}
-//   -> { unlock_token, chat_jid, ttl_seconds }
+//
+//	-> { unlock_token, chat_jid, ttl_seconds }
 func (s *Server) handleHiddenWAChatVerify(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)

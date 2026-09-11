@@ -11,7 +11,8 @@ import (
 // itself opens SQLite read-only, so all writes go through the REST API.
 //
 // POST /api/v2/extractions/mark  {"chat_jid","session_id"}
-//   -> {"chat_jid","watermark","session_id"}
+//
+//	-> {"chat_jid","watermark","session_id"}
 func (s *Server) handleExtractionMark(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)

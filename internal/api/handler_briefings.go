@@ -52,9 +52,9 @@ type briefingPayload struct {
 
 // handleBriefingsRoot routes /api/v2/briefings[...] paths.
 //
-//   GET  /api/v2/briefings/today      -> latest briefing for today, or null
-//   GET  /api/v2/briefings            -> recent briefings (list)
-//   POST /api/v2/briefings/generate   -> build a fresh briefing and store it
+//	GET  /api/v2/briefings/today      -> latest briefing for today, or null
+//	GET  /api/v2/briefings            -> recent briefings (list)
+//	POST /api/v2/briefings/generate   -> build a fresh briefing and store it
 func (s *Server) handleBriefingsRoot(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/briefings")
 	path = strings.TrimPrefix(path, "/")

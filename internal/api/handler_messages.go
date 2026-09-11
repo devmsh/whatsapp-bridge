@@ -162,7 +162,9 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request, msgID, cha
 		return
 	}
 	if chatJID == "" {
-		var req struct{ ChatJID string `json:"chat_jid"` }
+		var req struct {
+			ChatJID string `json:"chat_jid"`
+		}
 		decodeJSON(r, &req)
 		chatJID = req.ChatJID
 	}

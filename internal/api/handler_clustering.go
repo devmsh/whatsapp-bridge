@@ -24,10 +24,10 @@ type proposedCluster struct {
 
 // ClusterResult summarizes what the cluster pass changed.
 type ClusterResult struct {
-	NewParents     int    `json:"new_parents"`     // newly-created parent tasks
-	ReusedParents  int    `json:"reused_parents"`  // existing tasks promoted to parent
-	ChildrenLinked int    `json:"children_linked"` // tasks now pointing to a parent
-	Skipped        int    `json:"skipped"`         // clusters rejected (invalid / no children)
+	NewParents     int      `json:"new_parents"`     // newly-created parent tasks
+	ReusedParents  int      `json:"reused_parents"`  // existing tasks promoted to parent
+	ChildrenLinked int      `json:"children_linked"` // tasks now pointing to a parent
+	Skipped        int      `json:"skipped"`         // clusters rejected (invalid / no children)
 	Rationales     []string `json:"rationales,omitempty"`
 }
 

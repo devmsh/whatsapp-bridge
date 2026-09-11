@@ -20,7 +20,8 @@ type draftReply struct {
 // reply-assistant sidecar.
 //
 // POST /api/v2/chats/{jid}/draft-replies
-//   -> { drafts: [{text, style, reason}], ... }
+//
+//	-> { drafts: [{text, style, reason}], ... }
 func (s *Server) handleDraftReplies(w http.ResponseWriter, r *http.Request, jid string) {
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -69,11 +70,11 @@ func (s *Server) handleDraftReplies(w http.ResponseWriter, r *http.Request, jid 
 	tone := s.recentMyTone(jid, 8)
 
 	input := map[string]any{
-		"kind":             kind,
-		"chat_label":       label,
-		"profile":          profile,
-		"recent_messages":  recent,
-		"my_recent_tone":   tone,
+		"kind":            kind,
+		"chat_label":      label,
+		"profile":         profile,
+		"recent_messages": recent,
+		"my_recent_tone":  tone,
 	}
 	in, _ := json.Marshal(input)
 

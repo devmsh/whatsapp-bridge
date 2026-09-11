@@ -16,10 +16,10 @@ import (
 // instant stub (no model call). Profiles refresh on a 7-working-day cadence.
 
 const (
-	profileMsgSample   = 80    // recent messages fed to the summarizer
-	profileMaxMsgLen   = 280   // per-message cap (chars)
+	profileMsgSample   = 80  // recent messages fed to the summarizer
+	profileMaxMsgLen   = 280 // per-message cap (chars)
 	profileQueueCap    = 12000
-	profileConcurrency = 5     // chats/groups summarized in parallel
+	profileConcurrency = 5 // chats/groups summarized in parallel
 )
 
 type profileJob struct {

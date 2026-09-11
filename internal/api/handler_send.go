@@ -166,10 +166,10 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		JID           string   `json:"jid"`
 		Message       string   `json:"message"`
 		MediaPath     string   `json:"media_path,omitempty"`
-		Sticker       bool     `json:"sticker,omitempty"`         // true = send .webp as sticker; default = image
-		PTT           bool     `json:"ptt,omitempty"`             // true = send audio as voice note (push-to-talk)
-		MentionedJIDs []string `json:"mentioned_jids,omitempty"`  // JIDs to ping (filled into ContextInfo.MentionedJID)
-		ViewOnce      bool     `json:"view_once,omitempty"`       // true = wrap photo / video / voice in WA's view-once envelope
+		Sticker       bool     `json:"sticker,omitempty"`        // true = send .webp as sticker; default = image
+		PTT           bool     `json:"ptt,omitempty"`            // true = send audio as voice note (push-to-talk)
+		MentionedJIDs []string `json:"mentioned_jids,omitempty"` // JIDs to ping (filled into ContextInfo.MentionedJID)
+		ViewOnce      bool     `json:"view_once,omitempty"`      // true = wrap photo / video / voice in WA's view-once envelope
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		jsonError(w, 400, "invalid JSON")

@@ -147,7 +147,8 @@ func (s *Server) handlePresenceSubscribe(w http.ResponseWriter, r *http.Request)
 // once every few seconds to render WA's "typing…" preview without N+1.
 //
 // Shape:
-//   { "chats": { "<chatJID>": ["<senderJID>", ...], ... } }
+//
+//	{ "chats": { "<chatJID>": ["<senderJID>", ...], ... } }
 //
 // For DMs the sender list is just [chatJID] (the peer themselves) — kept
 // uniform with groups so the client treats both the same way.
