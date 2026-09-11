@@ -67,6 +67,56 @@
   --color-wa-tick: #53bdeb; /* read receipt blue */
 }
 
+/* ---------------------------------------------------------------------------
+   Dark theme
+   ---------------------------------------------------------------------------
+   Same trick as the light flip above, applied a second time. The app's ~1,600
+   `neutral-*` utilities never change; only what the ramp MEANS changes, so one
+   block repaints everything.
+
+   The ramp keeps its meaning in both themes — "950 = the background you sit
+   on, 100 = the text you read" — which is why the same markup works upside
+   down. In light 950 is white and 100 is near-black; here it is the reverse.
+
+   One selector is enough. The theme has three settings — light, dark and
+   system — but "system" is resolved in JS (see theme.ts), which watches the OS
+   preference and stamps data-theme="dark" or "light" itself. So the CSS never
+   needs a prefers-color-scheme copy of this block, and the two can never
+   disagree about which one wins.
+
+   Values are WhatsApp's dark palette: #0b141a app, #111b21 panel, #202c33
+   raised, #005c4b outgoing bubble.
+--------------------------------------------------------------------------- */
+@layer theme {
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+
+    --color-neutral-950: #0b141a; /* app background */
+    --color-neutral-900: #111b21; /* raised panel, input wells */
+    --color-neutral-800: #202c33; /* dividers, hover fills, chips */
+    --color-neutral-700: #2a3942; /* stronger borders */
+    --color-neutral-600: #3b4a54; /* disabled text, heavy borders */
+    --color-neutral-500: #8696a0; /* tertiary / meta text */
+    --color-neutral-400: #aebac1; /* secondary text */
+    --color-neutral-300: #c4ced3;
+    --color-neutral-200: #d1d7db;
+    --color-neutral-100: #e9edef; /* primary text */
+    --color-neutral-50: #ffffff; /* strongest ink */
+
+    --color-wa-rail: #0b141a;
+    --color-wa-panel: #111b21;
+    --color-wa-hover: #202c33;
+    --color-wa-header: #202c33;
+    --color-wa-wallpaper: #0b141a;
+    --color-wa-doodle: #182229;
+    --color-wa-bubble-in: #202c33;
+    --color-wa-bubble-out: #005c4b;
+    --color-wa-ink: #e9edef;
+    --color-wa-ink-soft: #8696a0;
+    --color-wa-border: #222e35;
+  }
+}
+
 :root {
   color-scheme: light;
 }
@@ -177,3 +227,17 @@ body {
   background-size: 170px 170px;
   opacity: 1;
 }
+
+/* Dark wallpaper. The doodle ink is baked into the data URI, so it cannot
+   follow a token — dark needs its own copy with a darker stroke, or the cream
+   doodles glow against the near-black ground. */
+:root[data-theme='dark'] .wa-wallpaper {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='none' stroke='%23182229' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 30c6-6 14-6 20 0M30 22v16'/%3E%3Ccircle cx='96' cy='34' r='9'/%3E%3Cpath d='M150 24h20v14h-8l-5 6v-6h-7z'/%3E%3Cpath d='M214 26l6 12-6 12-6-12z'/%3E%3Cpath d='M36 92h18v12H36zM40 88v4M50 88v4'/%3E%3Cpath d='M104 84l8 16h-16z'/%3E%3Ccircle cx='168' cy='94' r='8'/%3E%3Cpath d='M168 86v16M160 94h16'/%3E%3Cpath d='M222 84c8 0 12 6 12 12s-8 10-12 6'/%3E%3Cpath d='M26 156c6-8 16-8 22 0-4 8-18 8-22 0z'/%3E%3Cpath d='M92 148h22v16H92zM96 164v6M110 164v6'/%3E%3Cpath d='M156 152l10 6-10 6z'/%3E%3Ccircle cx='222' cy='158' r='10'/%3E%3Cpath d='M30 214l8-10 8 10z'/%3E%3Cpath d='M88 206h24M88 214h16'/%3E%3Ccircle cx='164' cy='212' r='7'/%3E%3Cpath d='M158 220c4 4 8 4 12 0'/%3E%3Cpath d='M212 204h16v16h-16z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* The bubble shadow is tuned for light panels and vanishes on dark, taking the
+   bubble edge with it. Deepen it so bubbles still lift off the wallpaper. */
+:root[data-theme='dark'] .wa-bubble {
+  box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.35);
+}
+

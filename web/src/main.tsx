@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
 import { getUnlockToken, getChatUnlockToken } from './hidden'
+import { initTheme } from './theme'
 
 // Inject the right hidden-chats unlock token into every same-origin /api/v2/*
 // call without each call site knowing about it.
@@ -61,6 +62,9 @@ window.fetch = function (input, init) {
   headers.set('X-Hidden-Unlock', tok)
   return _origFetch(input as any, { ...(init || {}), headers })
 }
+
+// Before the first render, so the app never flashes light and then corrects.
+initTheme()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

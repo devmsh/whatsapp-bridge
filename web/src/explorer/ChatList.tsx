@@ -19,6 +19,8 @@ export function ChatList({
   nameMap,
   circles,
   selected,
+  view,
+  onView,
   onOpen,
   onRequestHide,
   onChanged,
@@ -27,6 +29,10 @@ export function ChatList({
   nameMap: Map<string, string>
   circles: Circle[]
   selected: string | null
+  /** Which list is showing. Controlled by the sidebar, because "Archived" is
+      a destination there now rather than a row inside the list. */
+  view: 'normal' | 'archived'
+  onView: (v: 'normal' | 'archived') => void
   onOpen: (jid: string) => void
   onRequestHide: (jid: string, title: string) => void
   onChanged: () => void
@@ -72,13 +78,29 @@ export function ChatList({
   // 'normal' shows non-archived chats + an 'Archived (N)' header at the top
   // when there is anything archived; 'archived' shows the archived-only view
   // with a back affordance. Mirrors WhatsApp's Archived screen exactly.
-  const [view, setView] = useState<'normal' | 'archived'>('normal')
+  const setView = onView
   // WA's recent filter pills at the top of the chat list: All / Unread /
   // Groups / @Mentions. Each is a cheap predicate over the chat row — no
   // backend filter, no fetch — so toggling is instant. Only meaningful in
   // the normal view; archived stays unfiltered.
-  type Filter = 'all' | 'unread' | 'groups' | 'mentions' | 'drafts'
+  type Filter = 'all' | 'unread' | 'groups' | 'meetings' | 'mentions' | 'drafts'
   const [filter, setFilter] = useState<Filter>('all')
+  // Chats with a meeting still ahead. Fetched once as a set rather than asked
+  // per row, and refreshed when the chat list changes — meetings are created by
+  // the extraction agent in the background, so this cannot be load-once.
+  const [meetingChats, setMeetingChats] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    api
+      .meetingChats()
+      .then((jids) => {
+        if (!cancelled) setMeetingChats(new Set(jids))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [chats.length])
 
   // Split into archived + non-archived once so we don't re-filter on every
   // render, and the counter in the 'Archived (N)' header is cheap.
@@ -118,14 +140,16 @@ export function ChatList({
     let groups = 0
     let mentions = 0
     let draftCount = 0
+    let meetings = 0
     for (const r of normalRows) {
       if ((r.chat.unread_count || 0) > 0) unread++
       if (isGroup(r.chat.jid)) groups++
       if ((r.chat.unread_mentions || 0) > 0) mentions++
       if (drafts.has(r.chat.jid)) draftCount++
+      if (meetingChats.has(r.chat.jid)) meetings++
     }
-    return { unread, groups, mentions, drafts: draftCount }
-  }, [normalRows, drafts])
+    return { unread, groups, mentions, drafts: draftCount, meetings }
+  }, [normalRows, drafts, meetingChats])
 
   // Apply the active filter to normalRows. We deliberately don't touch
   // archivedRows — WA's archived view is its own world, always unfiltered.
@@ -138,6 +162,7 @@ export function ChatList({
     return rows.filter((r) => {
       if (filter === 'unread') return (r.chat.unread_count || 0) > 0
       if (filter === 'groups') return isGroup(r.chat.jid)
+      if (filter === 'meetings') return meetingChats.has(r.chat.jid)
       if (filter === 'mentions') return (r.chat.unread_mentions || 0) > 0
       if (filter === 'drafts') return drafts.has(r.chat.jid)
       return true
@@ -199,6 +224,14 @@ export function ChatList({
           <FilterPill id="groups" current={filter} onPick={setFilter} count={filterCounts.groups}>
             Groups
           </FilterPill>
+          {/* Chats with a meeting still ahead — including ones where the time
+              is still being argued over, since those are the ones that need
+              an answer from you. */}
+          {filterCounts.meetings > 0 && (
+            <FilterPill id="meetings" current={filter} onPick={setFilter} count={filterCounts.meetings}>
+              Meetings
+            </FilterPill>
+          )}
           {filterCounts.mentions > 0 && (
             <FilterPill id="mentions" current={filter} onPick={setFilter} count={filterCounts.mentions}>
               @ Mentions
@@ -279,33 +312,6 @@ export function ChatList({
           </button>
         )}
 
-        {/* Normal-view 'Archived (N)' row: only shown when there's something
-            to navigate to. Click → switches into archived view. */}
-        {view === 'normal' && archivedRows.length > 0 && (
-          <button
-            onClick={() => setView('archived')}
-            className="flex w-full items-center gap-3 border-b border-neutral-800 px-3 py-2.5 text-left transition hover:bg-neutral-900"
-            title="View archived chats"
-          >
-            <span
-              aria-hidden="true"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-neutral-400"
-            >
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="21 8 21 21 3 21 3 8" />
-                <rect x="1" y="3" width="22" height="5" />
-                <line x1="10" y1="12" x2="14" y2="12" />
-              </svg>
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-neutral-200">Archived</div>
-            </div>
-            <span className="shrink-0 text-xs text-neutral-500">
-              {archivedRows.length}
-            </span>
-          </button>
-        )}
-
         {rows.length === 0 && (
           <div className="p-6 text-center text-xs text-neutral-600">
             {view === 'archived'
@@ -314,6 +320,8 @@ export function ChatList({
                 ? 'All caught up 🎉'
                 : filter === 'groups'
                   ? 'No groups'
+                  : filter === 'meetings'
+                    ? 'No chats with an upcoming meeting'
                   : filter === 'mentions'
                     ? 'No unread mentions'
                     : filter === 'drafts'

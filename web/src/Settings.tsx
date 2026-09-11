@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type MediaPolicy } from './api'
+import { readTheme, setTheme, type ThemeChoice } from './theme'
 
 const TYPES: { key: keyof MediaPolicy; label: string; hint: string }[] = [
   { key: 'images', label: 'Images', hint: 'Photos' },
@@ -8,6 +9,49 @@ const TYPES: { key: keyof MediaPolicy; label: string; hint: string }[] = [
   { key: 'documents', label: 'Documents', hint: 'PDFs, files' },
   { key: 'stickers', label: 'Stickers', hint: '' },
 ]
+
+const THEMES: { value: ThemeChoice; label: string }[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'system', label: 'System' },
+]
+
+// ThemePicker switches the palette. The change is instant — setTheme stamps the
+// resolved theme on <html> and the CSS repaints — so there is nothing to save.
+function ThemePicker() {
+  const [choice, setChoice] = useState<ThemeChoice>(() => readTheme())
+
+  function pick(next: ThemeChoice) {
+    setChoice(next)
+    setTheme(next)
+  }
+
+  return (
+    <div className="mb-6">
+      <div className="mb-2 text-sm font-medium">Appearance</div>
+      <div className="flex gap-1 rounded-lg bg-neutral-950 p-1">
+        {THEMES.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => pick(t.value)}
+            aria-pressed={choice === t.value}
+            className={
+              'flex-1 rounded-md px-3 py-1.5 text-sm transition ' +
+              (choice === t.value
+                ? 'bg-neutral-800 font-medium text-neutral-100'
+                : 'text-neutral-400 hover:text-neutral-200')
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-neutral-500">
+        System follows your Mac's light or dark setting and changes with it.
+      </p>
+    </div>
+  )
+}
 
 // MediaSettings is a modal to control which media auto-downloads. Changes apply
 // to newly received messages immediately and persist across restarts.
@@ -48,11 +92,15 @@ export function MediaSettings({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Media download</h2>
+          <h2 className="text-base font-semibold">Settings</h2>
           <button onClick={onClose} className="text-neutral-500 hover:text-neutral-300">
             ✕
           </button>
         </div>
+
+        <ThemePicker />
+
+        <div className="mb-2 text-sm font-medium">Media download</div>
 
         {!policy ? (
           <div className="py-8 text-center text-sm text-neutral-500">Loading…</div>
