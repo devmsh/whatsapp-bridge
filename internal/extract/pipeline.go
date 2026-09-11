@@ -44,6 +44,33 @@ type Result struct {
 	Tasks []db.Task
 	// Rejections says why things were dropped, keyed by reason.
 	Rejections map[RejectReason]int
+	// Outcomes is every proposal and what became of it. A dry run writes
+	// nothing, so this is the only way to see what a model actually answered —
+	// which is what the evaluation command scores.
+	Outcomes []Outcome
+	// ChunkMS is how long each extract call took, for the median latency.
+	ChunkMS []int64
+}
+
+// Outcome is one proposal and the decision made about it.
+type Outcome struct {
+	ChunkIndex int
+	Title      string
+	EvidenceID string
+	// Evidence is the quote the model gave. Kept so the evaluation command can
+	// re-check it against the raw message, by a path that does not run Verify.
+	Evidence   string
+	Confidence float64
+	Kept       bool
+	// Reason is empty when Kept. OwnerJID and DueAt are filled only when kept,
+	// because they are resolved after the checks pass.
+	Reason   RejectReason
+	OwnerJID string
+	DueAt    int64
+	// Resolvable says the evidence message carried a mention or was a reply —
+	// something an owner could be read from. Without it, "unknown" is the
+	// correct answer, and scoring the owner would be scoring a guess.
+	Resolvable bool
 }
 
 // forwardWindow is how far to look for the original of a forwarded message.
@@ -112,6 +139,16 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 
 	meta := RunMeta{RunID: spec.RunID, Engine: d.Extractor.Name(), ChatJID: spec.ChatJID}
 
+	// A message carried into the next chunk as context can now produce a task,
+	// which means the same message can be reported twice in one run. The
+	// database catches that between runs; within a run nothing is written yet
+	// on a dry run, so the guard has to live here too.
+	seen := map[string]bool{}
+	// And the same piece of work is often asked for twice in different
+	// messages — "the map needs changing" on Monday, and again in Tuesday's
+	// list. Titles catch what message ids cannot.
+	var titles []string
+
 	for _, chunk := range chunks {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -143,6 +180,7 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 			say("chunk %d failed: %v", chunk.Index, err)
 			continue
 		}
+		res.ChunkMS = append(res.ChunkMS, time.Since(started).Milliseconds())
 
 		verified, rejected := 0, 0
 		for _, p := range out.Tasks {
@@ -152,9 +190,30 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 				rejected++
 				res.Rejected++
 				res.Rejections[reason]++
+				res.Outcomes = append(res.Outcomes, Outcome{
+					ChunkIndex: chunk.Index, Title: p.Title, EvidenceID: trimHash(p.EvidenceID),
+					Evidence: p.Evidence, Confidence: p.Confidence, Reason: reason,
+				})
 				if !d.DryRun {
 					RecordRejection(d.Store, meta, p, reason)
 				}
+				continue
+			}
+
+			if sameWorkAlready(titles, v.Task.Title) {
+				res.Rejections["same_work"]++
+				res.Outcomes = append(res.Outcomes, Outcome{
+					ChunkIndex: chunk.Index, Title: p.Title, EvidenceID: v.Line.MessageID,
+					Evidence: p.Evidence, Confidence: p.Confidence, Reason: "same_work",
+				})
+				continue
+			}
+			if seen[v.Line.MessageID] {
+				res.Rejections["duplicate"]++
+				res.Outcomes = append(res.Outcomes, Outcome{
+					ChunkIndex: chunk.Index, Title: p.Title, EvidenceID: v.Line.MessageID,
+					Evidence: p.Evidence, Confidence: p.Confidence, Reason: "duplicate",
+				})
 				continue
 			}
 
@@ -164,12 +223,20 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 				// This very message already produced a task, or one that was
 				// rejected. Either way the answer is already known.
 				res.Rejections["duplicate"]++
+				res.Outcomes = append(res.Outcomes, Outcome{
+					ChunkIndex: chunk.Index, Title: p.Title, EvidenceID: v.Line.MessageID,
+					Evidence: p.Evidence, Confidence: p.Confidence, Reason: "duplicate",
+				})
 				continue
 			case ActionAttach:
 				if !d.DryRun {
 					_ = d.Store.LinkTaskMessage(existingID, spec.ChatJID, v.Line.MessageID, "comment")
 				}
 				res.Rejections["same_work"]++
+				res.Outcomes = append(res.Outcomes, Outcome{
+					ChunkIndex: chunk.Index, Title: p.Title, EvidenceID: v.Line.MessageID,
+					Evidence: p.Evidence, Confidence: p.Confidence, Reason: "same_work",
+				})
 				continue
 			}
 
@@ -179,6 +246,14 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 
 			verified++
 			res.Verified++
+			seen[v.Line.MessageID] = true
+			titles = append(titles, v.Task.Title)
+			res.Outcomes = append(res.Outcomes, Outcome{
+				ChunkIndex: chunk.Index, Title: v.Task.Title, EvidenceID: v.Line.MessageID,
+				Evidence: v.Task.Evidence, Confidence: p.Confidence, Kept: true,
+				OwnerJID: ownerJID, DueAt: dueAt,
+				Resolvable: len(v.Line.Mentions) > 0 || v.Line.ReplyTo != "",
+			})
 			if d.DryRun {
 				continue
 			}
@@ -338,4 +413,17 @@ func chatDisplayName(store *db.Store, chatJID string) string {
 		LEFT JOIN contacts ct ON (ct.jid = ch.jid OR ct.lid = ch.jid)
 		WHERE ch.jid = ?`, chatJID).Scan(&name)
 	return name
+}
+
+// sameWorkTitle is how close two titles must be to be the same piece of work.
+// The same number the evaluation command uses to match a proposal to a label.
+const sameWorkTitle = 0.6
+
+func sameWorkAlready(titles []string, title string) bool {
+	for _, t := range titles {
+		if TitleSimilarity(t, title) >= sameWorkTitle {
+			return true
+		}
+	}
+	return false
 }

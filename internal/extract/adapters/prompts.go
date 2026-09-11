@@ -20,6 +20,12 @@ package adapters
 //     hallucinations became detectable rather than plausible.
 //   - padding: one model returned the same task four ways. An empty list has
 //     to be an acceptable answer or the model will always find something.
+//
+// One rule was REMOVED on 2026-09-12 after measuring against hand-labelled
+// chats: "a bug report is not a task". It cost more than half the recall on
+// client chats, where "the map needs changing" and "the report comes out
+// empty" are precisely the work. A defect reported to the people who own the
+// thing is a request, whatever mood it is written in.
 
 const extractSystem = `You read one slice of a WhatsApp work conversation and
 report the work it contains.
@@ -30,6 +36,11 @@ Work that still has to be DONE by somebody.
 - a request: "جهز العقد", "ابعتلي الاكسز", "please review the contract"
 - a commitment: "انا هعملها", "I'll prepare it", "بعملها بكرة"
 - an instruction that creates work: "الاهداف لازم يتم ادخالها في FlowOS"
+- a change asked for: "نغير الخريطة", "جميل لو قدرنا نضيف اسم الدولة",
+  "نحتاج نضيف قياس للتغطية", "we need the country name next to each item"
+- a defect reported to the people who own the thing: "الشات ما بيحدث الا لما
+  اعمل refresh", "التقرير بيطلع فاضي", "موضوع الفراغات ما تم علاجه". In a
+  client or support chat this IS the work — somebody has to fix it.
 
 WHAT DOES NOT COUNT
 - Anything already finished. Past tense is a status update, not a task.
@@ -37,9 +48,8 @@ WHAT DOES NOT COUNT
   "sent it yesterday" are NOT tasks. The work is over.
 - A question. "ممكن مثال؟", "شو رايكم؟", "ليش ما بيضل فاتح؟", "what do you
   think?" are questions. Asking is not assigning.
-- A complaint or a bug report. "مش شغال", "كل ما اعمل refresh بيرجعني",
-  "طلبت منك من ٥ سنين وللآن مش محلولة", "this is broken" describe a problem.
-  Somebody may act on it, but nobody was asked to, so it is not a task.
+- Grumbling about something nobody in this chat owns: a slow airline, a
+  competitor's app, the weather. Nobody here can act on it.
 - A meeting being arranged. "نجتمع الخميس" is a meeting, not a task. Meetings
   are handled elsewhere. Ignore them completely.
 - Opinions, greetings, thanks, jokes, forwarded articles, general discussion.
@@ -74,11 +84,15 @@ RULES
 - One task per piece of work. If the same work is discussed in five messages,
   that is one task, with the clearest message as evidence.
 - Return only tasks you can point at real words for.
-- Before returning a task, re-read your evidence and ask: is this a REQUEST or
-  a COMMITMENT? If it is a question, a complaint, or a report of finished
-  work, drop it.
-- An empty list is a good answer. Do not pad it. Two solid tasks beat six
-  guesses.`
+- Before returning a task, re-read your evidence and ask: does somebody have
+  to DO something because of these words? A bare question and a report of
+  finished work do not pass. A defect or a change named to the people who own
+  the thing does.
+- Read the slice from the first line to the last, and report EVERY piece of
+  work you find. A busy slice can hold ten or more; a quiet one holds none.
+  Missing a real request is as wrong as inventing one.
+- An empty list is a good answer when the slice is small talk. Do not pad, and
+  do not repeat one piece of work in several shapes.`
 
 const completionSystem = `You read one slice of a WhatsApp conversation and
 report which of the listed open tasks it says are FINISHED.

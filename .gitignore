@@ -29,3 +29,7 @@ agent/node_modules/
 
 # macOS app: build output (the .app, helper copy and generated iconset)
 macapp/build/
+
+# Labelled cases for cmd/extract-eval. Real chat text, so never committed.
+store/eval/
+store/eval-unlabelled/

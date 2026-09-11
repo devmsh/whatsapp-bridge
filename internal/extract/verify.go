@@ -18,13 +18,14 @@ type RejectReason string
 
 const (
 	RejectNoEvidenceID RejectReason = "no_evidence_id" // named a message that is not here
-	RejectContextOnly  RejectReason = "context_only"   // drawn from a carried-in line
+	RejectContextOnly  RejectReason = "context_only"   // kept for old rows; no longer produced
 	RejectBadQuote     RejectReason = "bad_quote"      // the words are not in that message
 	RejectEmptyTitle   RejectReason = "empty_title"    //
 	RejectQuestion     RejectReason = "question_only"  // asking is not assigning
 	RejectFinished     RejectReason = "already_done"   // a report of work behind them
 	RejectMeeting      RejectReason = "meeting"        // arranging a meeting, which has its own module
 	RejectLowScore     RejectReason = "low_confidence" //
+	RejectTooShort     RejectReason = "too_short"      // too few words to name work
 )
 
 // Verified is a proposal that survived checking, with the line it came from.
@@ -62,13 +63,26 @@ func Verify(c Chunk, p ProposedTask) (Verified, RejectReason, bool) {
 	if !found {
 		return Verified{}, RejectNoEvidenceID, false
 	}
-	if line.Context {
-		// Context is carried in so replies make sense. Drawing a task from it
-		// would create the same task again in the chunk that owns that line.
-		return Verified{}, RejectContextOnly, false
-	}
+	// A context line used to be rejected here, on the reasoning that the chunk
+	// which owns the line will produce the task anyway. Measured against
+	// hand-labelled chats, that reasoning was wrong: it threw away fourteen
+	// correct tasks in one run, because a request often only becomes obvious
+	// once somebody answers it — and the answer lives in the NEXT chunk, where
+	// the request is context. The duplicate this allows is handled where
+	// duplicates belong, in dedupe.
 	if !quoteMatches(line, p.Evidence) {
-		return Verified{}, RejectBadQuote, false
+		// The words are not in the message the model named. Before calling it
+		// a fabrication, look for the message they ARE in: models copy a quote
+		// correctly and then cite the id of the line above or below it, and
+		// four real tasks were thrown away for that in one measured run.
+		//
+		// Only an exact, unique hit counts. If two lines contain the quote, or
+		// none does, there is nothing to anchor to and it is dropped.
+		fixed, ok := lineHoldingQuote(c, p.Evidence, line.Sender)
+		if !ok {
+			return Verified{}, RejectBadQuote, false
+		}
+		line = fixed
 	}
 	if isMeetingArrangement(p.Title, p.Evidence) {
 		// Meetings have their own module, with their own review queue, dates
@@ -86,6 +100,18 @@ func Verify(c Chunk, p ProposedTask) (Verified, RejectReason, bool) {
 		// return them, so the rule lives here where it is enforced rather than
 		// requested.
 		return Verified{}, RejectQuestion, false
+	}
+	// Last, because a short bare question is more usefully filed as a question
+	// than as a fragment.
+	if tooShortForWork(line.Text) {
+		// "فيها مشكله" became "fix the problem in the chat", and "فل الفل"
+		// ("great") became "check the system works". The quote matched both
+		// times, because the words really were said — the model had simply
+		// built a task out of an acknowledgement.
+		//
+		// The MESSAGE is what is measured, not the quote: quoting "جهز العقد"
+		// out of "جهز العقد قبل الخميس" is a fair quote of a real request.
+		return Verified{}, RejectTooShort, false
 	}
 	return Verified{Task: p, Line: line, chunkLines: c.Lines}, "", true
 }
@@ -191,6 +217,7 @@ func wordOverlap(hay, quote string) float64 {
 var pastReportWords = []string{
 	"عملت", "خلصت", "انجزت", "أنجزت", "بعتت", "بعتها", "نقلت", "راجعت", "جهزت",
 	"ارسلت", "أرسلت", "رفعت", "كتبت", "حدثت", "سويت", "اتفقنا", "التقيت", "قابلت",
+	"عرضت", "اضفت", "أضفت", "نزلت", "عملنا", "اتفقت", "طلبت", "شرحت", "ركبت",
 	"i did", "i sent", "i finished", "i completed", "i prepared", "i reviewed",
 	"already sent", "already done",
 }
@@ -275,12 +302,18 @@ func normalise(s string) string {
 //
 // Live on a real group, qwen2.5 produced two tasks in a row that were both
 // "agree a time for the weekly meeting", despite the prompt forbidding it.
-var meetingNouns = []string{"اجتماع", "الاجتماع", "اجتماعنا", "لقاء", "ميتنج", "meeting", "call"}
+var meetingNouns = []string{
+	"اجتماع", "الاجتماع", "اجتماعنا", "لقاء", "ميتنج", "meeting", "call",
+	// A meeting goes by many names: a session, an appointment, a sit-down.
+	// Measured, these four were the ones slipping through as tasks.
+	"جلسة", "الجلسة", "جلستنا", "موعد", "الموعد", "موعدنا", "قعدة", "session",
+}
 
 var arrangeVerbs = []string{
 	"تحديد", "نحدد", "حدد", "اقتراح", "اقترح", "نتفق", "تثبيت", "نثبت", "ترتيب",
-	"نرتب", "جدولة", "موعد", "مواعيد", "schedule", "arrange", "set up", "set a time",
-	"agree a time", "propose", "book",
+	"نرتب", "جدولة", "موعد", "مواعيد", "اجراء", "إجراء", "عقد", "حضور",
+	"schedule", "arrange", "set up", "set a time", "agree a time", "propose",
+	"book", "hold a", "attend",
 }
 
 func isMeetingArrangement(title, evidence string) bool {
@@ -303,4 +336,78 @@ func isMeetingArrangement(title, evidence string) bool {
 		}
 	}
 	return false
+}
+
+// TitleSimilarity says how much two titles say the same thing, from 0 to 1.
+//
+// The evaluation command uses it to match what a model proposed against what a
+// person labelled. It lives here so both sides read Arabic the same way — the
+// same diacritics stripped, the same definite article ignored.
+func TitleSimilarity(a, b string) float64 {
+	wa, wb := titleWords(a), titleWords(b)
+	if len(wa) == 0 || len(wb) == 0 {
+		return 0
+	}
+	shared := 0
+	for w := range wa {
+		if wb[w] {
+			shared++
+		}
+	}
+	// Against the shorter title, so "جهز العقد" still matches
+	// "جهز العقد قبل الخميس".
+	shorter := len(wa)
+	if len(wb) < shorter {
+		shorter = len(wb)
+	}
+	return float64(shared) / float64(shorter)
+}
+
+func titleWords(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.Fields(normalise(s)) {
+		w = strings.Trim(w, ".,!?:;\u060c\u061f\u2026()[]\"'")
+		w = strings.TrimPrefix(w, "\u0627\u0644") // the definite article
+		if len([]rune(w)) >= 2 {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+// minWorkWords and minWorkRunes are the floor for a quote that names work.
+//
+// Set from the shortest real requests there are: "ممكن تبعتلي الملف؟" is three
+// words and eighteen characters, and it is as plain an ask as exists. Below
+// that is an acknowledgement, a greeting or a fragment — "فيها مشكله",
+// "فل الفل", "سلم عليه", "اذا كنت في جدة".
+const (
+	minWorkWords = 3
+	minWorkRunes = 15
+)
+
+func tooShortForWork(evidence string) bool {
+	e := strings.TrimSpace(normalise(evidence))
+	return len(strings.Fields(e)) < minWorkWords || len([]rune(e)) < minWorkRunes
+}
+
+// lineHoldingQuote finds the one message in the chunk that really contains the
+// quote, for when the model copied the words right and the id wrong.
+func lineHoldingQuote(c Chunk, quote, sender string) (Line, bool) {
+	q := normalise(stripRenderArtefacts(quote, sender))
+	// Short quotes match too many lines to identify anything.
+	if len([]rune(q)) < 25 {
+		return Line{}, false
+	}
+	var hit Line
+	found := 0
+	for _, l := range c.Lines {
+		if strings.Contains(normalise(l.Text), q) {
+			hit, found = l, found+1
+			if found > 1 {
+				return Line{}, false
+			}
+		}
+	}
+	return hit, found == 1
 }

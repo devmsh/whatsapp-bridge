@@ -21,8 +21,16 @@ type ChunkOptions struct {
 	Loc     *time.Location
 }
 
+// DefaultChunkOptions is sized for recall, not for the model's context window.
+//
+// 14k characters fits in the window easily, and that was the first guess. But
+// measured against hand-labelled chats, a 77-message chunk holding fifteen
+// requests came back with six: the model reads it all and still answers about
+// the part it found most salient. It is not a context limit, it is an
+// attention one, and the cure is a smaller slice — 14k, then 5k, then 2.6k,
+// each step finding more work at about ten seconds a call.
 func DefaultChunkOptions(loc *time.Location) ChunkOptions {
-	return ChunkOptions{MaxMessages: 180, MaxChars: 14000, Overlap: 10, Loc: loc}
+	return ChunkOptions{MaxMessages: 25, MaxChars: 2600, Overlap: 6, Loc: loc}
 }
 
 // Split cuts lines into model-sized chunks.
@@ -156,6 +164,15 @@ var requestWords = []string{
 	"بعتل", "ابعت", "إبعت", "جهز", "جهّز", "راجع", "لازم", "بدي منك", "بدنا",
 	"ياريت", "رجاء", "من فضلك", "تابع", "ذكرني", "حدد", "اعمل", "سوي", "كمل",
 	"ارسل", "أرسل", "شوف", "اتأكد", "تأكد", "خلص", "مطلوب", "كلف", "سلم",
+	// Asking by naming a need, which is how a client asks for a change.
+	//
+	// Verbs and need-words only. Bare nouns were tried and taken straight out
+	// again: "تعديل" lives inside "عملت شوية تعديلات", which is a report of
+	// finished work, and the noun made every such report read as a request.
+	// "ممكن" went the same way — it is politeness, not an ask, and it turned
+	// "ممكن مثال؟" into a task.
+	"يحتاج", "نحتاج", "محتاج", "بحتاج", "نبي", "نضيف", "نغير", "اضف", "أضف",
+	"عدل", "نعدل", "صلح", "نشيل", "احذف", "امنع", "يفضل", "اتمنى", "جميل لو",
 	// English
 	"please", "can you", "could you", "need to", "make sure", "send me",
 	"follow up", "prepare", "review", "deadline", "asap", "assign", "by eod",

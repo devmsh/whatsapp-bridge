@@ -48,16 +48,21 @@ func TestVerifyRejectsFabrication(t *testing.T) {
 	}
 }
 
-// TestVerifyRejectsContextLines — a line carried in so a reply makes sense
-// belongs to the chunk before this one. Extracting from it would create the
-// same task twice.
-func TestVerifyRejectsContextLines(t *testing.T) {
-	ctx := line("M0", 50, "Omar", "جهز العقد")
+// TestVerifyAcceptsContextLines — a request often only becomes visible once
+// somebody answers it, and the answer lands in the next chunk, where the
+// request itself is only context.
+//
+// This used to be a rejection. Measured against hand-labelled chats it threw
+// away fourteen correct tasks in a single run, so the rule was removed and the
+// duplicate it allows is handled in dedupe, where duplicates belong.
+func TestVerifyAcceptsContextLines(t *testing.T) {
+	ctx := line("M0", 50, "Omar", "جهز العقد قبل الخميس")
 	ctx.Context = true
 	c := chunkWith(ctx, line("M1", 100, "Sara", "تمام"))
 
-	if _, reason, ok := extract.Verify(c, proposal("#M0", "جهز العقد", "x")); ok || reason != extract.RejectContextOnly {
-		t.Errorf("context line should be rejected, got ok=%v reason=%q", ok, reason)
+	if _, reason, ok := extract.Verify(c,
+		proposal("#M0", "جهز العقد قبل الخميس", "جهز العقد")); !ok {
+		t.Errorf("a request in a context line is still a request (reason %q)", reason)
 	}
 }
 
@@ -274,5 +279,49 @@ func TestVerifyLeavesMeetingsToTheMeetingsModule(t *testing.T) {
 	if _, reason, ok := extract.Verify(c,
 		proposal("#A3", "لازم تجهز العرض قبل الاجتماع", "تجهيز العرض قبل الاجتماع")); !ok {
 		t.Errorf("preparing for a meeting is a task (reason %q)", reason)
+	}
+}
+
+// TestVerifyNeedsEnoughWordsToNameWork — measured against hand-labelled chats,
+// the model built "fix the problem in the chat" out of "فيها مشكله" and "check
+// that the system works" out of "فل الفل" ("great"). Both quotes matched,
+// because the words were really said; the task was invented around them.
+func TestVerifyNeedsEnoughWordsToNameWork(t *testing.T) {
+	c := chunkWith(
+		line("S1", 100, "Nidal", "فيها مشكله"),
+		line("S2", 101, "Fady", "فل الفل"),
+		line("S3", 102, "Nayef", "وشغلك اخيرة المساعد الذكي"),
+	)
+
+	for _, tc := range []struct{ id, quote, title string }{
+		{"#S1", "فيها مشكله", "تصحيح المشكلة في الشات"},
+		{"#S2", "فل الفل", "تحقق من النظام وتأكد أنه يعمل"},
+	} {
+		if _, reason, ok := extract.Verify(c, proposal(tc.id, tc.quote, tc.title)); ok {
+			t.Errorf("%q is too short to name work", tc.quote)
+		} else if reason != extract.RejectTooShort {
+			t.Errorf("%q: reason = %q, want too_short", tc.quote, reason)
+		}
+	}
+
+	// The shortest real task in the labelled set stays in. The floor is set
+	// from it, so if it ever falls out the floor is wrong. A short quote out
+	// of a long message is fine — it is the message that has to carry work.
+	if _, reason, ok := extract.Verify(c,
+		proposal("#S3", "وشغلك اخيرة المساعد الذكي", "إضافة المساعد الذكي")); !ok {
+		t.Errorf("the shortest real task must survive (reason %q)", reason)
+	}
+}
+
+// TestVerifyPastTenseCoversMoreVerbs — "عرضت الodoo على عدي ومالك" ("I showed
+// Odoo to Adi and Malik") came back as "evaluate the Odoo demo". Showing it
+// already happened.
+func TestVerifyPastTenseCoversMoreVerbs(t *testing.T) {
+	c := chunkWith(line("P2", 100, "Shurrab", "عرضت الodoo على عدي ومالك وانهبلوا فيه"))
+	if _, reason, ok := extract.Verify(c,
+		proposal("#P2", "عرضت الodoo على عدي ومالك وانهبلوا فيه", "تقييم عرض Odoo")); ok {
+		t.Errorf("showing it already happened; that is a report")
+	} else if reason != extract.RejectFinished {
+		t.Errorf("reason = %q, want already_done", reason)
 	}
 }
