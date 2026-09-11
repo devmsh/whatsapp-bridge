@@ -58,42 +58,50 @@ var introSignals = []introSignal{
 	{"role/company", 1, regexp.MustCompile(`\bfrom [A-Z]\w+|من شركة|CEO|[Ff]ounder|مؤسس`)},
 }
 
-// greeting matches an opening that is only a hello, which on its own says
-// nothing about who someone is.
-var greeting = regexp.MustCompile(`^(?i)(hi|hello|hey|مرحبا|أهلا|اهلا|السلام عليكم|هلا)[\s!،.]*$`)
-
-// nameLike reports whether a message is simply a name — "باسم العكل",
-// "Mohammed Shurrab One Studio".
+// looksLikeNameCard reports whether a message is one of the two parties' names
+// being handed over — the exchange that happens when people swap numbers in a
+// room. "باسم العكل", "Mohammed Shurrab\n\nOne Studio", "احمد حمدي شراب".
 //
-// This is the exchange that happens when two people swap numbers in a room:
-// each sends their name and nothing else. It carries no keyword at all, so the
-// phrase patterns above never see it, yet it is one of the clearest signs of a
-// brand-new acquaintance.
-func nameLike(text string) bool {
-	t := strings.TrimSpace(text)
-	if t == "" || len([]rune(t)) > 40 || greeting.MatchString(t) {
+// The test is overlap with a name, not the shape of the text. An earlier
+// version accepted any short two-to-four-word message, which works in English
+// where names are capitalised but falls apart in Arabic: "وعليكم السلام",
+// "مساء الخير" and "تم الاستلام" are all short, unpunctuated and utterly
+// ordinary. Requiring a word from either side's name keeps the signal and
+// drops the pleasantries.
+func looksLikeNameCard(text, contactName, ownName string) bool {
+	// A name card is often sent across lines — name, then company.
+	t := strings.Join(strings.Fields(text), " ")
+	if t == "" || len([]rune(t)) > 60 {
 		return false
 	}
-	// Anything with a link, a number or sentence punctuation is a message, not
-	// a name being handed over.
-	if strings.ContainsAny(t, "0123456789?؟:/\n") || strings.Contains(t, "http") {
+	if strings.ContainsAny(t, "0123456789?؟") || strings.Contains(t, "http") {
 		return false
 	}
 	words := strings.Fields(t)
-	if len(words) < 2 || len(words) > 4 {
+	if len(words) < 2 || len(words) > 6 {
 		return false
 	}
-	// Every word has to read as a name. A Latin word must be capitalised, which
-	// is what separates "Mohammed Shurrab One Studio" from "Order hanger" or
-	// "Hello order" — both of which are two short words, and neither of which
-	// is anyone's name. Arabic has no case, so those words pass on length.
-	for _, w := range words {
-		r := []rune(w)[0]
-		if r < 128 && !(r >= 'A' && r <= 'Z') {
-			return false
+	return sharesNameWord(words, contactName) || sharesNameWord(words, ownName)
+}
+
+// sharesNameWord reports whether the message carries a distinctive word from a
+// person's name. Short fragments are ignored: two letters match far too much,
+// especially in Arabic.
+func sharesNameWord(words []string, name string) bool {
+	if strings.TrimSpace(name) == "" {
+		return false
+	}
+	for _, part := range strings.Fields(strings.ToLower(name)) {
+		if len([]rune(part)) < 3 {
+			continue
+		}
+		for _, w := range words {
+			if strings.EqualFold(strings.Trim(w, ".,،"), part) {
+				return true
+			}
 		}
 	}
-	return true
+	return false
 }
 
 // IntroChats finds recently-started direct chats that read like introductions.
@@ -101,7 +109,7 @@ func nameLike(text string) bool {
 // sinceTS bounds "recently met"; maxMessages keeps it to conversations that
 // have not yet turned into a working relationship. Hidden, archived and deleted
 // chats never appear. Highest score first.
-func (s *Store) IntroChats(sinceTS int64, maxMessages int, tagID int64) ([]IntroChat, error) {
+func (s *Store) IntroChats(sinceTS int64, maxMessages int, tagID int64, ownName string) ([]IntroChat, error) {
 	if maxMessages <= 0 {
 		maxMessages = 40
 	}
@@ -185,7 +193,7 @@ func (s *Store) IntroChats(sinceTS int64, maxMessages int, tagID int64) ([]Intro
 		// A bare exchange of names, in a chat that has barely started.
 		if c.total <= 8 {
 			for _, line := range openingLines {
-				if nameLike(line) {
+				if looksLikeNameCard(line, c.name, ownName) {
 					score += 3
 					signals = append(signals, "name-exchange")
 					break

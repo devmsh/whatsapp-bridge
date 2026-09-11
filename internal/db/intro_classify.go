@@ -21,6 +21,7 @@ import (
 const (
 	introTagKey       = "intro_tag_id"
 	introWatermarkKey = "intro_classified_since"
+	introOwnNameKey   = "intro_own_name"
 	// Only a clear match is applied without asking. Weaker candidates still
 	// appear in the suggestion list, where a human decides.
 	introAutoScore = 5
@@ -36,6 +37,18 @@ func (s *Store) IntroTagID() int64 {
 // SetIntroTagID records which label means "new introduction".
 func (s *Store) SetIntroTagID(id int64) error {
 	return s.PutSyncState(introTagKey, strconv.FormatInt(id, 10))
+}
+
+// IntroOwnName is your own display name, used to spot a name card carrying it
+// — someone sending "Mohammed Shurrab / One Studio" back to you is confirming
+// who they just saved.
+func (s *Store) IntroOwnName() string {
+	v, _, _ := s.GetSyncState(introOwnNameKey)
+	return v
+}
+
+func (s *Store) SetIntroOwnName(name string) error {
+	return s.PutSyncState(introOwnNameKey, name)
 }
 
 // IntroWatermark is the point after which a conversation counts as new. Chats
@@ -72,7 +85,7 @@ func (s *Store) AutoClassifyIntros() ([]string, error) {
 
 	// A generous message cap here: a brand-new chat has not had time to grow,
 	// and the score is what actually decides.
-	candidates, err := s.IntroChats(since, 40, tagID)
+	candidates, err := s.IntroChats(since, 40, tagID, s.IntroOwnName())
 	if err != nil {
 		return nil, err
 	}

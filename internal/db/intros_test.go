@@ -51,7 +51,7 @@ func TestIntroChats(t *testing.T) {
 	}
 
 	since := now - 90*86400
-	got, err := st.IntroChats(since, 40, 0)
+	got, err := st.IntroChats(since, 40, 0, "Mohammed Shurrab")
 	if err != nil {
 		t.Fatalf("IntroChats: %v", err)
 	}
@@ -91,11 +91,78 @@ func TestIntroChatsRespectsMessageCap(t *testing.T) {
 		})
 	}
 
-	got, err := st.IntroChats(now-90*86400, 5, 0)
+	got, err := st.IntroChats(now-90*86400, 5, 0, "Mohammed Shurrab")
 	if err != nil {
 		t.Fatalf("IntroChats: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("a chat past the message cap is a working relationship, not an intro: %+v", got)
+	}
+}
+
+// TestNameLikeAcrossLines covers the shape a name card actually arrives in.
+// People send their name and company on separate lines, and an earlier version
+// treated any newline as proof of a sentence — so a textbook exchange of names
+// was thrown away.
+func TestIntroNameCardAcrossLines(t *testing.T) {
+	st := newTestStore(t)
+	now := time.Now().Unix()
+	jid := "card@s.whatsapp.net"
+
+	if err := st.StoreChat(&db.Chat{JID: jid, Name: "Anas"}); err != nil {
+		t.Fatalf("StoreChat: %v", err)
+	}
+	if err := st.StoreContact(&db.Contact{JID: jid, Name: "Anas"}); err != nil {
+		t.Fatalf("StoreContact: %v", err)
+	}
+	if err := st.StoreMessage(&db.Message{
+		ID: "m1", ChatJID: jid,
+		Content: "Mohammed Shurrab \n\nOne Studio", Timestamp: now - 2*86400,
+	}); err != nil {
+		t.Fatalf("StoreMessage: %v", err)
+	}
+
+	got, err := st.IntroChats(now-90*86400, 40, 0, "Mohammed Shurrab")
+	if err != nil {
+		t.Fatalf("IntroChats: %v", err)
+	}
+	if len(got) != 1 || got[0].JID != jid {
+		t.Fatalf("a name card sent across lines should be an intro candidate, got %+v", got)
+	}
+	found := false
+	for _, sig := range got[0].Signals {
+		if sig == "name-exchange" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("signals = %v, want name-exchange", got[0].Signals)
+	}
+}
+
+// TestNameCardNeedsARealName is what separates an exchange of names from an
+// exchange of pleasantries. An earlier rule accepted any short two-to-four-word
+// message, which works where names are capitalised and collapses in Arabic:
+// "وعليكم السلام" and "تم الاستلام" are short, unpunctuated and ordinary.
+func TestNameCardNeedsARealName(t *testing.T) {
+	const me = "Mohammed Shurrab"
+	cases := []struct {
+		text, contact string
+		want          bool
+		why           string
+	}{
+		{"Mohammed Shurrab \n\nOne Studio", "Anas Alzebin", true, "carries my name, across lines"},
+		{"باسم العكل", "Basem Alakal", false, "transliterated name does not overlap"},
+		{"احمد حمدي شراب", "احمد حمدي شراب", true, "carries the contact's own name"},
+		{"وعليكم السلام", "Mohand zohdy", false, "a greeting, not a name"},
+		{"تم الاستلام", "Someone", false, "an acknowledgement"},
+		{"مساء الخير", "Someone", false, "a pleasantry"},
+		{"Hunger Station", "Raja Bilal", false, "a company nobody here is called"},
+		{"Hi Mohammed", "Muath", true, "addresses me by name"},
+	}
+	for _, c := range cases {
+		if got := db.LooksLikeNameCardForTest(c.text, c.contact, me); got != c.want {
+			t.Errorf("%q (contact %q) = %v, want %v — %s", c.text, c.contact, got, c.want, c.why)
+		}
 	}
 }

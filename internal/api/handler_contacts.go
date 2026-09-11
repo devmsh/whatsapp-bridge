@@ -312,7 +312,12 @@ func (s *Server) handleIntroChats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	since := time.Now().AddDate(0, 0, -days).Unix()
-	list, err := s.store.IntroChats(since, maxMsgs, tagID)
+	// Remember our own display name so the classifier, which runs with no
+	// request context, can spot a name card carrying it.
+	if wa := s.client.GetWhatsmeowClient(); wa != nil && wa.Store != nil && wa.Store.PushName != "" {
+		_ = s.store.SetIntroOwnName(wa.Store.PushName)
+	}
+	list, err := s.store.IntroChats(since, maxMsgs, tagID, s.store.IntroOwnName())
 	if err != nil {
 		jsonError(w, 500, err.Error())
 		return
