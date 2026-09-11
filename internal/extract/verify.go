@@ -23,6 +23,7 @@ const (
 	RejectEmptyTitle   RejectReason = "empty_title"    //
 	RejectQuestion     RejectReason = "question_only"  // asking is not assigning
 	RejectFinished     RejectReason = "already_done"   // a report of work behind them
+	RejectMeeting      RejectReason = "meeting"        // arranging a meeting, which has its own module
 	RejectLowScore     RejectReason = "low_confidence" //
 )
 
@@ -68,6 +69,12 @@ func Verify(c Chunk, p ProposedTask) (Verified, RejectReason, bool) {
 	}
 	if !quoteMatches(line, p.Evidence) {
 		return Verified{}, RejectBadQuote, false
+	}
+	if isMeetingArrangement(p.Title, p.Evidence) {
+		// Meetings have their own module, with their own review queue, dates
+		// and attendees. Letting them in here would mean the same conversation
+		// produces a task AND a meeting, and the task would be the worse copy.
+		return Verified{}, RejectMeeting, false
 	}
 	if isFinishedReport(p.Evidence) {
 		// The work is behind them. A status update is not a task, and the
@@ -257,4 +264,43 @@ func normalise(s string) string {
 		}
 	}
 	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// Arranging a meeting, as opposed to doing work.
+//
+// The distinction is narrow but real: "جهز العرض قبل الاجتماع" is a task —
+// prepare something, ahead of a meeting. "نتفق على موعد الاجتماع" is the
+// meeting itself being arranged, and that belongs to the meetings module,
+// which already tracks proposed times, attendees and agendas properly.
+//
+// Live on a real group, qwen2.5 produced two tasks in a row that were both
+// "agree a time for the weekly meeting", despite the prompt forbidding it.
+var meetingNouns = []string{"اجتماع", "الاجتماع", "اجتماعنا", "لقاء", "ميتنج", "meeting", "call"}
+
+var arrangeVerbs = []string{
+	"تحديد", "نحدد", "حدد", "اقتراح", "اقترح", "نتفق", "تثبيت", "نثبت", "ترتيب",
+	"نرتب", "جدولة", "موعد", "مواعيد", "schedule", "arrange", "set up", "set a time",
+	"agree a time", "propose", "book",
+}
+
+func isMeetingArrangement(title, evidence string) bool {
+	t := normalise(title)
+	hasMeeting := false
+	for _, n := range meetingNouns {
+		if strings.Contains(t, n) {
+			hasMeeting = true
+			break
+		}
+	}
+	if !hasMeeting {
+		return false
+	}
+	// The title has to be ABOUT arranging it. "prepare the deck for the
+	// meeting" mentions a meeting and is still a task.
+	for _, v := range arrangeVerbs {
+		if strings.Contains(t, v) {
+			return true
+		}
+	}
+	return false
 }

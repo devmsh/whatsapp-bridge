@@ -244,3 +244,35 @@ func TestVerifyStripsRenderedPrefix(t *testing.T) {
 		}
 	}
 }
+
+// TestVerifyLeavesMeetingsToTheMeetingsModule — run live on a real group,
+// qwen2.5 produced two tasks in a row that were both "agree a time for the
+// weekly meeting", despite the prompt forbidding exactly that. Meetings have
+// their own module with proper dates, attendees and agendas; a task would be
+// the worse copy of the same thing.
+func TestVerifyLeavesMeetingsToTheMeetingsModule(t *testing.T) {
+	c := chunkWith(
+		line("A1", 100, "Ibrahim", "بس لازم نتفق على اجتماع اسبوعي حضوري في جاده"),
+		line("A2", 101, "Ibrahim", "ممكن نتفق بالاسابيع القادمه يكون اجتماعنا الاسبوعي السبت من ٥ م"),
+		line("A3", 102, "Sara", "لازم تجهز العرض قبل الاجتماع"),
+	)
+
+	arranging := []struct{ id, title, quote string }{
+		{"#A1", "اقتراح مواعيد للاجتماع الاسبوعي الحضوري", "بس لازم نتفق على اجتماع اسبوعي حضوري في جاده"},
+		{"#A2", "تحديد موعد للاجتماع الاسبوعي القادم", "ممكن نتفق بالاسابيع القادمه يكون اجتماعنا الاسبوعي السبت من ٥ م"},
+	}
+	for _, a := range arranging {
+		p := proposal(a.id, a.quote, a.title)
+		if _, reason, ok := extract.Verify(c, p); ok {
+			t.Errorf("%q is a meeting being arranged, not a task", a.title)
+		} else if reason != extract.RejectMeeting {
+			t.Errorf("%q: reason = %q, want meeting", a.title, reason)
+		}
+	}
+
+	// Preparing something for a meeting is work, and stays work.
+	if _, reason, ok := extract.Verify(c,
+		proposal("#A3", "لازم تجهز العرض قبل الاجتماع", "تجهيز العرض قبل الاجتماع")); !ok {
+		t.Errorf("preparing for a meeting is a task (reason %q)", reason)
+	}
+}
