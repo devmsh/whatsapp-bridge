@@ -142,14 +142,17 @@ func (m *ProfileManager) EnqueueStale() {
 	store := m.s.store
 	counts := store.ChatMessageCounts()
 	existing := store.AllProfiles()
-	hidden := store.HiddenChatJIDs() // AI never profiles hidden chats
+	// AI never profiles a hidden or archived chat. Archived covers groups you
+	// left and clients you finished with, so the profiler stops burning model
+	// calls on them.
+	skip := store.AIExcludedJIDs()
 
 	var stubs []db.ProfileRef
 
 	// consider a chat-like entity (group or DM) given its message count.
 	consider := func(entityType, ref string) {
-		if hidden[ref] {
-			return // hidden chat — never profile
+		if skip[ref] {
+			return // hidden or archived chat — never profile
 		}
 		p := existing[entityType+":"+ref]
 		if counts[ref] == 0 {

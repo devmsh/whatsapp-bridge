@@ -583,6 +583,12 @@ func (s *Store) FlattenCircleChats(circleID int64) ([]string, error) {
 	seenJID := map[string]bool{}
 	visited := map[int64]bool{}
 	stack := []int64{circleID}
+	// Every circle-level AI job funnels through here: auto extraction, circle
+	// digests, briefings, exports. Dropping hidden and archived chats at this
+	// one point keeps them out of all of them, so a group you left or a client
+	// you archived never costs another AI run. Membership rows are left alone
+	// — unarchiving brings the chat straight back into the circle.
+	excluded := s.AIExcludedJIDs()
 	for len(stack) > 0 {
 		cur := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
@@ -597,7 +603,7 @@ func (s *Store) FlattenCircleChats(circleID int64) ([]string, error) {
 		for _, m := range members {
 			switch m.MemberType {
 			case MemberGroup, MemberContact:
-				if !seenJID[m.MemberRef] {
+				if !seenJID[m.MemberRef] && !excluded[m.MemberRef] {
 					seenJID[m.MemberRef] = true
 					jids = append(jids, m.MemberRef)
 				}

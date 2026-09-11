@@ -140,14 +140,15 @@ func (s *Server) notFoundIfHidden(w http.ResponseWriter, r *http.Request, jid st
 	return true
 }
 
-// notAllowedForAI returns true (and writes 403) when the chat is hidden — used
-// by AI endpoints (draft replies, extractions, dashboards) which must NEVER
-// process hidden chats, even when the session is unlocked.
+// notAllowedForAI returns true (and writes 403) when the chat is hidden or
+// archived — used by AI endpoints (draft replies, extractions, dashboards)
+// which must NEVER process either, even when the session is unlocked. See
+// db/ai_scope.go for why the two share one rule here.
 func (s *Server) notAllowedForAI(w http.ResponseWriter, jid string) bool {
-	if !s.store.IsChatHidden(jid) {
+	if !s.store.IsChatExcludedFromAI(jid) {
 		return false
 	}
-	jsonError(w, 403, "AI features are disabled for hidden chats")
+	jsonError(w, 403, "AI features are disabled for hidden and archived chats")
 	return true
 }
 

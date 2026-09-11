@@ -25,10 +25,10 @@ func (s *Server) handleExtractionMark(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "chat_jid required")
 		return
 	}
-	// AI extraction never touches hidden chats; refuse any mark for one
-	// regardless of the caller's unlock state.
-	if s.store.IsChatHidden(req.ChatJID) {
-		jsonError(w, 403, "hidden chat")
+	// AI extraction never touches hidden or archived chats; refuse any mark
+	// for one regardless of the caller's unlock state.
+	if s.store.IsChatExcludedFromAI(req.ChatJID) {
+		jsonError(w, 403, "hidden or archived chat")
 		return
 	}
 

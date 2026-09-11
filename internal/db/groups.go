@@ -154,6 +154,14 @@ func (s *Store) MarkGroupLeft(groupJID, ownJID string, ts int64) error {
 	if _, err := s.DB.Exec(`UPDATE groups SET left_at = ? WHERE jid = ?`, ts, groupJID); err != nil {
 		return err
 	}
+	// A group you are no longer in is finished work: drop it out of the active
+	// chat list and, through the archived flag, out of every AI job too (see
+	// db/ai_scope.go). Local only — this never pushes an archive to WhatsApp,
+	// because leaving on the phone should not make the bridge mutate the
+	// account's own state behind the user's back.
+	if _, err := s.DB.Exec(`UPDATE chats SET is_archived = 1 WHERE jid = ?`, groupJID); err != nil {
+		return err
+	}
 	if ownJID == "" {
 		return nil
 	}

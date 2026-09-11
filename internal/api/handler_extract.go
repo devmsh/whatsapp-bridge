@@ -125,9 +125,10 @@ func (s *Server) handleTaskExtract(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 400, "chat_jid required")
 		return
 	}
-	// AI never processes hidden chats — extraction refused even when unlocked.
-	if s.store.IsChatHidden(req.ChatJID) {
-		jsonError(w, 403, "AI features are disabled for hidden chats")
+	// AI never processes hidden or archived chats — extraction refused even
+	// when unlocked.
+	if s.store.IsChatExcludedFromAI(req.ChatJID) {
+		jsonError(w, 403, "AI features are disabled for hidden and archived chats")
 		return
 	}
 

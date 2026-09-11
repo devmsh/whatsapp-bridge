@@ -565,8 +565,19 @@ func (e *Engine) fillCircleRecs(
 
 // --- loaders ---
 
+// loadGroups reads the groups worth suggesting from. Dead ones are skipped:
+// groups you left, archived or deleted groups, and hidden ones. Without
+// this the engine kept proposing circles built out of closed projects, because
+// their names still shared plenty of distinctive tokens.
 func (e *Engine) loadGroups() ([]groupRec, error) {
-	rows, err := e.s.DB.Query(`SELECT jid, name FROM groups`)
+	rows, err := e.s.DB.Query(`
+		SELECT g.jid, g.name
+		FROM groups g
+		LEFT JOIN chats c ON c.jid = g.jid
+		WHERE g.left_at = 0
+		  AND COALESCE(c.is_archived, 0) = 0
+		  AND COALESCE(c.deleted_at, 0) = 0
+		  AND g.jid NOT IN (SELECT chat_jid FROM hidden_chats)`)
 	if err != nil {
 		return nil, err
 	}
