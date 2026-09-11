@@ -68,13 +68,11 @@ func TestAutoClassifyRespectsTheWatermark(t *testing.T) {
 		t.Errorf("a chat rejected during the backfill must never be re-labelled")
 	}
 
-	// Removing the label by hand takes it out, and a second pass must not
-	// quietly put it back.
+	// Removing the label by hand must stick. The pass above advanced the
+	// watermark past this chat, so a later run no longer sees it — no manual
+	// watermark change here, which is the point.
 	if err := st.UnassignTag("new@s.whatsapp.net", tag.ID); err != nil {
 		t.Fatalf("UnassignTag: %v", err)
-	}
-	if err := st.SetIntroWatermark(now); err != nil {
-		t.Fatalf("SetIntroWatermark: %v", err)
 	}
 	if _, err := st.AutoClassifyIntros(); err != nil {
 		t.Fatalf("AutoClassifyIntros (second): %v", err)

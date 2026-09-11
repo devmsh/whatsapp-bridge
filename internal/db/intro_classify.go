@@ -87,6 +87,17 @@ func (s *Store) AutoClassifyIntros() ([]string, error) {
 		}
 		labelled = append(labelled, c.Name)
 	}
+
+	// Move the watermark past everything just considered, so no chat is judged
+	// twice. Without this a conversation stays in scope for ever and taking its
+	// label off would be undone on the next tick — the same rejection problem
+	// the watermark exists to prevent, just for newer chats.
+	//
+	// An intro announces itself in its opening messages, and a chat is looked at
+	// within minutes of starting, so one look is enough.
+	if err := s.SetIntroWatermark(time.Now().Unix()); err != nil {
+		return labelled, err
+	}
 	return labelled, nil
 }
 
