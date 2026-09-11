@@ -178,3 +178,39 @@ func (o *Ollama) chat(ctx context.Context, system, user string, schema any, dst 
 	}
 	return lastErr
 }
+
+// OllamaModels lists what is installed locally, so a settings screen can offer
+// real choices instead of asking somebody to type a model name correctly.
+func OllamaModels(baseURL string) ([]string, error) {
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:11434"
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(strings.TrimRight(baseURL, "/") + "/api/tags")
+	if err != nil {
+		return nil, fmt.Errorf("ollama is not reachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Models []struct {
+			Name    string `json:"name"`
+			Details struct {
+				Family string `json:"family"`
+			} `json:"details"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(body.Models))
+	for _, m := range body.Models {
+		// Embedding models cannot answer a chat prompt; offering them would
+		// only produce a confusing failure later.
+		if strings.Contains(m.Name, "embed") || m.Details.Family == "bert" {
+			continue
+		}
+		out = append(out, m.Name)
+	}
+	return out, nil
+}

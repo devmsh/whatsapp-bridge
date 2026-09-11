@@ -120,6 +120,9 @@ func (s *Server) handleTaskExtract(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ChatJID   string `json:"chat_jid"`
 		GroupName string `json:"group_name"`
+		// Since re-reads from a point in time instead of the stored watermark.
+		// Re-running is safe: the same message cannot produce a second task.
+		Since int64 `json:"since"`
 	}
 	if err := decodeJSON(r, &req); err != nil || strings.TrimSpace(req.ChatJID) == "" {
 		jsonError(w, 400, "chat_jid required")
@@ -136,8 +139,10 @@ func (s *Server) handleTaskExtract(w http.ResponseWriter, r *http.Request) {
 	if label == "" {
 		label = req.ChatJID
 	}
+	// The engine reads the chat itself now, rather than an agent driving tools
+	// in a loop. Progress reaches the UI the same way.
 	run, ctx := s.runs.Start("chat", req.ChatJID, label)
-	go s.executeExtraction(ctx, run, 15*time.Minute, "extract.mjs", req.ChatJID, req.GroupName)
+	go s.runExtraction(ctx, run, req.ChatJID, req.Since)
 
 	fmt.Printf("Task extraction starting for %s (run=%s)\n", req.ChatJID, run.ID)
 	jsonOK(w, map[string]any{"run_id": run.ID})
@@ -242,8 +247,7 @@ func (s *Server) handleCircleExtract(w http.ResponseWriter, r *http.Request, id 
 	}
 
 	run, ctx := s.runs.Start("circle", strconv.FormatInt(id, 10), circle.Name)
-	go s.executeExtraction(ctx, run, 30*time.Minute, "extract-circle.mjs",
-		strconv.FormatInt(id, 10), circle.Name)
+	go s.runCircleExtraction(ctx, run, id)
 
 	fmt.Printf("Circle task extraction starting for circle %d (%s, run=%s)\n", id, circle.Name, run.ID)
 	jsonOK(w, map[string]any{"run_id": run.ID})

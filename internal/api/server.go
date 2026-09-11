@@ -12,14 +12,14 @@ import (
 
 // Server holds the HTTP server state.
 type Server struct {
-	store      *db.Store
-	client     *wa.Client
-	mediaDir   string
-	port       int
-	mux        *http.ServeMux
-	cfg        *config.Config
-	webFS      fs.FS
-	fileServer http.Handler
+	store              *db.Store
+	client             *wa.Client
+	mediaDir           string
+	port               int
+	mux                *http.ServeMux
+	cfg                *config.Config
+	webFS              fs.FS
+	fileServer         http.Handler
 	profiles           *ProfileManager
 	runs               *RunManager
 	autoExtract        *AutoExtractor
@@ -192,6 +192,8 @@ func (s *Server) registerRoutes() {
 
 	// Auto / continuous extraction
 	s.mux.HandleFunc("/api/v2/extractions/auto", s.handleAutoExtract)
+	s.mux.HandleFunc("/api/v2/extractions/stats", s.handleExtractionStats)
+	s.mux.HandleFunc("/api/v2/extractions/models", s.handleExtractionModels)
 
 	// Universal search (contacts + groups + circles + tasks + messages)
 	s.mux.HandleFunc("/api/v2/search", s.handleSearch)

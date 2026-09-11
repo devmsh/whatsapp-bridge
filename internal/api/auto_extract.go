@@ -10,7 +10,7 @@ import (
 
 // AutoExtractor periodically re-runs incremental circle-level extraction on
 // circles that have had new messages since their last watermark. It reuses the
-// same RunManager and sidecar as a manual extraction.
+// same RunManager and engine as a manual extraction.
 //
 // Gated behind a sync_state toggle: nothing happens until the user enables it.
 type AutoExtractor struct {
@@ -134,8 +134,7 @@ func (a *AutoExtractor) tick() {
 			a.current = nil
 			a.mu.Unlock()
 		}()
-		a.s.executeExtraction(ctx, run, 30*time.Minute, "extract-circle.mjs",
-			strconv.FormatInt(circleID, 10), name)
+		a.s.runCircleExtraction(ctx, run, circleID)
 	}()
 }
 
