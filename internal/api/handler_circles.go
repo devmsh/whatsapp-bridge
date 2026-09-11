@@ -102,6 +102,33 @@ func (s *Server) toggleDismiss(w http.ResponseWriter, r *http.Request, dismiss b
 	jsonOK(w, map[string]bool{"success": true})
 }
 
+// handleCircleUnassigned returns the virtual "Unassigned" circle: every live
+// group AND person that is in no circle yet, each list ranked by how busy the
+// chat has been over the last 30 days. It is computed, never stored, so it
+// always reflects reality and empties itself as things get sorted.
+// GET /api/v2/circles/unassigned
+func (s *Server) handleCircleUnassigned(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	groups, err := s.store.UnassignedGroups()
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	people, err := s.store.UnassignedPeople(s.ownPhone())
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	jsonOK(w, map[string]any{
+		"count":  len(groups) + len(people),
+		"groups": groups,
+		"people": people,
+	})
+}
+
 // handleCircles handles the collection: GET list, POST create.
 // /api/v2/circles
 func (s *Server) handleCircles(w http.ResponseWriter, r *http.Request) {

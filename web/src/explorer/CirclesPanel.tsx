@@ -11,16 +11,22 @@ export function CirclesPanel({
   circles,
   selected,
   recoActive,
+  unassignedActive,
+  unassignedCount,
   onOpen,
   onOpenReco,
+  onOpenUnassigned,
   onCreated,
   onChanged,
 }: {
   circles: Circle[]
   selected: number | null
   recoActive: boolean
+  unassignedActive: boolean
+  unassignedCount: number
   onOpen: (id: number) => void
   onOpenReco: () => void
+  onOpenUnassigned: () => void
   onCreated: (c: Circle) => void
   onChanged: () => void
 }) {
@@ -220,6 +226,26 @@ export function CirclesPanel({
         }
       >
         ✨ Recommendations
+      </button>
+
+      {/* The virtual "Unassigned" circle. It is not a row in the circles table
+          — it is every live group still waiting for a circle, so it shrinks to
+          zero as you file them and never needs cleaning up. */}
+      <button
+        onClick={onOpenUnassigned}
+        className={
+          'mx-2 mt-1.5 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ' +
+          (unassignedActive
+            ? 'bg-emerald-500/15 text-emerald-300'
+            : 'bg-neutral-800/60 text-neutral-200 hover:bg-neutral-800')
+        }
+      >
+        <span>📥 Unassigned</span>
+        {unassignedCount > 0 && (
+          <span className="ml-auto rounded-full bg-neutral-700 px-2 text-[11px] text-neutral-200">
+            {unassignedCount}
+          </span>
+        )}
       </button>
 
       <div className="p-2">

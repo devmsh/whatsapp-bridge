@@ -160,6 +160,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/circles/recommendations/dismiss", s.handleRecDismiss)
 	s.mux.HandleFunc("/api/v2/circles/recommendations/restore", s.handleRecRestore)
 	s.mux.HandleFunc("/api/v2/circles/for-member", s.handleCircleForMember)
+	s.mux.HandleFunc("/api/v2/circles/unassigned", s.handleCircleUnassigned)
 	s.mux.HandleFunc("/api/v2/circles/", s.handleCircleByID)
 
 	// Tasks (work items on top of WhatsApp content)
