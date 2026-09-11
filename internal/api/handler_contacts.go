@@ -123,6 +123,8 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleContactName(w, r, jid)
 	case "tags":
 		s.handleContactTags(w, r, jid)
+	case "notes":
+		s.handleContactNotes(w, r, jid)
 	case "dashboard":
 		s.handleContactDashboard(w, r, jid)
 	default:
@@ -322,4 +324,133 @@ func (s *Server) handleIntroChats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	jsonOK(w, map[string]any{"count": len(out), "chats": out})
+}
+
+// handleContactNotes reads or writes the two things only you know about a
+// person: the kunya they are really addressed by ("أبو فلان"), and how you came
+// to know them — who introduced you, when and why.
+//
+// This is the context the AI cannot get from anywhere else. WhatsApp knows a
+// display name and a number; it does not know that Abdullah sent this person to
+// you about the CVB file.
+//
+// GET  /api/v2/contacts/{jid}/notes
+// PUT  /api/v2/contacts/{jid}/notes  {"kunya":"...","how_we_met":"..."}
+func (s *Server) handleContactNotes(w http.ResponseWriter, r *http.Request, jid string) {
+	switch r.Method {
+	case http.MethodGet:
+		c, err := s.store.GetContact(jid)
+		if err != nil {
+			jsonError(w, 500, err.Error())
+			return
+		}
+		if c == nil {
+			jsonOK(w, map[string]any{"jid": jid, "kunya": "", "how_we_met": ""})
+			return
+		}
+		jsonOK(w, map[string]any{"jid": jid, "kunya": c.Kunya, "how_we_met": c.HowWeMet})
+	case http.MethodPut, http.MethodPost:
+		// Both fields are sent together and replace what is there. They are
+		// short, hand-written, and edited in one form, so patch semantics would
+		// only add a way to lose half of an edit.
+		var req struct {
+			Kunya    string `json:"kunya"`
+			HowWeMet string `json:"how_we_met"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			jsonError(w, 400, "invalid JSON")
+			return
+		}
+		if err := s.store.SetContactNotes(jid,
+			strings.TrimSpace(req.Kunya), strings.TrimSpace(req.HowWeMet)); err != nil {
+			jsonError(w, 500, err.Error())
+			return
+		}
+		jsonOK(w, map[string]any{
+			"jid": jid, "kunya": strings.TrimSpace(req.Kunya),
+			"how_we_met": strings.TrimSpace(req.HowWeMet),
+		})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+// handleIntroLabelled lists the chats carrying the intro label — what the
+// filter shows. It is the label, not the detector: both your own decisions and
+// the classifier's land here, and removing the label removes the chat from the
+// filter.
+//
+// Calling it also runs the classifier over anything new, so a conversation
+// started since the last look is labelled by the time you see the list.
+//
+// GET /api/v2/contacts/intros/labelled
+func (s *Server) handleIntroLabelled(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	if _, err := s.store.AutoClassifyIntros(); err != nil {
+		// A classification failure must not take the list down with it.
+		fmt.Printf("intro auto-classify: %v\n", err)
+	}
+	set, err := s.store.IntroLabelledJIDs()
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	// Expand identities so a labelled person matches their own chat row.
+	for jid := range set {
+		if alt := s.client.ResolveLIDForJID(jid); alt != "" {
+			set[alt] = true
+		} else if alt := s.client.ResolvePhoneForLID(jid); alt != "" {
+			set[alt] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for jid := range set {
+		out = append(out, jid)
+	}
+	jsonOK(w, map[string]any{"count": len(out), "chat_jids": out, "tag_id": s.store.IntroTagID()})
+}
+
+// handleIntroConfig reads or sets which label means "new introduction", and the
+// watermark the classifier starts from.
+//
+// GET  /api/v2/contacts/intros/config
+// PUT  /api/v2/contacts/intros/config  {"tag_id":4,"since":1789156376}
+func (s *Server) handleIntroConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		jsonOK(w, map[string]any{
+			"tag_id": s.store.IntroTagID(),
+			"since":  s.store.IntroWatermark(),
+		})
+	case http.MethodPut, http.MethodPost:
+		var req struct {
+			TagID *int64 `json:"tag_id"`
+			Since *int64 `json:"since"`
+		}
+		if err := decodeJSON(r, &req); err != nil {
+			jsonError(w, 400, "invalid JSON")
+			return
+		}
+		if req.TagID != nil {
+			if err := s.store.SetIntroTagID(*req.TagID); err != nil {
+				jsonError(w, 500, err.Error())
+				return
+			}
+		}
+		if req.Since != nil {
+			if err := s.store.SetIntroWatermark(*req.Since); err != nil {
+				jsonError(w, 500, err.Error())
+				return
+			}
+		}
+		jsonOK(w, map[string]any{
+			"tag_id": s.store.IntroTagID(),
+			"since":  s.store.IntroWatermark(),
+		})
+	default:
+		methodNotAllowed(w)
+	}
 }

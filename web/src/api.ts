@@ -1745,6 +1745,29 @@ export const api = {
   },
   // Chats that have a meeting still ahead — one call for the whole list,
   // rather than asking per chat.
+  // The two things only you know about a person. Kept apart from the synced
+  // contact fields, so a refresh from WhatsApp can never overwrite them.
+  contactNotes: async (jid: string): Promise<{ kunya: string; how_we_met: string }> => {
+    const res = await fetch(`/api/v2/contacts/${encodeURIComponent(jid)}/notes`)
+    return res.json()
+  },
+  saveContactNotes: async (jid: string, kunya: string, how_we_met: string) => {
+    const res = await fetch(`/api/v2/contacts/${encodeURIComponent(jid)}/notes`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kunya, how_we_met }),
+    })
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
+  // Chats carrying the intro label — what the filter shows. Both your own
+  // decisions and the classifier's land here; removing the label removes the
+  // chat from the filter. The call also classifies anything newly started.
+  introLabelled: async (): Promise<string[]> => {
+    const res = await fetch('/api/v2/contacts/intros/labelled')
+    const d = await res.json()
+    return d?.chat_jids || []
+  },
   introChats: async (opts: { days?: number; tagId?: number } = {}): Promise<IntroChat[]> => {
     const q = new URLSearchParams()
     q.set('days', String(opts.days ?? 90))

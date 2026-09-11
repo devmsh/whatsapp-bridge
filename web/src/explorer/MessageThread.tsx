@@ -922,174 +922,187 @@ export function MessageThread({
             onChanged={onTagsChanged}
           />
         )}
-        {/* WhatsApp keeps this header to a couple of icons plus an
-            overflow. Ours are the same controls, just folded in. */}
-        <HeaderOverflow>
-          {group && (
-            <button
-              onClick={async () => {
-                if (extracting) return
-                setExtracting(true)
-                try {
-                  const r = await api.extractTasks(jid, title)
-                  setLiveRunId(r.run_id)
-                  setShowHistory(true)
-                } catch (e) {
-                  alert('Extraction failed to start: ' + (e as Error).message)
-                } finally {
-                  setExtracting(false)
+        {/* WhatsApp keeps this header to a couple of icons plus an overflow.
+            Ours holds more actions, so it is a labelled menu rather than a row
+            of icons nobody can read. */}
+        <HeaderOverflow
+          items={[
+            ...(group
+              ? [
+                  {
+                    id: 'extract',
+                    label: extracting ? 'Extracting…' : 'Extract tasks',
+                    hint: 'Find work items in this group with AI',
+                    icon: <span aria-hidden="true">✨</span>,
+                    disabled: extracting,
+                    onClick: async () => {
+                      if (extracting) return
+                      setExtracting(true)
+                      try {
+                        const r = await api.extractTasks(jid, title)
+                        setLiveRunId(r.run_id)
+                        setShowHistory(true)
+                      } catch (e) {
+                        alert('Extraction failed to start: ' + (e as Error).message)
+                      } finally {
+                        setExtracting(false)
+                      }
+                    },
+                  },
+                  {
+                    id: 'history',
+                    label: 'Extraction history',
+                    hint: 'Past runs and what the agent did',
+                    icon: <span aria-hidden="true">🕘</span>,
+                    onClick: () => setShowHistory(true),
+                  },
+                ]
+              : []),
+            {
+              id: 'drafts',
+              label: 'Draft replies',
+              hint: 'Two or three candidate replies (AI)',
+              icon: <span aria-hidden="true">✨</span>,
+              onClick: () => setShowDrafts(true),
+            },
+            {
+              id: 'tasks',
+              label: 'Tasks in this chat',
+              icon: <span aria-hidden="true">✓</span>,
+              onClick: () => onOpenChatTasks(jid),
+            },
+            {
+              id: 'search',
+              label: 'Search in this chat',
+              hint: 'Cmd-F',
+              icon: (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              ),
+              active: searchOpen,
+              onClick: () => setSearchOpen((v) => !v),
+            },
+            {
+              id: 'media',
+              label: 'Media, links and docs',
+              icon: (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21 15 16 10 5 21" />
+                </svg>
+              ),
+              onClick: () => setMediaGalleryOpen(true),
+            },
+            ...(group
+              ? [
+                  {
+                    id: 'members',
+                    label: 'Group members',
+                    hint: 'Participants and admins',
+                    icon: (
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                      </svg>
+                    ),
+                    onClick: () => setGroupInfoOpen(true),
+                  },
+                ]
+              : []),
+            ...(isContact
+              ? [
+                  {
+                    id: 'click-to-chat',
+                    label: 'Click-to-chat link & QR',
+                    icon: (
+                      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="7" height="7" rx="1" />
+                        <rect x="14" y="3" width="7" height="7" rx="1" />
+                        <rect x="3" y="14" width="7" height="7" rx="1" />
+                        <path d="M14 14h3v3h-3zM19 19h2v2h-2z" />
+                      </svg>
+                    ),
+                    onClick: () => setClickToChatOpen(true),
+                  },
+                ]
+              : []),
+            {
+              id: 'jump-to-date',
+              label: 'Jump to a date',
+              icon: (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4.5" width="18" height="16" rx="2" />
+                  <path d="M3 9.5h18M8 3v3M16 3v3" />
+                </svg>
+              ),
+              active: dateJumpOpen,
+              keepOpen: true,
+              onClick: () => setDateJumpOpen((v) => !v),
+            },
+            {
+              id: 'labels',
+              label: 'Labels',
+              icon: (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                  <line x1="7" y1="7" x2="7.01" y2="7" />
+                </svg>
+              ),
+              active: labelPickerOpen,
+              keepOpen: true,
+              onClick: () => setLabelPickerOpen((v) => !v),
+            },
+            {
+              id: 'export',
+              label: 'Export chat',
+              hint: 'Save the conversation as a text file',
+              icon: (
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              ),
+              disabled: messages.length === 0,
+              onClick: () => exportChat(title, jid, group, messages, nameMap),
+            },
+            chat?.is_hidden
+              ? {
+                  id: 'unhide',
+                  label: 'Unhide this chat',
+                  hint: 'It returns to your main list',
+                  icon: <span aria-hidden="true">🔓</span>,
+                  onClick: async () => {
+                    await api.unhideChat(jid)
+                    // Tell the rest of the UI the locked set changed; the chat
+                    // list refetches and the chat moves out of private mode.
+                    window.dispatchEvent(new CustomEvent('wa.unlock-changed'))
+                  },
                 }
-              }}
-              disabled={extracting}
-              className="shrink-0 rounded-lg bg-emerald-500/15 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 disabled:opacity-60"
-              title="Extract tasks from this group with AI"
-            >
-              {extracting ? 'Extracting…' : '✨ Extract tasks'}
-            </button>
-          )}
-          {group && (
-            <button
-              onClick={() => setShowHistory(true)}
-              className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800"
-              title="See past extraction runs and what the agent did"
-            >
-              🕘 History
-            </button>
-          )}
-          <button
-            onClick={() => setShowDrafts(true)}
-            className="shrink-0 rounded-lg bg-sky-500/15 px-2.5 py-1.5 text-xs font-medium text-sky-300 transition hover:bg-sky-500/30"
-            title="Draft 2-3 candidate replies (AI)"
-          >
-            ✨ Draft
-          </button>
-          {chat?.is_hidden ? (
-            <button
-              onClick={async () => {
-                await api.unhideChat(jid)
-                // Tell the rest of the UI the locked set changed; chat list
-                // refetches → now-unhidden chat moves out of "private mode".
-                window.dispatchEvent(new CustomEvent('wa.unlock-changed'))
-              }}
-              className="shrink-0 rounded-lg border border-emerald-700 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/15"
-              title="Unhide this chat — it will return to your main list"
-            >
-              🔓 Unhide
-            </button>
-          ) : (
-            <button
-              onClick={() => setShowHideDialog(true)}
-              className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-400 transition hover:bg-neutral-800"
-              title="Hide this chat (and delete its AI-derived data)"
-            >
-              🔒
-            </button>
-          )}
-          <button
-            onClick={() => onOpenChatTasks(jid)}
-            className="shrink-0 rounded-lg border border-neutral-700 px-2.5 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-800"
-            title="Tasks in this chat"
-          >
-            ✓ Tasks
-          </button>
-          <button
-            onClick={() => setSearchOpen((v) => !v)}
-            title="Search in this chat (Cmd-F)"
-            aria-label="Search in this chat"
-            className={
-              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition ' +
-              (searchOpen
-                ? 'border-emerald-600/60 bg-emerald-500/15 text-emerald-300'
-                : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
-            }
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="7" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
-          </button>
-          <button
-            onClick={() => setMediaGalleryOpen(true)}
-            title="Media, links, docs in this chat"
-            aria-label="Open shared media, links, and docs"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="M21 15l-5-5L5 21" />
-            </svg>
-          </button>
-          {!group && jid.endsWith('@s.whatsapp.net') && (
-            <button
-              onClick={() => setClickToChatOpen(true)}
-              title="Click-to-chat link & QR code"
-              aria-label="Click-to-chat link and QR code"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
-            >
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="7" height="7" rx="1" />
-                <rect x="14" y="3" width="7" height="7" rx="1" />
-                <rect x="3" y="14" width="7" height="7" rx="1" />
-                <path d="M14 14h3v3h-3zM21 14v7M17 21h4M21 17h-1" />
-              </svg>
-            </button>
-          )}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setLabelPickerOpen((v) => !v)}
-              title="Labels"
-              aria-label="Labels"
-              aria-expanded={labelPickerOpen}
-              className={
-                'flex h-8 w-8 items-center justify-center rounded-lg border transition ' +
-                (labelPickerOpen
-                  ? 'border-emerald-600/60 bg-emerald-500/15 text-emerald-300'
-                  : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
-              }
-            >
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-                <line x1="7" y1="7" x2="7.01" y2="7" />
-              </svg>
-            </button>
-            {labelPickerOpen && <ChatLabelPicker jid={jid} onClose={() => setLabelPickerOpen(false)} />}
-          </div>
-          {group && (
-            <button
-              onClick={() => setGroupInfoOpen(true)}
-              title="Group members + admins"
-              aria-label="Open group info"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800"
-            >
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-            </button>
-          )}
-          <DateJumpButton
-            open={dateJumpOpen}
-            setOpen={setDateJumpOpen}
-            onJump={jumpToDate}
-          />
-          <button
-            onClick={() => exportChat(title, jid, group, messages, nameMap)}
-            title="Export chat as a text file"
-            aria-label="Export chat"
-            disabled={messages.length === 0}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-neutral-700 text-neutral-300 transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          </button>
-          <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
-        </HeaderOverflow>
+              : {
+                  id: 'hide',
+                  label: 'Hide this chat',
+                  hint: 'Also deletes its AI-derived data',
+                  icon: <span aria-hidden="true">🔒</span>,
+                  danger: true,
+                  onClick: () => setShowHideDialog(true),
+                },
+          ]}
+          footer={
+            <div className="space-y-2">
+              {/* These manage popovers of their own, so they live below the
+                  divider where a click never closes the menu. */}
+              {dateJumpOpen && <DateJumpInline onJump={jumpToDate} />}
+              {labelPickerOpen && (
+                <ChatLabelPicker jid={jid} onClose={() => setLabelPickerOpen(false)} />
+              )}
+              <ChatCircles jid={jid} circles={circles} onChanged={onCirclesChanged} />
+            </div>
+          }
+        />
       </header>
 
       {(group || isContact) && <ProfileCard type={group ? 'group' : 'contact'} ref_={jid} />}
@@ -3375,44 +3388,25 @@ function MentionPicker({
 // window and fires the existing scroll-and-flash. A "Not found" hint
 // appears when the date is outside the loaded window so the user knows
 // they need to "Load earlier" first.
-function DateJumpButton({
-  open,
-  setOpen,
-  onJump,
-}: {
-  open: boolean
-  setOpen: (v: boolean) => void
-  onJump: (yyyymmdd: string) => boolean
-}) {
-  const wrapRef = useRef<HTMLDivElement>(null)
+// DateJumpInline is the date picker as it appears inside the overflow menu.
+//
+// It used to be a button that owned its own popover. Inside a menu that is one
+// popover too many — and its outside-click handler fought the menu's, closing
+// both. The menu now owns opening and closing; this is just the panel.
+function DateJumpInline({ onJump }: { onJump: (yyyymmdd: string) => boolean }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [notFound, setNotFound] = useState(false)
   const [picked, setPicked] = useState('')
 
   useEffect(() => {
-    if (!open) return
-    setNotFound(false)
     requestAnimationFrame(() => inputRef.current?.focus())
-    function onDown(e: MouseEvent) {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('mousedown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open, setOpen])
+  }, [])
 
   function tryJump() {
     if (!picked) return
-    const ok = onJump(picked)
-    if (ok) {
-      setOpen(false)
+    if (onJump(picked)) {
       setPicked('')
+      setNotFound(false)
     } else {
       setNotFound(true)
     }
@@ -3423,67 +3417,39 @@ function DateJumpButton({
   const maxIso = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`
 
   return (
-    <div ref={wrapRef} className="relative shrink-0">
-      <button
-        onClick={() => setOpen(!open)}
-        title="Jump to date"
-        aria-label="Jump to date"
-        className={
-          'flex h-8 w-8 items-center justify-center rounded-lg border transition ' +
-          (open
-            ? 'border-emerald-600/60 bg-emerald-500/15 text-emerald-300'
-            : 'border-neutral-700 text-neutral-300 hover:bg-neutral-800')
-        }
-      >
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <line x1="16" y1="2" x2="16" y2="6" />
-          <line x1="8" y1="2" x2="8" y2="6" />
-          <line x1="3" y1="10" x2="21" y2="10" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-64 rounded-xl border border-neutral-700 bg-neutral-900 p-3 shadow-2xl shadow-black/60">
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500">
-            Jump to date
-          </div>
-          <input
-            ref={inputRef}
-            type="date"
-            max={maxIso}
-            value={picked}
-            onChange={(e) => {
-              setPicked(e.target.value)
-              setNotFound(false)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                tryJump()
-              }
-            }}
-            className="w-full rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
-          />
-          {notFound && (
-            <div className="mt-2 text-[11px] text-amber-300/90">
-              No messages from that date in the loaded window — try "Load earlier" first.
-            </div>
-          )}
-          <div className="mt-2 flex items-center justify-end gap-2">
-            <button
-              onClick={() => setOpen(false)}
-              className="rounded px-2 py-1 text-[11px] text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={tryJump}
-              disabled={!picked}
-              className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-medium text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Jump
-            </button>
-          </div>
+    <div>
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-neutral-500">
+        Jump to date
+      </div>
+      <div className="flex gap-1.5">
+        <input
+          ref={inputRef}
+          type="date"
+          max={maxIso}
+          value={picked}
+          onChange={(e) => {
+            setPicked(e.target.value)
+            setNotFound(false)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              tryJump()
+            }
+          }}
+          className="min-w-0 flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-neutral-600"
+        />
+        <button
+          onClick={tryJump}
+          disabled={!picked}
+          className="shrink-0 rounded bg-emerald-600 px-2.5 text-[11px] font-medium text-neutral-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Go
+        </button>
+      </div>
+      {notFound && (
+        <div className="mt-1.5 text-[11px] text-amber-300/90">
+          No messages from that date in the loaded window — try "Load earlier" first.
         </div>
       )}
     </div>

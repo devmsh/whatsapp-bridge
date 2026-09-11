@@ -85,6 +85,14 @@ func (a *AutoExtractor) Start() {
 }
 
 func (a *AutoExtractor) tick() {
+	// Label brand-new introductions on the same cadence. It is a couple of
+	// cheap queries and it is independent of task extraction — it must keep
+	// working even when auto-extract is switched off, which is why it runs
+	// before the enabled() check below.
+	if names, err := a.s.store.AutoClassifyIntros(); err == nil && len(names) > 0 {
+		fmt.Printf("Intro label applied to %d new chat(s): %v\n", len(names), names)
+	}
+
 	a.mu.Lock()
 	a.lastTickedAt = time.Now().Unix()
 	if a.running || !a.enabled() {

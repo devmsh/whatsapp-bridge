@@ -82,6 +82,20 @@ CREATE TABLE IF NOT EXISTS contacts (
     picture_url    TEXT    NOT NULL DEFAULT '',
     first_seen     INTEGER NOT NULL DEFAULT 0,
     last_seen      INTEGER NOT NULL DEFAULT 0,
+    -- Two things only you know, which no sync can supply.
+    --
+    -- kunya is the Arabic teknonym ("أبو فلان") — often how someone is really
+    -- addressed, and rarely what WhatsApp carries in the name field.
+    --
+    -- how_we_met is where the person came from: who introduced you, when and
+    -- why. It is context the AI has no other way to learn, and it is the
+    -- difference between "a contact" and "the person Abdullah sent me to about
+    -- the CVB file".
+    --
+    -- Both survive contact sync: every writer names its columns, so a refresh
+    -- from WhatsApp cannot overwrite them.
+    kunya          TEXT    NOT NULL DEFAULT '',
+    how_we_met     TEXT    NOT NULL DEFAULT '',
     updated_at     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_lid ON contacts(lid);

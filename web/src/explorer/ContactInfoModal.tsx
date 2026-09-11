@@ -173,6 +173,8 @@ export function ContactInfoModal({
             <div className="py-4 text-center text-xs text-neutral-600">Loading…</div>
           )}
 
+          {data && <ContactNotes jid={jid} />}
+
           {data && data.tags.length > 0 && (
             <Section title="Tags">
               <div className="flex flex-wrap gap-1.5">
@@ -252,6 +254,67 @@ export function ContactInfoModal({
         </footer>
       </div>
     </div>
+  )
+}
+
+// ContactNotes is where you write the two things WhatsApp can never tell you:
+// the kunya someone is actually addressed by, and how you came to know them.
+// Both feed the AI — "the person Abdullah sent me about the CVB file" is worth
+// far more to it than a display name.
+function ContactNotes({ jid }: { jid: string }) {
+  const [kunya, setKunya] = useState('')
+  const [howWeMet, setHowWeMet] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .contactNotes(jid)
+      .then((n) => {
+        if (cancelled) return
+        setKunya(n.kunya || '')
+        setHowWeMet(n.how_we_met || '')
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [jid])
+
+  // Saved on blur rather than behind a button: these are notes you jot while
+  // reading a chat, and a save step you can forget loses them.
+  async function save() {
+    if (!loaded) return
+    await api.saveContactNotes(jid, kunya, howWeMet).catch(() => {})
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
+  }
+
+  return (
+    <Section title="Your notes">
+      <input
+        value={kunya}
+        onChange={(e) => setKunya(e.target.value)}
+        onBlur={save}
+        dir="auto"
+        placeholder="الكنية — e.g. أبو يمان"
+        className="mb-1.5 w-full rounded-lg border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-sm outline-none focus:border-neutral-600"
+      />
+      <textarea
+        value={howWeMet}
+        onChange={(e) => setHowWeMet(e.target.value)}
+        onBlur={save}
+        dir="auto"
+        rows={3}
+        placeholder="How we met — who introduced us, when, and why"
+        className="w-full rounded-lg border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 text-sm outline-none focus:border-neutral-600"
+      />
+      {saved && <div className="mt-1 text-[10px] text-emerald-600">Saved</div>}
+    </Section>
   )
 }
 

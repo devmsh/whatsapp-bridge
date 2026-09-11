@@ -1,6 +1,10 @@
 package db
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+	"time"
+)
 
 // Intro chats: people you met recently, where the conversation is still just an
 // introduction — a name exchanged, a number shared, "let's meet properly soon".
@@ -38,12 +42,58 @@ type introSignal struct {
 }
 
 var introSignals = []introSignal{
-	{"self-intro", 3, regexp.MustCompile(`(?i)مع[اك]\s+\S+|أنا\s+\S+\s+(مهندس|من)|انا\s+\S+\s+(مهندس|من)|this is \w+|i'm \w+ from|my name is`)},
+	// "this Mohammad Shaban from PEF" is as common as "this IS ..." — people
+	// drop the verb when typing fast, and the first version of this pattern
+	// missed a textbook introduction because of it.
+	// No (?i) here, on purpose. The case-insensitive flag applies to the whole
+	// pattern, which quietly turns [A-Z] into [A-Za-z] — and then "I'm outside"
+	// reads as someone introducing themselves. The Arabic alternatives need no
+	// case handling, and the Latin ones spell both cases where it matters.
+	{"self-intro", 3, regexp.MustCompile(`مع[اك]\s+\S+|أنا\s+\S+\s+(مهندس|من)|انا\s+\S+\s+(مهندس|من)|[Tt]his( is)? [A-Z]\w+|[Ii]'m [A-Z]\w+|[Mm]y name is|[A-Z]\w+ from [A-Z]\w+`)},
 	{"pleased-to-meet", 3, regexp.MustCompile(`(?i)تشرفت|تشرفنا|شرفتنا|سعدت بلقائك|nice (to meet|meeting) you|good to meet`)},
 	{"shared-number", 3, regexp.MustCompile(`(?i)ه[اذ]ا رقمي|هي رقمي|رقمي صار عندك|سجله عندك|my number|save my (number|contact)`)},
 	{"referred-by", 3, regexp.MustCompile(`(?i)أعطاني رقمك|اعطاني رقمك|وصلني رقمك|طلبت رقمك|أخذت رقمك|gave me your number|got your number`)},
 	{"meet-soon", 2, regexp.MustCompile(`(?i)نرتب لقاء|نلتقي قريب|لقاء قريب|نرتبها|نتقابل|meet soon|catch up|set up a (call|meeting)`)},
-	{"role/company", 1, regexp.MustCompile(`(?i)\bfrom [A-Z]\w+|من شركة|CEO|founder|مؤسس`)},
+	// Same trap: "from [A-Z]" under (?i) matches "from the".
+	{"role/company", 1, regexp.MustCompile(`\bfrom [A-Z]\w+|من شركة|CEO|[Ff]ounder|مؤسس`)},
+}
+
+// greeting matches an opening that is only a hello, which on its own says
+// nothing about who someone is.
+var greeting = regexp.MustCompile(`^(?i)(hi|hello|hey|مرحبا|أهلا|اهلا|السلام عليكم|هلا)[\s!،.]*$`)
+
+// nameLike reports whether a message is simply a name — "باسم العكل",
+// "Mohammed Shurrab One Studio".
+//
+// This is the exchange that happens when two people swap numbers in a room:
+// each sends their name and nothing else. It carries no keyword at all, so the
+// phrase patterns above never see it, yet it is one of the clearest signs of a
+// brand-new acquaintance.
+func nameLike(text string) bool {
+	t := strings.TrimSpace(text)
+	if t == "" || len([]rune(t)) > 40 || greeting.MatchString(t) {
+		return false
+	}
+	// Anything with a link, a number or sentence punctuation is a message, not
+	// a name being handed over.
+	if strings.ContainsAny(t, "0123456789?؟:/\n") || strings.Contains(t, "http") {
+		return false
+	}
+	words := strings.Fields(t)
+	if len(words) < 2 || len(words) > 4 {
+		return false
+	}
+	// Every word has to read as a name. A Latin word must be capitalised, which
+	// is what separates "Mohammed Shurrab One Studio" from "Order hanger" or
+	// "Hello order" — both of which are two short words, and neither of which
+	// is anyone's name. Arabic has no case, so those words pass on length.
+	for _, w := range words {
+		r := []rune(w)[0]
+		if r < 128 && !(r >= 'A' && r <= 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // IntroChats finds recently-started direct chats that read like introductions.
@@ -97,6 +147,12 @@ func (s *Store) IntroChats(sinceTS int64, maxMessages int, tagID int64) ([]Intro
 		return nil, err
 	}
 
+	// How many of these conversations began on each day.
+	sameDayStarts := map[string]int{}
+	for _, c := range candidates {
+		sameDayStarts[dayKey(c.firstTS)]++
+	}
+
 	out := []IntroChat{}
 	for _, c := range candidates {
 		// Only the opening of the conversation is scored. Later messages are
@@ -108,10 +164,12 @@ func (s *Store) IntroChats(sinceTS int64, maxMessages int, tagID int64) ([]Intro
 			continue
 		}
 		blob := ""
+		var openingLines []string
 		for opening.Next() {
 			var t string
 			if opening.Scan(&t) == nil {
 				blob += " " + t
+				openingLines = append(openingLines, t)
 			}
 		}
 		opening.Close()
@@ -123,6 +181,24 @@ func (s *Store) IntroChats(sinceTS int64, maxMessages int, tagID int64) ([]Intro
 				score += sig.weight
 				signals = append(signals, sig.name)
 			}
+		}
+		// A bare exchange of names, in a chat that has barely started.
+		if c.total <= 8 {
+			for _, line := range openingLines {
+				if nameLike(line) {
+					score += 3
+					signals = append(signals, "name-exchange")
+					break
+				}
+			}
+		}
+		// Several conversations beginning on one day means a day spent meeting
+		// people — an event, a trip, a round of introductions. On its own that
+		// is circumstantial, which is why it only lifts a chat that already
+		// looks like an opening rather than creating a match by itself.
+		if score > 0 && sameDayStarts[dayKey(c.firstTS)] >= 3 {
+			score += 2
+			signals = append(signals, "met-that-day")
 		}
 		if score == 0 {
 			continue
@@ -155,4 +231,10 @@ func (s *Store) IntroChats(sinceTS int64, maxMessages int, tagID int64) ([]Intro
 		}
 	}
 	return out, nil
+}
+
+// dayKey buckets a timestamp by local calendar day, so conversations that began
+// on the same day land together.
+func dayKey(ts int64) string {
+	return time.Unix(ts, 0).Format("2006-01-02")
 }

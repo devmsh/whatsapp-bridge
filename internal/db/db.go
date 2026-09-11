@@ -66,6 +66,10 @@ func NewStore(path string) (*Store, error) {
 		`ALTER TABLE meetings ADD COLUMN location_url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE meetings ADD COLUMN location_lat REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE meetings ADD COLUMN location_lng REAL NOT NULL DEFAULT 0`,
+		// Your own notes on a person: the kunya they are actually called by, and
+		// how you came to know them. Contact sync never touches either.
+		`ALTER TABLE contacts ADD COLUMN kunya TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE contacts ADD COLUMN how_we_met TEXT NOT NULL DEFAULT ''`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type Chat, type Circle } from '../api'
 import { chatListTime, chatTitle, isGroup, previewText } from './format'
 import { ChatAvatar } from './ChatAvatar'
@@ -101,22 +101,23 @@ export function ChatList({
       cancelled = true
     }
   }, [chats.length])
-  // People met recently whose chat is still just an introduction. Computed
-  // live rather than stored, so it stays current as you meet people — the
-  // Intro label is what records the lasting answer.
+  // Chats carrying the Intro label. The LABEL is what this filter shows, not
+  // the detector — so what you see is what was actually decided, by you or by
+  // the classifier, and removing the label takes a chat out of the list. The
+  // same call classifies anything newly started, so a person you met this
+  // morning is already here.
   const [introChats, setIntroChats] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    let cancelled = false
+  const loadIntros = useCallback(() => {
     api
-      .introChats({ days: 90 })
-      .then((list) => {
-        if (!cancelled) setIntroChats(new Set(list.map((c) => c.jid)))
-      })
+      .introLabelled()
+      .then((jids) => setIntroChats(new Set(jids)))
       .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [chats.length])
+  }, [])
+  useEffect(loadIntros, [loadIntros, chats.length])
+  // The label can change from anywhere — this window, another session, or the
+  // classifier running in the background. usePoll is visibility-gated, so a
+  // hidden window costs nothing.
+  usePoll(loadIntros, 120_000, [loadIntros])
 
   // Split into archived + non-archived once so we don't re-filter on every
   // render, and the counter in the 'Archived (N)' header is cheap.
@@ -251,11 +252,11 @@ export function ChatList({
               Meetings
             </FilterPill>
           )}
-          {/* People you met recently, where the chat is still an introduction
-              waiting to become something. */}
+          {/* Chats labelled as introductions — by you or by the classifier.
+              Remove the label from a chat and it leaves this list. */}
           {filterCounts.intros > 0 && (
             <FilterPill id="intros" current={filter} onPick={setFilter} count={filterCounts.intros}>
-              New intros
+              Intros
             </FilterPill>
           )}
           {filterCounts.mentions > 0 && (
@@ -349,7 +350,7 @@ export function ChatList({
                   : filter === 'meetings'
                     ? 'No chats with an upcoming meeting'
                     : filter === 'intros'
-                      ? 'No recent introductions'
+                      ? 'Nothing labelled as an introduction yet'
                   : filter === 'mentions'
                     ? 'No unread mentions'
                     : filter === 'drafts'

@@ -16,6 +16,7 @@ import { ChatList } from './ChatList'
 import { ContactsPanel } from './ContactsPanel'
 import { CirclesPanel } from './CirclesPanel'
 import { RecommendationsView } from './RecommendationsView'
+import { usePoll } from '../hooks/usePoll'
 import { UnassignedView } from './UnassignedView'
 import { MeetingsView } from './MeetingsView'
 import { TasksSidebar, type TasksSelection } from './TasksSidebar'
@@ -244,6 +245,13 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     api.tags().then((t) => setTags(t || [])).catch(() => {})
     api.contactTagsMap().then((m) => setContactTags(m || {})).catch(() => {})
   }, [])
+
+  // Tags can change outside this window — another session, a script, or a bulk
+  // pass over the API — and the header chips would then show yesterday's
+  // answer. usePoll rather than setInterval, because it is visibility-gated:
+  // the mac app hides its window instead of quitting, and a bare interval keeps
+  // polling all night. Two minutes is plenty for something edited by hand.
+  usePoll(reloadTags, 120_000, [reloadTags])
 
   // Live message stream: append to the open chat and reorder the chat list.
   useEffect(() => {

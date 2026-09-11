@@ -8,21 +8,24 @@ import (
 
 // Contact maps to the contacts table.
 type Contact struct {
-	JID           string `json:"jid"`
-	LID           string `json:"lid,omitempty"`
-	Phone         string `json:"phone,omitempty"`
-	Name          string `json:"name"`
-	PushName      string `json:"push_name,omitempty"`
-	BusinessName  string `json:"business_name,omitempty"`
-	VerifiedName  string `json:"verified_name,omitempty"`
-	IsBusiness    bool   `json:"is_business"`
-	StatusText    string `json:"status_text,omitempty"`
-	StatusSetAt   int64  `json:"status_set_at,omitempty"`
-	PictureID     string `json:"picture_id,omitempty"`
-	PictureURL    string `json:"picture_url,omitempty"`
-	FirstSeen     int64  `json:"first_seen,omitempty"`
-	LastSeen      int64  `json:"last_seen,omitempty"`
-	UpdatedAt     int64  `json:"updated_at"`
+	JID          string `json:"jid"`
+	LID          string `json:"lid,omitempty"`
+	Phone        string `json:"phone,omitempty"`
+	Name         string `json:"name"`
+	PushName     string `json:"push_name,omitempty"`
+	BusinessName string `json:"business_name,omitempty"`
+	VerifiedName string `json:"verified_name,omitempty"`
+	IsBusiness   bool   `json:"is_business"`
+	StatusText   string `json:"status_text,omitempty"`
+	StatusSetAt  int64  `json:"status_set_at,omitempty"`
+	PictureID    string `json:"picture_id,omitempty"`
+	PictureURL   string `json:"picture_url,omitempty"`
+	FirstSeen    int64  `json:"first_seen,omitempty"`
+	LastSeen     int64  `json:"last_seen,omitempty"`
+	// Yours, not WhatsApp's. See schema.go for why sync cannot overwrite them.
+	Kunya     string `json:"kunya,omitempty"`
+	HowWeMet  string `json:"how_we_met,omitempty"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
 // StoreContact upserts a contact record.
@@ -64,12 +67,12 @@ func (s *Store) StoreContact(c *Contact) error {
 func (s *Store) GetContact(jid string) (*Contact, error) {
 	row := s.DB.QueryRow(`SELECT jid, lid, phone, name, push_name, business_name, verified_name,
 		is_business, status_text, status_set_at, picture_id, picture_url,
-		first_seen, last_seen, updated_at
+		first_seen, last_seen, kunya, how_we_met, updated_at
 		FROM contacts WHERE jid = ?`, jid)
 	c := &Contact{}
 	err := row.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName, &c.VerifiedName,
 		&c.IsBusiness, &c.StatusText, &c.StatusSetAt, &c.PictureID, &c.PictureURL,
-		&c.FirstSeen, &c.LastSeen, &c.UpdatedAt)
+		&c.FirstSeen, &c.LastSeen, &c.Kunya, &c.HowWeMet, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -84,13 +87,13 @@ func (s *Store) GetContacts(query string) ([]Contact, error) {
 		q := "%" + query + "%"
 		rows, err = s.DB.Query(`SELECT jid, lid, phone, name, push_name, business_name, verified_name,
 			is_business, status_text, status_set_at, picture_id, picture_url,
-			first_seen, last_seen, updated_at
+			first_seen, last_seen, kunya, how_we_met, updated_at
 			FROM contacts WHERE name LIKE ? OR push_name LIKE ? OR phone LIKE ? OR business_name LIKE ?
 			ORDER BY updated_at DESC`, q, q, q, q)
 	} else {
 		rows, err = s.DB.Query(`SELECT jid, lid, phone, name, push_name, business_name, verified_name,
 			is_business, status_text, status_set_at, picture_id, picture_url,
-			first_seen, last_seen, updated_at
+			first_seen, last_seen, kunya, how_we_met, updated_at
 			FROM contacts ORDER BY updated_at DESC`)
 	}
 	if err != nil {
@@ -102,7 +105,7 @@ func (s *Store) GetContacts(query string) ([]Contact, error) {
 		var c Contact
 		if err := rows.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName, &c.VerifiedName,
 			&c.IsBusiness, &c.StatusText, &c.StatusSetAt, &c.PictureID, &c.PictureURL,
-			&c.FirstSeen, &c.LastSeen, &c.UpdatedAt); err != nil {
+			&c.FirstSeen, &c.LastSeen, &c.Kunya, &c.HowWeMet, &c.UpdatedAt); err != nil {
 			return contacts, err
 		}
 		contacts = append(contacts, c)
@@ -175,5 +178,23 @@ func (s *Store) UpdateContactPicture(jid, pictureID string) error {
 	_, err := s.DB.Exec(`INSERT INTO contacts (jid, picture_id, updated_at) VALUES (?, ?, ?)
 		ON CONFLICT(jid) DO UPDATE SET picture_id = excluded.picture_id, updated_at = excluded.updated_at`,
 		jid, pictureID, now)
+	return err
+}
+
+// SetContactNotes stores the two things only you know about a person: the kunya
+// they are really addressed by, and how you came to know them.
+//
+// It writes ONLY those columns, so it can never disturb what sync owns. A
+// contact row may not exist yet — someone can be worth a note before WhatsApp
+// has told us anything about them — so it inserts when missing.
+func (s *Store) SetContactNotes(jid, kunya, howWeMet string) error {
+	now := time.Now().Unix()
+	_, err := s.DB.Exec(`INSERT INTO contacts (jid, kunya, how_we_met, first_seen, updated_at)
+		VALUES (?,?,?,?,?)
+		ON CONFLICT(jid) DO UPDATE SET
+			kunya = excluded.kunya,
+			how_we_met = excluded.how_we_met,
+			updated_at = excluded.updated_at`,
+		jid, kunya, howWeMet, now, now)
 	return err
 }

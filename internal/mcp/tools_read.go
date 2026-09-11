@@ -73,8 +73,12 @@ func toolSearchMessages() mcp.Tool {
 
 func toolFindContact() mcp.Tool {
 	return mcp.NewTool("wa_find_contact",
-		mcp.WithDescription("Search WhatsApp contacts by name, phone number, or JID. Returns matching contacts with all known identifiers."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Search term — matches against name, push_name, phone, business_name")),
+		mcp.WithDescription("Search WhatsApp contacts by name, phone number, JID, kunya, or by how the user met them. "+
+			"Results carry the user's OWN notes, which WhatsApp does not have and which are often the most useful "+
+			"thing about a person: `kunya` is the name they are actually addressed by (\"أبو فلان\"), and "+
+			"`how_we_met` says who introduced them, when and why. Read both before describing or writing to anyone, "+
+			"and use the kunya when it is how they are really called."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search term — matches name, push_name, phone, business_name, kunya and how_we_met")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
 		}),
@@ -350,11 +354,18 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	q := "%" + query + "%"
+	// kunya and how_we_met are the user's own notes, and they are the most
+	// useful thing here: WhatsApp knows a display name, but only the user knows
+	// that this is "أبو يمان" and that Abdullah sent him about the CVB file.
+	// Searching them too means the agent can find someone by how they were
+	// introduced, not just by name.
 	rows, err := s.db.Query(`SELECT jid, lid, phone, name, push_name, business_name,
-		is_business, status_text, first_seen, last_seen
+		is_business, status_text, COALESCE(kunya,''), COALESCE(how_we_met,''),
+		first_seen, last_seen
 		FROM contacts
 		WHERE name LIKE ? OR push_name LIKE ? OR phone LIKE ? OR business_name LIKE ? OR jid LIKE ?
-		ORDER BY last_seen DESC LIMIT 20`, q, q, q, q, q)
+		   OR kunya LIKE ? OR how_we_met LIKE ?
+		ORDER BY last_seen DESC LIMIT 20`, q, q, q, q, q, q, q)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
@@ -369,15 +380,20 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 		BusinessName string `json:"business_name,omitempty"`
 		IsBusiness   bool   `json:"is_business"`
 		StatusText   string `json:"status_text,omitempty"`
-		FirstSeen    int64  `json:"first_seen,omitempty"`
-		LastSeen     int64  `json:"last_seen,omitempty"`
+		// The user's own notes. Kunya is what they are actually called;
+		// HowWeMet is where the relationship came from.
+		Kunya     string `json:"kunya,omitempty"`
+		HowWeMet  string `json:"how_we_met,omitempty"`
+		FirstSeen int64  `json:"first_seen,omitempty"`
+		LastSeen  int64  `json:"last_seen,omitempty"`
 	}
 
 	var contacts []contact
 	for rows.Next() {
 		var c contact
 		if err := rows.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName,
-			&c.IsBusiness, &c.StatusText, &c.FirstSeen, &c.LastSeen); err != nil {
+			&c.IsBusiness, &c.StatusText, &c.Kunya, &c.HowWeMet,
+			&c.FirstSeen, &c.LastSeen); err != nil {
 			continue
 		}
 		contacts = append(contacts, c)
