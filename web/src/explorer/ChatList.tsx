@@ -83,7 +83,7 @@ export function ChatList({
   // Groups / @Mentions. Each is a cheap predicate over the chat row — no
   // backend filter, no fetch — so toggling is instant. Only meaningful in
   // the normal view; archived stays unfiltered.
-  type Filter = 'all' | 'unread' | 'groups' | 'meetings' | 'mentions' | 'drafts'
+  type Filter = 'all' | 'unread' | 'groups' | 'meetings' | 'intros' | 'mentions' | 'drafts'
   const [filter, setFilter] = useState<Filter>('all')
   // Chats with a meeting still ahead. Fetched once as a set rather than asked
   // per row, and refreshed when the chat list changes — meetings are created by
@@ -95,6 +95,22 @@ export function ChatList({
       .meetingChats()
       .then((jids) => {
         if (!cancelled) setMeetingChats(new Set(jids))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [chats.length])
+  // People met recently whose chat is still just an introduction. Computed
+  // live rather than stored, so it stays current as you meet people — the
+  // Intro label is what records the lasting answer.
+  const [introChats, setIntroChats] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    let cancelled = false
+    api
+      .introChats({ days: 90 })
+      .then((list) => {
+        if (!cancelled) setIntroChats(new Set(list.map((c) => c.jid)))
       })
       .catch(() => {})
     return () => {
@@ -141,15 +157,17 @@ export function ChatList({
     let mentions = 0
     let draftCount = 0
     let meetings = 0
+    let intros = 0
     for (const r of normalRows) {
       if ((r.chat.unread_count || 0) > 0) unread++
       if (isGroup(r.chat.jid)) groups++
       if ((r.chat.unread_mentions || 0) > 0) mentions++
       if (drafts.has(r.chat.jid)) draftCount++
       if (meetingChats.has(r.chat.jid)) meetings++
+      if (introChats.has(r.chat.jid)) intros++
     }
-    return { unread, groups, mentions, drafts: draftCount, meetings }
-  }, [normalRows, drafts, meetingChats])
+    return { unread, groups, mentions, drafts: draftCount, meetings, intros }
+  }, [normalRows, drafts, meetingChats, introChats])
 
   // Apply the active filter to normalRows. We deliberately don't touch
   // archivedRows — WA's archived view is its own world, always unfiltered.
@@ -163,6 +181,7 @@ export function ChatList({
       if (filter === 'unread') return (r.chat.unread_count || 0) > 0
       if (filter === 'groups') return isGroup(r.chat.jid)
       if (filter === 'meetings') return meetingChats.has(r.chat.jid)
+      if (filter === 'intros') return introChats.has(r.chat.jid)
       if (filter === 'mentions') return (r.chat.unread_mentions || 0) > 0
       if (filter === 'drafts') return drafts.has(r.chat.jid)
       return true
@@ -230,6 +249,13 @@ export function ChatList({
           {filterCounts.meetings > 0 && (
             <FilterPill id="meetings" current={filter} onPick={setFilter} count={filterCounts.meetings}>
               Meetings
+            </FilterPill>
+          )}
+          {/* People you met recently, where the chat is still an introduction
+              waiting to become something. */}
+          {filterCounts.intros > 0 && (
+            <FilterPill id="intros" current={filter} onPick={setFilter} count={filterCounts.intros}>
+              New intros
             </FilterPill>
           )}
           {filterCounts.mentions > 0 && (
@@ -322,6 +348,8 @@ export function ChatList({
                   ? 'No groups'
                   : filter === 'meetings'
                     ? 'No chats with an upcoming meeting'
+                    : filter === 'intros'
+                      ? 'No recent introductions'
                   : filter === 'mentions'
                     ? 'No unread mentions'
                     : filter === 'drafts'

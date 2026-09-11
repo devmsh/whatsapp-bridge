@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
@@ -265,4 +267,59 @@ func (s *Server) handleContactName(w http.ResponseWriter, r *http.Request, jid s
 	})
 
 	jsonOK(w, map[string]bool{"success": true})
+}
+
+// handleIntroChats lists recently-started direct chats that read like an
+// introduction — someone you just met, where the conversation has not yet
+// become a working relationship.
+//
+// This is a different axis from circles: a circle says which venture someone
+// belongs to, this says how far the relationship has got. It is computed live
+// rather than stored, so it stays current as you meet people; a label is what
+// records the lasting answer.
+//
+// GET /api/v2/contacts/intros?days=90&max=40&tag_id=4
+func (s *Server) handleIntroChats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	days := 90
+	if v := r.URL.Query().Get("days"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			days = n
+		}
+	}
+	maxMsgs := 40
+	if v := r.URL.Query().Get("max"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxMsgs = n
+		}
+	}
+	var tagID int64
+	if v := r.URL.Query().Get("tag_id"); v != "" {
+		tagID, _ = strconv.ParseInt(v, 10, 64)
+	}
+	// A single weak signal — a role word like "CEO" or "from Acme" — is not an
+	// introduction on its own; it matches ordinary business contacts too. Two
+	// points means at least one real intro phrase was found.
+	minScore := 2
+	if v := r.URL.Query().Get("min_score"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			minScore = n
+		}
+	}
+	since := time.Now().AddDate(0, 0, -days).Unix()
+	list, err := s.store.IntroChats(since, maxMsgs, tagID)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	out := make([]db.IntroChat, 0, len(list))
+	for _, c := range list {
+		if c.Score >= minScore {
+			out = append(out, c)
+		}
+	}
+	jsonOK(w, map[string]any{"count": len(out), "chats": out})
 }

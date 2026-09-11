@@ -98,6 +98,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/contacts", s.handleContacts)
 	s.mux.HandleFunc("/api/v2/contacts/check", s.handleContactsCheck)
 	s.mux.HandleFunc("/api/v2/contacts/tags", s.handleContactTagsMap)
+	s.mux.HandleFunc("/api/v2/contacts/intros", s.handleIntroChats)
 	s.mux.HandleFunc("/api/v2/contacts/", s.handleContactByJID)
 
 	// Tags

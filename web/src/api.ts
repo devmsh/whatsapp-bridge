@@ -495,6 +495,19 @@ export interface Meeting {
   circles?: Circle[]
 }
 
+// A recently-started chat that reads like an introduction — someone you just
+// met, before the relationship has a shape. A different axis from circles.
+export interface IntroChat {
+  jid: string
+  name: string
+  message_count: number
+  first_message_at: number
+  last_message_at?: number
+  score: number
+  signals: string[]
+  tagged: boolean
+}
+
 export interface CircleSuggestions {
   context: string
   suggestions: MemberSuggestion[]
@@ -1732,6 +1745,14 @@ export const api = {
   },
   // Chats that have a meeting still ahead — one call for the whole list,
   // rather than asking per chat.
+  introChats: async (opts: { days?: number; tagId?: number } = {}): Promise<IntroChat[]> => {
+    const q = new URLSearchParams()
+    q.set('days', String(opts.days ?? 90))
+    if (opts.tagId) q.set('tag_id', String(opts.tagId))
+    const res = await fetch('/api/v2/contacts/intros?' + q)
+    const d = await res.json()
+    return d?.chats || []
+  },
   meetingChats: async (): Promise<string[]> => {
     const res = await fetch('/api/v2/meetings/chats')
     const d = await res.json()
