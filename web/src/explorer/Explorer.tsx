@@ -233,17 +233,17 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     api.unassignedGroups().then((r) => setUnassignedCount(r.count || 0)).catch(() => {})
   }, [])
 
-  // Keep allTasks fresh whenever the Tasks tab is visible, tasks change, or
-  // Focus Mode is active (its task board needs allTasks too, even though its
-  // own `tab` is not 'tasks').
-  const focusModeActive = focusCircleId != null
+  // Keep allTasks fresh. Loaded on mount, not only when the Tasks tab opens:
+  // the sidebar badge counts open tasks out of this list, so gating the load
+  // on the tab left the badge blank until you clicked Tasks, and it then
+  // appeared out of nowhere. The Meetings badge already loads its count up
+  // front for the same reason.
   useEffect(() => {
-    if (tab !== 'tasks' && !focusModeActive) return
     api
       .tasks({})
       .then((t) => setAllTasks(t || []))
       .catch(() => setAllTasks([]))
-  }, [tab, taskVersion, focusModeActive])
+  }, [taskVersion])
 
   const reloadTags = useCallback(() => {
     api.tags().then((t) => setTags(t || [])).catch(() => {})
