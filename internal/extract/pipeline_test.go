@@ -2,6 +2,7 @@ package extract_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -16,6 +17,9 @@ type fakeModel struct {
 	tasks       []extract.ProposedTask
 	completions []extract.ProposedCompletion
 	calls       int
+	// rejectTitles are the titles the second opinion says are not work.
+	rejectTitles map[string]bool
+	judged       int
 }
 
 func (f *fakeModel) Name() string { return "fake:test" }
@@ -23,6 +27,17 @@ func (f *fakeModel) Name() string { return "fake:test" }
 func (f *fakeModel) Extract(_ context.Context, _ extract.ExtractInput) (extract.ExtractOutput, error) {
 	f.calls++
 	return extract.ExtractOutput{Tasks: f.tasks}, nil
+}
+
+func (f *fakeModel) Judge(_ context.Context, in extract.JudgeInput) (extract.JudgeOutput, error) {
+	f.judged++
+	var out extract.JudgeOutput
+	for i, it := range in.Items {
+		out.Verdicts = append(out.Verdicts, extract.JudgeVerdict{
+			Index: i, IsTask: !f.rejectTitles[it.Title],
+		})
+	}
+	return out, nil
 }
 
 func (f *fakeModel) CheckCompletion(_ context.Context, _ extract.CompletionInput) (extract.CompletionOutput, error) {
@@ -275,3 +290,69 @@ func TestDoneReplyClosesTaskWithoutAModel(t *testing.T) {
 		t.Errorf("status = %q, want done", got.Status)
 	}
 }
+
+// TestSecondOpinionCanDropATask — code checks everything code can check, and
+// what survives is still a judgement call: is "send me the pin" work? So the
+// last word is the model's, asked a different question from the first one.
+func TestSecondOpinionCanDropATask(t *testing.T) {
+	st := newStore(t)
+	chat := "team@g.us"
+	seedChat(t, st, chat)
+
+	model := &fakeModel{
+		tasks: []extract.ProposedTask{{
+			Title: "جهز العقد", EvidenceID: "#REQ",
+			Evidence: "جهز العقد قبل الخميس", Confidence: 0.9,
+		}},
+		rejectTitles: map[string]bool{"جهز العقد": true},
+	}
+	res, err := extract.Run(context.Background(),
+		extract.Deps{Store: st, Extractor: model, Loc: riyadh(t)},
+		extract.RunSpec{ChatJID: chat, RunID: "run-1"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if model.judged == 0 {
+		t.Fatalf("the second opinion was never asked")
+	}
+	if res.Verified != 0 {
+		t.Errorf("the judge said no; %d task(s) were kept anyway", res.Verified)
+	}
+	if res.Rejections[extract.RejectNotWork] != 1 {
+		t.Errorf("the rejection should be recorded as not_work, got %v", res.Rejections)
+	}
+	if tasks, _ := st.ListTasks("", ""); len(tasks) != 0 {
+		t.Errorf("%d task(s) were written", len(tasks))
+	}
+}
+
+// TestSecondOpinionFailsOpen — losing real work because a second model call
+// broke is worse than letting a doubtful task reach a review queue that exists
+// precisely to catch it.
+func TestSecondOpinionFailsOpen(t *testing.T) {
+	st := newStore(t)
+	chat := "team@g.us"
+	seedChat(t, st, chat)
+
+	model := &brokenJudge{fakeModel{tasks: []extract.ProposedTask{{
+		Title: "جهز العقد", EvidenceID: "#REQ",
+		Evidence: "جهز العقد قبل الخميس", Confidence: 0.9,
+	}}}}
+	res, err := extract.Run(context.Background(),
+		extract.Deps{Store: st, Extractor: model, Loc: riyadh(t)},
+		extract.RunSpec{ChatJID: chat, RunID: "run-1"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Verified != 1 {
+		t.Errorf("a broken judge must not swallow the task, got %d", res.Verified)
+	}
+}
+
+type brokenJudge struct{ fakeModel }
+
+func (b *brokenJudge) Judge(context.Context, extract.JudgeInput) (extract.JudgeOutput, error) {
+	return extract.JudgeOutput{}, errAsking
+}
+
+var errAsking = errors.New("model unreachable")

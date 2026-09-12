@@ -53,9 +53,12 @@ func ResolveOwner(v Verified, roster []RosterPerson) (jid string, src OwnerSourc
 		}
 	}
 
-	// 2. A request written as a reply is aimed at whoever it answers.
+	// 2. A request written as a reply is aimed at whoever it answers — unless
+	// it answers YOUR OWN message. People reply to themselves constantly, to
+	// add a thought to what they just said, and reading that as "you own this"
+	// made the person asking for the work the person who must do it.
 	if line.ReplyTo != "" && looksLikeRequest(text) {
-		if jid := replyTargetJID(v, line.ReplyTo); jid != "" {
+		if jid := replyTargetJID(v, line.ReplyTo); jid != "" && !sameParty(jid, line.SenderJID) {
 			return jid, OwnerFromReply
 		}
 	}
@@ -270,4 +273,23 @@ func westernDigits(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// sameParty compares two identities by their digits, so a LID and a phone
+// number for one person do not read as two people.
+func sameParty(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return partyDigits(a) == partyDigits(b)
+}
+
+func partyDigits(jid string) string {
+	if i := strings.IndexAny(jid, "@:"); i >= 0 {
+		jid = jid[:i]
+	}
+	return jid
 }

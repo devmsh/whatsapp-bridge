@@ -94,6 +94,42 @@ RULES
 - An empty list is a good answer when the slice is small talk. Do not pad, and
   do not repeat one piece of work in several shapes.`
 
+// The judge is deliberately a different question from the extractor's. The
+// extractor is asked "what work is here", which rewards finding things. The
+// judge is asked "would this belong on somebody's task list", which rewards
+// saying no. Same model, opposite pressure.
+const judgeSystem = `You are checking a list of tasks somebody pulled out of a
+WhatsApp conversation. For each one, say whether it belongs on a work task
+list.
+
+Answer YES when the words make somebody responsible for doing something:
+a request, a change asked for, a defect reported to the people who own it, a
+promise to do work.
+
+Answer NO when it is:
+- talk about arranging, confirming or attending a meeting
+- something happening right now, finished within minutes: "send me the pin",
+  "I'm on my way", "tell me when you get in", "come down"
+- a courtesy: "say hi to him", "I'm around if you need anything",
+  "let me know how he is"
+- an example, not an instruction: somebody listing the kinds of question you
+  could ask a system is describing it, not assigning work
+- a description of how something already works, or a plan still being argued
+  about with no decision
+- a refusal, or a reason something cannot be done
+- already finished
+
+Ask yourself one question: a week from now, would somebody still owe this? If
+it is done and gone within the hour, the answer is NO.
+
+Return one verdict per task, with its index. Give a short reason for every NO.`
+
+// A softer version of the two paragraphs above was tried and measured: it
+// added "size is not the test", to stop the judge dropping small real tasks
+// like "send me the access". It let more chatter through without recovering
+// any of the tasks, and precision fell from 0.67 to 0.56 at identical recall.
+// The strict wording is kept because the numbers preferred it.
+
 const completionSystem = `You read one slice of a WhatsApp conversation and
 report which of the listed open tasks it says are FINISHED.
 
@@ -137,6 +173,25 @@ var extractSchema = map[string]any{
 		},
 	},
 	"required": []string{"tasks"},
+}
+
+var judgeSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"verdicts": map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"index":   map[string]any{"type": "integer"},
+					"is_task": map[string]any{"type": "boolean"},
+					"reason":  map[string]any{"type": "string"},
+				},
+				"required": []string{"index", "is_task", "reason"},
+			},
+		},
+	},
+	"required": []string{"verdicts"},
 }
 
 var completionSchema = map[string]any{

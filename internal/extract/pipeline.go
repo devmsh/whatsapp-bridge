@@ -50,6 +50,12 @@ type Result struct {
 	Outcomes []Outcome
 	// ChunkMS is how long each extract call took, for the median latency.
 	ChunkMS []int64
+	// FailedChunks counts model calls that errored. A run that swallows these
+	// looks exactly like a model that found nothing, which is how a wrong
+	// model name once scored "0 precision" instead of "not installed".
+	FailedChunks int
+	// LastError is the most recent chunk failure, so a caller can say why.
+	LastError string
 }
 
 // Outcome is one proposal and the decision made about it.
@@ -178,11 +184,23 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 			// One bad chunk must not cost the whole run, and the watermark has
 			// not moved, so the next run will see these messages again.
 			say("chunk %d failed: %v", chunk.Index, err)
+			res.FailedChunks++
+			res.LastError = err.Error()
 			continue
 		}
 		res.ChunkMS = append(res.ChunkMS, time.Since(started).Milliseconds())
 
 		verified, rejected := 0, 0
+		// Survivors of every code check, held back for the second opinion.
+		type survivor struct {
+			p        ProposedTask
+			v        Verified
+			ownerJID string
+			dueAt    int64
+			fwdChat  string
+			fwdMsg   string
+		}
+		var survivors []survivor
 		for _, p := range out.Tasks {
 			res.Proposed++
 			v, reason, ok := Verify(chunk, p)
@@ -244,22 +262,51 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 			dueAt := ResolveDue(v.Task.DueText, v.Line.TS, d.Loc)
 			fwdChat, fwdMsg := ForwardedOrigin(d.Store, v.Line, spec.ChatJID, forwardWindow)
 
-			verified++
-			res.Verified++
 			seen[v.Line.MessageID] = true
 			titles = append(titles, v.Task.Title)
+			survivors = append(survivors, survivor{p, v, ownerJID, dueAt, fwdChat, fwdMsg})
+		}
+
+		// The second opinion. Code has checked everything code can check; what
+		// is left is the judgement call of whether these are really work.
+		items := make([]JudgeItem, 0, len(survivors))
+		for _, sv := range survivors {
+			items = append(items, JudgeItem{
+				Title: sv.v.Task.Title, Evidence: sv.v.Task.Evidence,
+				EvidenceID: sv.v.Line.MessageID,
+			})
+		}
+		keep := judgeItems(ctx, d, chunk, items, say)
+
+		for i, sv := range survivors {
+			if !keep[i] {
+				rejected++
+				res.Rejected++
+				res.Rejections[RejectNotWork]++
+				res.Outcomes = append(res.Outcomes, Outcome{
+					ChunkIndex: chunk.Index, Title: sv.v.Task.Title,
+					EvidenceID: sv.v.Line.MessageID, Evidence: sv.v.Task.Evidence,
+					Confidence: sv.p.Confidence, Reason: RejectNotWork,
+				})
+				if !d.DryRun {
+					RecordRejection(d.Store, meta, sv.p, RejectNotWork)
+				}
+				continue
+			}
+			verified++
+			res.Verified++
 			res.Outcomes = append(res.Outcomes, Outcome{
-				ChunkIndex: chunk.Index, Title: v.Task.Title, EvidenceID: v.Line.MessageID,
-				Evidence: v.Task.Evidence, Confidence: p.Confidence, Kept: true,
-				OwnerJID: ownerJID, DueAt: dueAt,
-				Resolvable: len(v.Line.Mentions) > 0 || v.Line.ReplyTo != "",
+				ChunkIndex: chunk.Index, Title: sv.v.Task.Title, EvidenceID: sv.v.Line.MessageID,
+				Evidence: sv.v.Task.Evidence, Confidence: sv.p.Confidence, Kept: true,
+				OwnerJID: sv.ownerJID, DueAt: sv.dueAt,
+				Resolvable: len(sv.v.Line.Mentions) > 0 || sv.v.Line.ReplyTo != "",
 			})
 			if d.DryRun {
 				continue
 			}
-			task, err := Persist(d.Store, meta, v, ownerJID, dueAt, fwdChat, fwdMsg)
+			task, err := Persist(d.Store, meta, sv.v, sv.ownerJID, sv.dueAt, sv.fwdChat, sv.fwdMsg)
 			if err != nil {
-				say("could not save %q: %v", p.Title, err)
+				say("could not save %q: %v", sv.p.Title, err)
 				continue
 			}
 			res.Tasks = append(res.Tasks, *task)
@@ -426,4 +473,36 @@ func sameWorkAlready(titles []string, title string) bool {
 		}
 	}
 	return false
+}
+
+// judgeItems asks the model whether each surviving proposal is really work,
+// and returns one decision per item.
+//
+// It fails open: if the judge call errors or answers about the wrong things,
+// everything is kept. The alternative — dropping work because a second call
+// timed out — loses real tasks silently, and the review queue already exists
+// to catch what gets through.
+func judgeItems(ctx context.Context, d Deps, chunk Chunk, items []JudgeItem,
+	say func(string, ...any)) []bool {
+
+	keep := make([]bool, len(items))
+	for i := range keep {
+		keep[i] = true
+	}
+	if len(items) == 0 {
+		return keep
+	}
+
+	out, err := d.Extractor.Judge(ctx, JudgeInput{Chunk: chunk, Items: items})
+	if err != nil {
+		say("chunk %d: second opinion unavailable, keeping all %d (%v)",
+			chunk.Index, len(items), err)
+		return keep
+	}
+	for _, v := range out.Verdicts {
+		if v.Index >= 0 && v.Index < len(keep) {
+			keep[v.Index] = v.IsTask
+		}
+	}
+	return keep
 }

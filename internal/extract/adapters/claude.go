@@ -51,6 +51,15 @@ func (c *Claude) Extract(ctx context.Context, in extract.ExtractInput) (extract.
 	return out, err
 }
 
+func (c *Claude) Judge(ctx context.Context, in extract.JudgeInput) (extract.JudgeOutput, error) {
+	if len(in.Items) == 0 {
+		return extract.JudgeOutput{}, nil
+	}
+	var out extract.JudgeOutput
+	err := c.ask(ctx, judgeSystem, judgeUser(in), judgeSchema, &out)
+	return out, err
+}
+
 func (c *Claude) CheckCompletion(ctx context.Context, in extract.CompletionInput) (extract.CompletionOutput, error) {
 	if len(in.Open) == 0 {
 		return extract.CompletionOutput{}, nil

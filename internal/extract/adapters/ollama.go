@@ -55,6 +55,17 @@ func (o *Ollama) Extract(ctx context.Context, in extract.ExtractInput) (extract.
 	return out, nil
 }
 
+func (o *Ollama) Judge(ctx context.Context, in extract.JudgeInput) (extract.JudgeOutput, error) {
+	if len(in.Items) == 0 {
+		return extract.JudgeOutput{}, nil
+	}
+	var out extract.JudgeOutput
+	if err := o.chat(ctx, judgeSystem, judgeUser(in), judgeSchema, &out); err != nil {
+		return extract.JudgeOutput{}, err
+	}
+	return out, nil
+}
+
 func (o *Ollama) CheckCompletion(ctx context.Context, in extract.CompletionInput) (extract.CompletionOutput, error) {
 	if len(in.Open) == 0 {
 		return extract.CompletionOutput{}, nil

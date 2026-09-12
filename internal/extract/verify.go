@@ -26,6 +26,7 @@ const (
 	RejectMeeting      RejectReason = "meeting"        // arranging a meeting, which has its own module
 	RejectLowScore     RejectReason = "low_confidence" //
 	RejectTooShort     RejectReason = "too_short"      // too few words to name work
+	RejectNotWork      RejectReason = "not_work"       // the second opinion said no
 )
 
 // Verified is a proposal that survived checking, with the line it came from.

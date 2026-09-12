@@ -100,6 +100,39 @@ type ExtractOutput struct {
 	Tasks []ProposedTask `json:"tasks"`
 }
 
+// JudgeItem is a proposal that survived every code check, put back to the
+// model for a second opinion.
+//
+// Why a second pass at all: five rounds of code rules moved precision from
+// 0.46 to 0.51, and four different models all landed between 0.32 and 0.42.
+// What they get wrong is not a pattern — it is the judgement call of whether
+// "send me the pin" or "I'm around if you need anything" is work. Confidence
+// does not separate it either: at a floor of 1.0 precision only reaches 0.71
+// and recall falls to 0.27. Asking plainly, once, about a short list is the
+// remaining lever.
+type JudgeItem struct {
+	Title      string `json:"title"`
+	Evidence   string `json:"evidence"`
+	EvidenceID string `json:"evidence_id"`
+}
+
+type JudgeInput struct {
+	Chunk Chunk
+	Items []JudgeItem
+}
+
+// JudgeVerdict answers about Items[Index]. Index rather than id, because two
+// proposals can share an evidence message.
+type JudgeVerdict struct {
+	Index  int    `json:"index"`
+	IsTask bool   `json:"is_task"`
+	Reason string `json:"reason"`
+}
+
+type JudgeOutput struct {
+	Verdicts []JudgeVerdict `json:"verdicts"`
+}
+
 type CompletionInput struct {
 	Chunk Chunk
 	Open  []OpenTask
@@ -119,5 +152,8 @@ type Extractor interface {
 	// "ollama:qwen2.5:14b".
 	Name() string
 	Extract(ctx context.Context, in ExtractInput) (ExtractOutput, error)
+	// Judge is the second opinion on what Extract proposed, after code has
+	// checked everything code can check. One call for the whole chunk.
+	Judge(ctx context.Context, in JudgeInput) (JudgeOutput, error)
 	CheckCompletion(ctx context.Context, in CompletionInput) (CompletionOutput, error)
 }

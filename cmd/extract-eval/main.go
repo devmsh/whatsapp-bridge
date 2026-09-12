@@ -160,6 +160,7 @@ func main() {
 		rows = append(rows, score(store, ex, cases, *verbose))
 	}
 	printTable(rows)
+	printConfidenceSweep(rows)
 }
 
 // ---------------------------------------------------------------- scoring
@@ -183,9 +184,53 @@ type scoreRow struct {
 	BadQuotes    int // model invented a quote (caught by verify)
 	Unverifiable int // kept task whose quote is not in the raw message
 	Failed       int // chats that could not be read at all
+	FailedChunks int // model calls that errored
+	LastError    string
 
 	MS []int64
+
+	// cases keeps each run so the same numbers can be recomputed at a
+	// different confidence floor without asking the model again.
+	cases []scoredCase
 }
+
+type scoredCase struct {
+	c   evalCase
+	res extract.Result
+}
+
+// atConfidence rescores this engine counting only proposals the model was at
+// least min sure of. The model is asked to spread its range; this says whether
+// the range is worth anything.
+func (r scoreRow) atConfidence(min float64) scoreRow {
+	out := scoreRow{Engine: r.Engine, Cases: r.Cases, Chunks: r.Chunks, MS: r.MS}
+	for _, sc := range out.casesOf(r) {
+		out.Expected += len(sc.c.Expected)
+		taken := make([]bool, len(sc.c.Expected))
+		for _, o := range sc.res.Outcomes {
+			if !o.Kept || o.Confidence < min {
+				continue
+			}
+			out.Kept++
+			idx := matchExpected(sc.c.Expected, taken, o)
+			if idx < 0 {
+				continue
+			}
+			taken[idx] = true
+			out.Matched++
+			out.Found++
+			if want := sc.c.Expected[idx].OwnerJID; want != "" && o.Resolvable {
+				out.OwnerAsked++
+				if sameJID(want, o.OwnerJID) {
+					out.OwnerRight++
+				}
+			}
+		}
+	}
+	return out
+}
+
+func (scoreRow) casesOf(r scoreRow) []scoredCase { return r.cases }
 
 func (r scoreRow) precision() float64 {
 	if r.Kept == 0 {
@@ -218,6 +263,9 @@ func (r scoreRow) p50() int64 {
 }
 
 func (r scoreRow) passes() bool {
+	if r.FailedChunks > 0 {
+		return false
+	}
 	return r.precision() >= barPrecision && r.recall() >= barRecall &&
 		r.ownerOK() >= barOwner && r.Unverifiable == 0 && r.p50() <= barP50MS
 }
@@ -237,7 +285,12 @@ func score(store *db.Store, ex extract.Extractor, cases []evalCase, verbose bool
 			continue
 		}
 
+		row.cases = append(row.cases, scoredCase{c: c, res: res})
 		row.Chunks += res.Chunks
+		row.FailedChunks += res.FailedChunks
+		if res.LastError != "" {
+			row.LastError = res.LastError
+		}
 		row.MS = append(row.MS, res.ChunkMS...)
 		row.Expected += len(c.Expected)
 		row.BadQuotes += res.Rejections[extract.RejectBadQuote]
@@ -412,23 +465,53 @@ func printTable(rows []scoreRow) {
 		return
 	}
 	fmt.Println()
-	fmt.Printf("%-24s %6s %8s %6s %10s %7s %9s %11s %13s %8s  %s\n",
+	fmt.Printf("%-24s %6s %8s %6s %10s %7s %13s %11s %13s %8s  %s\n",
 		"engine", "chunks", "expected", "kept", "precision", "recall",
 		"owner_ok", "bad_quotes", "unverifiable", "p50_ms", "bar")
 	for _, r := range rows {
 		verdict := "FAIL"
-		if r.passes() {
+		switch {
+		case r.FailedChunks == r.Chunks && r.Chunks > 0:
+			// Not a bad model. No model.
+			verdict = "BROKEN"
+		case r.passes():
 			verdict = "pass"
 		}
-		fmt.Printf("%-24s %6d %8d %6d %10.2f %7.2f %9.2f %11d %13d %8d  %s\n",
+		// The owner share is printed with the number it is out of. An owner
+		// can only be scored where the message carried a mention or a reply,
+		// and "0.50" over two cases is not a measurement.
+		owner := fmt.Sprintf("%.2f (of %d)", r.ownerOK(), r.OwnerAsked)
+		fmt.Printf("%-24s %6d %8d %6d %10.2f %7.2f %13s %11d %13d %8d  %s\n",
 			r.Engine, r.Chunks, r.Expected, r.Kept, r.precision(), r.recall(),
-			r.ownerOK(), r.BadQuotes, r.Unverifiable, r.p50(), verdict)
+			owner, r.BadQuotes, r.Unverifiable, r.p50(), verdict)
 	}
 	fmt.Printf("\nbar: precision >= %.2f, recall >= %.2f, owner >= %.2f, unverifiable = 0, p50 <= %d ms\n",
 		barPrecision, barRecall, barOwner, barP50MS)
 	for _, r := range rows {
 		if r.Failed > 0 {
 			fmt.Printf("note: %s could not read %d case(s)\n", r.Engine, r.Failed)
+		}
+		if r.FailedChunks > 0 {
+			fmt.Printf("note: %s failed on %d of %d chunk(s) — last error: %s\n",
+				r.Engine, r.FailedChunks, r.Chunks, r.LastError)
+		}
+	}
+}
+
+// printConfidenceSweep shows what the same run scores if low-confidence
+// proposals are dropped. The engine keeps everything above MinConfidence; this
+// says whether raising that floor would buy precision worth the recall.
+func printConfidenceSweep(rows []scoreRow) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Printf("\nIf low-confidence proposals were dropped:\n")
+	fmt.Printf("%-42s %6s %6s %10s %7s\n", "engine", "floor", "kept", "precision", "recall")
+	for _, r := range rows {
+		for _, min := range []float64{0.4, 0.6, 0.8, 1.0} {
+			a := r.atConfidence(min)
+			fmt.Printf("%-42s %6.1f %6d %10.2f %7.2f\n",
+				r.Engine, min, a.Kept, a.precision(), a.recall())
 		}
 	}
 }
