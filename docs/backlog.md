@@ -32,6 +32,17 @@ Size: L
 Added: 2026-09-12
 Depends on: a bigger golden set
 
+## Escalate low-confidence chunks to Claude
+
+Why: keep local as the default and spend subscription quota only where the
+local model is unsure (confidence < 0.6 or verify rejected most proposals).
+Why now: it is one of the untried levers for the quality bar, and the Claude
+chunk adapter (`adapters/claude.go`) is already built.
+Where: `internal/extract/pipeline.go`; `internal/extract/adapters/claude.go`.
+Size: S
+Added: 2026-09-12
+Depends on: nothing
+
 ## Meetings extraction on the local engine
 
 Why: the meetings backfill runs on the Claude subscription and takes hours.
@@ -41,7 +52,8 @@ Where: `agent/extract-meetings.mjs` → `internal/extract` with a meetings
 schema; keep the join-code matcher (`MeetingLinkCode`) as the cross-chat key.
 Size: M
 Added: 2026-09-12
-Depends on: task extraction engine, phase 1 passed the quality bar
+Depends on: the engine passing the quality bar (see "Reach the extraction
+quality bar")
 
 ## Digest, briefing, drafts and profiles on the local model
 
@@ -51,7 +63,7 @@ Where: `agent/circle-digest.mjs`, `briefing.mjs`, `draft-reply.mjs`,
 `profile.mjs` → calls through `internal/extract/adapters`.
 Size: M
 Added: 2026-09-12
-Depends on: task extraction engine (the adapter port)
+Depends on: nothing
 
 ## Embedding-based duplicate detection
 
@@ -62,17 +74,7 @@ Where: `internal/extract/dedupe.go`; Ollama `POST /api/embed`; store vectors
 per task in a new table.
 Size: M
 Added: 2026-09-12
-Depends on: task extraction engine
-
-## Escalate low-confidence chunks to Claude
-
-Why: keep local as the default and spend subscription quota only where the
-local model is unsure (confidence < 0.6 or verify rejected most proposals).
-Where: `internal/extract/pipeline.go`; the Claude chunk adapter already
-exists after phase 1.
-Size: S
-Added: 2026-09-12
-Depends on: task extraction engine, eval numbers showing where local is weak
+Depends on: nothing
 
 ## Stop tracking the 14 MB `whatsapp-mcp` binary in git
 
