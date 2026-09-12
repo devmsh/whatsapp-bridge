@@ -327,6 +327,100 @@ chats, stored in `store/eval/` which is gitignored):
 `go run ./cmd/extract-eval` prints these per adapter and per model so a model
 upgrade is a measured decision, not a hope.
 
+### Measured, 2026-09-12
+
+Golden set: 7 slices of real chats, 42 chunks, 37 tasks labelled by hand.
+Arabic-heavy, a mix of groups and direct chats, work and small talk. One slice
+(a friend, no work in it at all) is there to measure precision, not recall.
+The set lives in `store/eval/` and is not committed: it is real chat text.
+
+The build order was measure, fix, measure again. qwen2.5:14b through five
+rounds:
+
+| Round | What changed | Precision | Recall | Owner | p50 |
+|---|---|---|---|---|---|
+| 1 | as designed | 0.46 | 0.35 | 0.55 | 14.8 s |
+| 2 | bug reports count as tasks; 5k chunks | 0.37 | 0.51 | 0.75 | 12.5 s |
+| 3 | context lines may produce tasks | 0.40 | 0.51 | 0.75 | 9.6 s |
+| 4 | short quotes and more past-tense verbs | 0.51 | 0.54 | 0.75 | 9.7 s |
+| 5 | 2.6k chunks; misfiled quotes repaired | 0.38 | 0.62 | 1.00 | 9.0 s |
+
+Then across models, same golden set, same prompts:
+
+| Model | Precision | Recall | Owner | Bad quotes | p50 |
+|---|---|---|---|---|---|
+| qwen2.5:14b | 0.40 | 0.62 | 1.00 | 11 | 8.7 s |
+| qwen3-coder:30b | 0.69 | 0.30 | 0.33 | 2 | 1.0 s |
+| command-r7b-arabic | 0.32 | 0.62 | 0.50 | 11 | 7.4 s |
+| qwen3:30b-a3b-instruct-2507 | 0.42 | 0.65 | 0.60 | 8 | 4.9 s |
+
+Four models within ten points of each other on precision said the problem was
+not the model. Nor was it confidence — dropping everything the model was less
+than fully sure of reached 0.71 precision at 0.27 recall, which is not a
+trade worth making:
+
+| Confidence floor | Precision | Recall |
+|---|---|---|
+| 0.4 (as shipped) | 0.42 | 0.65 |
+| 0.8 | 0.47 | 0.59 |
+| 1.0 | 0.71 | 0.27 |
+
+So a second model call was added: the same model, asked the opposite question
+(§4a). With it:
+
+| Model | Precision | Recall | Bad quotes | p50 |
+|---|---|---|---|---|
+| qwen2.5:14b | 0.54 | 0.51 | 11 | 9.1 s |
+| **qwen3:30b-a3b-instruct-2507** | **0.65** | **0.54** | 8 | **4.2 s** |
+
+qwen3:30b-a3b-instruct-2507 is the default, on those numbers. It is a mixture
+of experts: 30B parameters, 3B of them active per token, so it is twice as
+fast as the 14B dense model while scoring better on everything.
+
+Reading of the result:
+
+- **Owner resolution and quote checking are solved.** Owner is 1.00 on
+  qwen2.5:14b, and no task has ever reached the database with a quote that is
+  not in the message it names. Both are code, not the model, which is why they
+  behave.
+- **Latency is a non-issue.** Every model is far inside the 30 s budget.
+- **Precision is the open problem, and it is judgement, not rules.** Five
+  rounds of code rules moved it from 0.46 to 0.51 and then smaller chunks
+  traded it back down for recall. What remains is the model deciding whether
+  "send me the pin", "I'm around if you need anything" and a list of six
+  example questions are work. No pattern separates those from real requests.
+- **The precision/recall trade is the chunk size.** Smaller chunks find more
+  work and more noise, in roughly equal measure.
+
+### The bar is not met
+
+Precision 0.65 against a bar of 0.85; recall 0.54 against 0.75. Quotes and
+latency pass; the owner sample is too small to call either way — only 4 of the
+37 labelled tasks sit on a message carrying a mention or a reply, which is all
+an owner can honestly be resolved from.
+
+What is known about the gap:
+
+- It is not the model. Four models, ten points apart.
+- It is not confidence. The range barely separates good from bad.
+- It is not code rules. Five rounds bought four points.
+- A second opinion bought twenty-three points, which is the largest single
+  move anything has made, and the same lever a third pass would pull again
+  with diminishing returns.
+
+What this means in practice: every extracted task lands as `pending_review`
+(§8). At 0.65 precision a reviewer keeps about two of every three they see.
+That is a working review queue, and far better than the agent it replaces —
+but it is not the unattended accuracy the bar was written for, and the bar
+should not be quietly lowered to match what was built.
+
+Three caveats on the numbers, stated so they are not read as better than they
+are. The golden set is labelled by one reader, and perhaps one in six "extra"
+tasks is defensible work the labels do not list — so true precision is a
+little better than 0.65. 37 tasks is a small set: one slice moves recall by
+two points. And the whole set is Arabic-heavy chats from a single 10-week
+window, which is the real traffic but not all of it.
+
 ### Feedback loop
 
 Every accept/reject in the review queue is kept (§8). Rejected evidence

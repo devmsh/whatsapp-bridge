@@ -28,7 +28,11 @@ const (
 	// The default is local: no quota, no network, and every answer is checked
 	// afterwards anyway.
 	defaultEngine = engineOllama
-	defaultModel  = "qwen2.5:14b"
+	// Chosen by measurement, not by size. Against the hand-labelled set this
+	// model scores 0.65 precision and 0.54 recall where qwen2.5:14b scores
+	// 0.54 and 0.51 — and it is twice as fast, because only 3B of its 30B
+	// parameters are active per token. See cmd/extract-eval.
+	defaultModel = "qwen3:30b-a3b-instruct-2507-q4_K_M"
 )
 
 // extractorFor builds the engine named in settings, unless the caller asked
@@ -143,8 +147,14 @@ func (s *Server) runCircleExtraction(ctx context.Context, run *Run, circleID int
 }
 
 func summarise(engine string, r extract.Result) string {
+	// Proposed = kept + dropped + deduped. Leaving the last one out made the
+	// line look like it had lost count.
+	deduped := r.Rejections["duplicate"] + r.Rejections["same_work"]
 	out := fmt.Sprintf("%s: %d proposed, %d kept, %d dropped across %d chunk(s)",
 		engine, r.Proposed, r.Verified, r.Rejected, r.Chunks)
+	if deduped > 0 {
+		out += fmt.Sprintf("; %d already said elsewhere", deduped)
+	}
 	if r.Completions > 0 {
 		out += fmt.Sprintf("; %d marked done", r.Completions)
 	}

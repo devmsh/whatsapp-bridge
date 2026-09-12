@@ -3,6 +3,35 @@
 Ideas we decided not to do now. Top = most valuable next. One idea = one
 block. When an idea is done or dropped, delete its block.
 
+## Grow the task-extraction golden set
+
+Why: the set is 7 slices, 37 tasks, labelled by one reader, all from one
+10-week window. A single slice moves recall by two points, and only 4 tasks
+sit on a message with a mention or reply, so owner accuracy cannot be measured
+at all. Every number in the design's Evidence section rests on this.
+Where: `store/eval/` (gitignored). `go run ./cmd/extract-eval -label "<chat>"
+-from <date> -to <date>` prints a slice and writes the skeleton to fill in.
+Four unlabelled slices are already waiting in `store/eval-unlabelled/`.
+Size: M
+Added: 2026-09-12
+Depends on: nothing
+
+## Reach the extraction quality bar, or agree a lower one
+
+Why: the engine scores 0.65 precision and 0.54 recall against a bar of 0.85
+and 0.75 (design §7). Known: it is not the model (four are within ten points),
+not confidence (the range barely separates), and not code rules (five rounds
+bought four points). The second-opinion call bought twenty-three points and is
+the only lever that has moved it. Options not yet tried: a third pass on what
+survives; sending only the doubtful chunks to Claude; merging bursts of
+messages from one sender into one line so a list of examples cannot become six
+tasks. Or accept the number: every task lands in a review queue, and two in
+three being right is a working queue.
+Where: `internal/extract/`, measured by `cmd/extract-eval`
+Size: L
+Added: 2026-09-12
+Depends on: a bigger golden set
+
 ## Meetings extraction on the local engine
 
 Why: the meetings backfill runs on the Claude subscription and takes hours.
