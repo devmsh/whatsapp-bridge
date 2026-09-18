@@ -61,6 +61,10 @@ func (l *meetingModelSlot) heldBy() string {
 // window a meeting is followed for.
 const maxRefreshPasses = 50
 
+// engineDownAfterChats is how many chats in a row may fail on every call
+// before the run decides the engine itself is down and stops.
+const engineDownAfterChats = 3
+
 // recentMeetingWindow is how far back the first, fast round of a refresh looks.
 const recentMeetingWindow = 14 * 24 * 3600
 
@@ -185,14 +189,15 @@ func (m *MeetingRefresher) doRun(ctx context.Context, run *Run, chats []string) 
 	}
 	deps := extract.UpdateDeps{Store: m.s.store, Updater: updater, Loc: extractLocation()}
 
-	var calls, changes int
+	var calls, changes, failed, deadChats int
+	engineDown := false
 	// Two rounds over the same chats. The first reads only the meetings whose
 	// unread messages start in the last two weeks: those are the ones a person
 	// is looking at, and a chat is read oldest first, so without this a
 	// meeting from this week waits behind months of old ones. The second round
 	// reads everything that is left.
 	for _, recentSince := range []int64{time.Now().Unix() - recentMeetingWindow, 0} {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || engineDown {
 			break
 		}
 		deps.RecentSince = recentSince
@@ -207,7 +212,7 @@ func (m *MeetingRefresher) doRun(ctx context.Context, run *Run, chats []string) 
 			// would otherwise wait for dozens of ticks. So a chat is read until
 			// nothing in it is due. The cap stops a chat whose watermark cannot
 			// move from holding the run forever.
-			var chatCalls, chatChanges, passes int
+			var chatCalls, chatChanges, chatFailed, passes int
 			for passes = 0; passes < maxRefreshPasses && ctx.Err() == nil; passes++ {
 				res, err := extract.RefreshChatMeetings(ctx, deps, chatJID, run.ID,
 					func(msg string) { run.AddEvent(RunEvent{Kind: "info", Text: msg}) })
@@ -217,12 +222,31 @@ func (m *MeetingRefresher) doRun(ctx context.Context, run *Run, chats []string) 
 				}
 				chatCalls += res.Calls
 				chatChanges += res.Changes
+				chatFailed += res.FailedChunks
 				if res.Meetings == 0 || res.FailedChunks > 0 {
 					break
 				}
 			}
 			calls += chatCalls
 			changes += chatChanges
+			failed += chatFailed
+
+			// A chat where every call failed, several chats running, is not a
+			// bad chat: the engine is gone. Seen live: the local model server
+			// stopped mid-run, the remaining chats each failed in a
+			// millisecond, and the run reported "done". Stopping here says
+			// what happened and leaves the rest for the next tick. Nothing is
+			// lost: a failed call never moves a meeting's watermark.
+			// Calls counts every attempt, failed ones too.
+			if chatFailed > 0 && chatCalls <= chatFailed {
+				deadChats++
+			} else if chatCalls > chatFailed {
+				deadChats = 0
+			}
+			if deadChats >= engineDownAfterChats {
+				engineDown = true
+				break
+			}
 			if chatCalls > 0 {
 				run.AddEvent(RunEvent{Kind: "info", Text: fmt.Sprintf("%s: %d call(s), %d change(s)",
 					chatLabel(m.s.store, chatJID), chatCalls, chatChanges)})
@@ -250,6 +274,9 @@ func (m *MeetingRefresher) doRun(ctx context.Context, run *Run, chats []string) 
 
 	summary := fmt.Sprintf("%s: %d chat(s), %d call(s), %d change(s); %d closed by rule",
 		updater.Name(), len(chats), calls, changes, lapsed)
+	if failed > 0 {
+		summary += fmt.Sprintf("; %d call(s) FAILED", failed)
+	}
 
 	m.mu.Lock()
 	m.last = meetingRefreshSummary{
@@ -258,6 +285,11 @@ func (m *MeetingRefresher) doRun(ctx context.Context, run *Run, chats []string) 
 	}
 	m.mu.Unlock()
 
+	if engineDown {
+		run.Finish(RunFailed, "", summary, changes,
+			"the model engine stopped answering; the rest waits for the next run")
+		return
+	}
 	run.Finish(RunDone, "", summary, changes, "")
 }
 
