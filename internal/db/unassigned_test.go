@@ -15,7 +15,7 @@ import (
 func TestUnassignedGroups(t *testing.T) {
 	st := newTestStore(t)
 
-	circle, err := st.CreateCircle("OneStudio", "", "")
+	circle, err := st.CreateCircle("NorthStudio", "", "")
 	if err != nil {
 		t.Fatalf("CreateCircle: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestUnassignedGroups(t *testing.T) {
 func TestUnassignedPeople(t *testing.T) {
 	st := newTestStore(t)
 
-	circle, err := st.CreateCircle("OneStudio", "", "")
+	circle, err := st.CreateCircle("NorthStudio", "", "")
 	if err != nil {
 		t.Fatalf("CreateCircle: %v", err)
 	}

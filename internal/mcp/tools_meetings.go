@@ -31,7 +31,7 @@ func toolCreateMeeting() mcp.Tool {
 				"ALWAYS call wa_find_meeting FIRST. The same meeting is often arranged across "+
 				"several chats, and must become ONE meeting with messages linked from each.",
 		),
-		mcp.WithString("title", mcp.Required(), mcp.Description("Short title, e.g. 'IC weekly review' or 'MoFA platform kickoff'")),
+		mcp.WithString("title", mcp.Required(), mcp.Description("Short title, e.g. 'IC weekly review' or 'MinX platform kickoff'")),
 		mcp.WithString("purpose", mcp.Description("Why this meeting is happening, in one or two lines")),
 		mcp.WithString("status", mcp.Description("proposed (a time is still being agreed) | confirmed | held | cancelled. Default proposed.")),
 		mcp.WithNumber("starts_at", mcp.Description("Start as a Unix epoch timestamp (seconds). Omit when no time has been agreed yet.")),
@@ -44,7 +44,7 @@ func toolCreateMeeting() mcp.Tool {
 		mcp.WithNumber("location_lng", mcp.Description("Longitude, when someone shared a WhatsApp location pin")),
 		mcp.WithString("link", mcp.Description("Join link (Google Meet / Zoom). The join code is derived automatically and is what ties the same meeting across chats.")),
 		mcp.WithString("recurrence", mcp.Description("Repeat rule in the words used, e.g. 'اجتماعنا الاسبوعي السبت ٥ م، ويستثنى السبت القادم'")),
-		mcp.WithNumber("prepares_meeting_id", mcp.Description("Id of the meeting THIS one is preparing for, when it is a pre-meeting ('نجلس الأحد قبل اجتماع xspace')")),
+		mcp.WithNumber("prepares_meeting_id", mcp.Description("Id of the meeting THIS one is preparing for, when it is a pre-meeting ('نجلس الأحد قبل اجتماع orbit')")),
 		mcp.WithString("origin_chat_jid", mcp.Required(), mcp.Description("Chat where the meeting was first arranged")),
 		mcp.WithString("origin_message_id", mcp.Description("Message id that started it, in origin_chat_jid")),
 		mcp.WithNumber("confidence", mcp.Description("0..1 — how sure you are this is a real prepared meeting")),

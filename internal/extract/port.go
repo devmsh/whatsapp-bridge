@@ -15,7 +15,7 @@ import "context"
 // RosterPerson is somebody in the conversation, as the model should see them.
 //
 // Kunya and HowWeMet are the user's own notes. They are the difference between
-// "a number" and "أبو يمان, who Abdullah introduced about the CVB file" — and
+// "a number" and "أبو يمان, who Abdullah introduced about the QRT file" — and
 // the model has no other way to learn either.
 type RosterPerson struct {
 	JID      string

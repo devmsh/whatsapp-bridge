@@ -51,7 +51,7 @@ func TestIntroChats(t *testing.T) {
 	}
 
 	since := now - 90*86400
-	got, err := st.IntroChats(since, 40, 0, "Mohammed Shurrab")
+	got, err := st.IntroChats(since, 40, 0, "Mohammed Hasan")
 	if err != nil {
 		t.Fatalf("IntroChats: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestIntroChatsRespectsMessageCap(t *testing.T) {
 		})
 	}
 
-	got, err := st.IntroChats(now-90*86400, 5, 0, "Mohammed Shurrab")
+	got, err := st.IntroChats(now-90*86400, 5, 0, "Mohammed Hasan")
 	if err != nil {
 		t.Fatalf("IntroChats: %v", err)
 	}
@@ -117,12 +117,12 @@ func TestIntroNameCardAcrossLines(t *testing.T) {
 	}
 	if err := st.StoreMessage(&db.Message{
 		ID: "m1", ChatJID: jid,
-		Content: "Mohammed Shurrab \n\nOne Studio", Timestamp: now - 2*86400,
+		Content: "Mohammed Hasan \n\nNorth Studio", Timestamp: now - 2*86400,
 	}); err != nil {
 		t.Fatalf("StoreMessage: %v", err)
 	}
 
-	got, err := st.IntroChats(now-90*86400, 40, 0, "Mohammed Shurrab")
+	got, err := st.IntroChats(now-90*86400, 40, 0, "Mohammed Hasan")
 	if err != nil {
 		t.Fatalf("IntroChats: %v", err)
 	}
@@ -145,15 +145,15 @@ func TestIntroNameCardAcrossLines(t *testing.T) {
 // message, which works where names are capitalised and collapses in Arabic:
 // "وعليكم السلام" and "تم الاستلام" are short, unpunctuated and ordinary.
 func TestNameCardNeedsARealName(t *testing.T) {
-	const me = "Mohammed Shurrab"
+	const me = "Mohammed Hasan"
 	cases := []struct {
 		text, contact string
 		want          bool
 		why           string
 	}{
-		{"Mohammed Shurrab \n\nOne Studio", "Anas Alzebin", true, "carries my name, across lines"},
+		{"Mohammed Hasan \n\nNorth Studio", "Anas Alzebin", true, "carries my name, across lines"},
 		{"باسم العكل", "Basem Alakal", false, "transliterated name does not overlap"},
-		{"احمد حمدي شراب", "احمد حمدي شراب", true, "carries the contact's own name"},
+		{"احمد حمدي حسن", "احمد حمدي حسن", true, "carries the contact's own name"},
 		{"وعليكم السلام", "Mohand zohdy", false, "a greeting, not a name"},
 		{"تم الاستلام", "Someone", false, "an acknowledgement"},
 		{"مساء الخير", "Someone", false, "a pleasantry"},
