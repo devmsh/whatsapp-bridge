@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     -- how_we_met is where the person came from: who introduced you, when and
     -- why. It is context the AI has no other way to learn, and it is the
     -- difference between "a contact" and "the person Abdullah sent me to about
-    -- the CVB file".
+    -- the QRT file".
     --
     -- Both survive contact sync: every writer names its columns, so a refresh
     -- from WhatsApp cannot overwrite them.
@@ -236,6 +236,15 @@ CREATE TABLE IF NOT EXISTS starred_messages (
     PRIMARY KEY (chat_jid, message_id)
 );
 CREATE INDEX IF NOT EXISTS idx_starred_at ON starred_messages(starred_at);
+
+-- Mentions the user has dismissed from the Mentions page, without replying.
+-- Local state only, like starred_messages — WhatsApp has no "dismiss" concept.
+CREATE TABLE IF NOT EXISTS dismissed_mentions (
+    chat_jid      TEXT    NOT NULL,
+    message_id    TEXT    NOT NULL,
+    dismissed_at  INTEGER NOT NULL,
+    PRIMARY KEY (chat_jid, message_id)
+);
 
 CREATE TABLE IF NOT EXISTS presence_cache (
     jid        TEXT    PRIMARY KEY,
@@ -461,7 +470,7 @@ CREATE TABLE IF NOT EXISTS meetings (
     -- chats are talking about ONE meeting, so it is indexed.
     link_code           TEXT    NOT NULL DEFAULT '',
     notes               TEXT    NOT NULL DEFAULT '',
-    -- A meeting held to prepare another one: "نجلس الأحد قبل اجتماع xspace".
+    -- A meeting held to prepare another one: "نجلس الأحد قبل اجتماع orbit".
     prepares_meeting_id INTEGER REFERENCES meetings(id) ON DELETE SET NULL,
     -- Free text for now: "اجتماعنا الاسبوعي السبت، ويستثنى السبت القادم".
     recurrence          TEXT    NOT NULL DEFAULT '',
@@ -473,7 +482,11 @@ CREATE TABLE IF NOT EXISTS meetings (
     -- pending | accepted | rejected — AI-found meetings land as pending.
     review_status       TEXT    NOT NULL DEFAULT 'accepted',
     created_at          INTEGER NOT NULL DEFAULT 0,
-    updated_at          INTEGER NOT NULL DEFAULT 0
+    updated_at          INTEGER NOT NULL DEFAULT 0,
+    -- Follow-up watermark: messages in the meeting's chats up to this time
+    -- were already read for changes. A new message after checked_ts is what
+    -- makes a meeting worth reading again.
+    checked_ts          INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_meetings_starts ON meetings(starts_at);
 CREATE INDEX IF NOT EXISTS idx_meetings_status ON meetings(status, review_status);
@@ -533,6 +546,27 @@ CREATE TABLE IF NOT EXISTS meeting_circles (
     PRIMARY KEY (meeting_id, circle_id)
 );
 
+-- meeting_changes: the history of a meeting after it was first found. Every
+-- automatic edit (the model reading a new message, or a rule closing a dead
+-- meeting) and every manual edit lands here, one row per changed field, so
+-- any change can be traced back to the one message or rule that caused it.
+CREATE TABLE IF NOT EXISTS meeting_changes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    -- status, starts_at, time_options, mode, location, link, agenda, title, purpose
+    field      TEXT    NOT NULL,
+    old_value  TEXT    NOT NULL DEFAULT '',
+    new_value  TEXT    NOT NULL DEFAULT '',
+    -- One short sentence: what happened, for a human reading the history.
+    note       TEXT    NOT NULL DEFAULT '',
+    -- model | rule | user — who made this change.
+    source     TEXT    NOT NULL DEFAULT 'model',
+    chat_jid   TEXT    NOT NULL DEFAULT '',
+    message_id TEXT    NOT NULL DEFAULT '',
+    run_id     TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_changes ON meeting_changes(meeting_id, created_at);
 
 -- What the extraction engine did, and why.
 --
@@ -569,4 +603,83 @@ CREATE TABLE IF NOT EXISTS extraction_rejections (
 );
 CREATE INDEX IF NOT EXISTS idx_extraction_rejections ON extraction_rejections(reason, created_at);
 
+-- Debugging ------------------------------------------------------------------
+--
+-- Three tables that exist only so the system can be watched from the outside.
+-- Nothing here changes what the bridge does; it records what it did.
+
+-- llm_calls: every single call to a model, whatever made it.
+--
+-- The old extraction_calls table counts calls. This one keeps the words: the
+-- exact prompt sent and the exact answer that came back. When a model starts
+-- returning nonsense, the counts say "something is wrong" and this says what.
+--
+-- Text is capped at 64KB per side and rows are deleted after 14 days, so the
+-- table stays a debugging window, not an archive.
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT    NOT NULL DEFAULT '',
+    service       TEXT    NOT NULL DEFAULT '',   -- tasks | meetings | media | profiles | ...
+    engine        TEXT    NOT NULL DEFAULT '',   -- ollama | claude | codex
+    model         TEXT    NOT NULL DEFAULT '',
+    kind          TEXT    NOT NULL DEFAULT '',   -- extract | judge | completion | meetings | describe | ...
+    chat_jid      TEXT    NOT NULL DEFAULT '',
+    system_prompt TEXT    NOT NULL DEFAULT '',
+    prompt        TEXT    NOT NULL DEFAULT '',
+    response      TEXT    NOT NULL DEFAULT '',
+    prompt_chars  INTEGER NOT NULL DEFAULT 0,
+    reply_chars   INTEGER NOT NULL DEFAULT 0,
+    latency_ms    INTEGER NOT NULL DEFAULT 0,
+    attempt       INTEGER NOT NULL DEFAULT 1,
+    ok            INTEGER NOT NULL DEFAULT 1,
+    error         TEXT    NOT NULL DEFAULT '',
+    created_at    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_time ON llm_calls(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_run  ON llm_calls(run_id, created_at);
+
+-- service_runs: run history that survives a restart.
+--
+-- RunManager keeps live runs in memory and forgets them thirty minutes after
+-- they end, which is fine for a progress bar and useless for "why did the
+-- nightly sweep stop last Tuesday". Every run is mirrored here when it starts
+-- and again when it ends, events included.
+CREATE TABLE IF NOT EXISTS service_runs (
+    id          TEXT    PRIMARY KEY,             -- the RunManager id
+    service     TEXT    NOT NULL DEFAULT '',     -- tasks | meetings | profiles | digest | ...
+    kind        TEXT    NOT NULL DEFAULT '',     -- chat | circle | meetings
+    subject     TEXT    NOT NULL DEFAULT '',     -- chat jid or circle id
+    label       TEXT    NOT NULL DEFAULT '',
+    trigger     TEXT    NOT NULL DEFAULT 'manual', -- manual | auto | startup
+    status      TEXT    NOT NULL DEFAULT '',
+    started_at  INTEGER NOT NULL DEFAULT 0,
+    ended_at    INTEGER NOT NULL DEFAULT 0,
+    created     INTEGER NOT NULL DEFAULT 0,      -- how many things it made
+    summary     TEXT    NOT NULL DEFAULT '',
+    error       TEXT    NOT NULL DEFAULT '',
+    session_id  TEXT    NOT NULL DEFAULT '',
+    events      TEXT    NOT NULL DEFAULT ''      -- JSON array, capped
+);
+CREATE INDEX IF NOT EXISTS idx_service_runs_time ON service_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_service_runs_svc  ON service_runs(service, started_at DESC);
+
+-- meeting_scan_state: the per-chat watermark for MEETING extraction.
+--
+-- The twin of chat_extraction_state, kept apart on purpose: tasks and meetings
+-- are found by different passes that move at different speeds, and sharing one
+-- watermark would mean whichever ran first hid the messages from the other.
+--
+-- hits counts messages since the watermark that read like meeting talk. It is
+-- what decides whether a chat is worth a model call at all.
+CREATE TABLE IF NOT EXISTS meeting_scan_state (
+    chat_jid     TEXT    PRIMARY KEY,
+    last_msg_ts  INTEGER NOT NULL DEFAULT 0,  -- watermark: scanned up to here
+    last_run_at  INTEGER NOT NULL DEFAULT 0,  -- when a model last read this chat
+    last_run_id  TEXT    NOT NULL DEFAULT '',
+    hits         INTEGER NOT NULL DEFAULT 0,  -- meeting-ish messages waiting
+    last_hit_ts  INTEGER NOT NULL DEFAULT 0,
+    found        INTEGER NOT NULL DEFAULT 0,  -- meetings created from this chat
+    updated_at   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_meeting_scan_hits ON meeting_scan_state(hits DESC, last_run_at);
 `

@@ -106,7 +106,7 @@ func TestMeetingParticipantsKeepKnownFacts(t *testing.T) {
 func TestMeetingItems(t *testing.T) {
 	st := newTestStore(t)
 
-	m, _ := st.CreateMeeting(&db.Meeting{Title: "MoFA platform"})
+	m, _ := st.CreateMeeting(&db.Meeting{Title: "MinX platform"})
 	for _, it := range []db.MeetingItem{
 		{MeetingID: m.ID, Kind: db.ItemAgenda, Text: "Kateb SEO walkthrough"},
 		{MeetingID: m.ID, Kind: db.ItemRequirement, Text: "Flow OS update at 80%+"},
@@ -205,7 +205,7 @@ func TestMeetingOfflineLocation(t *testing.T) {
 	st := newTestStore(t)
 
 	m, err := st.CreateMeeting(&db.Meeting{
-		Title:       "XSPACE leadership, in person",
+		Title:       "ORBIT leadership, in person",
 		Mode:        "in_person",
 		Location:    "مكتبنا بجاده ٣٠ https://maps.app.goo.gl/yJseT9NAiD4FSrHD9?g_st=ic",
 		LocationLat: 21.6606254577637,
@@ -237,11 +237,11 @@ func TestMeetingOfflineLocation(t *testing.T) {
 func TestMeetingInheritsCircles(t *testing.T) {
 	st := newTestStore(t)
 
-	studio, err := st.CreateCircle("OneStudio", "", "")
+	studio, err := st.CreateCircle("NorthStudio", "", "")
 	if err != nil {
 		t.Fatalf("CreateCircle: %v", err)
 	}
-	mofa, err := st.CreateCircle("MoFA", "", "")
+	minx, err := st.CreateCircle("MinX", "", "")
 	if err != nil {
 		t.Fatalf("CreateCircle: %v", err)
 	}
@@ -257,10 +257,10 @@ func TestMeetingInheritsCircles(t *testing.T) {
 	// This person is filed by phone JID, but the meeting will name their @lid.
 	phone := "966500@s.whatsapp.net"
 	lid := "77700@lid"
-	if err := st.StoreContact(&db.Contact{JID: phone, LID: lid, Name: "Nayef"}); err != nil {
+	if err := st.StoreContact(&db.Contact{JID: phone, LID: lid, Name: "Nabil"}); err != nil {
 		t.Fatalf("StoreContact: %v", err)
 	}
-	if err := st.AddCircleMember(mofa.ID, db.MemberContact, phone); err != nil {
+	if err := st.AddCircleMember(minx.ID, db.MemberContact, phone); err != nil {
 		t.Fatalf("AddCircleMember(contact): %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestMeetingInheritsCircles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateMeeting: %v", err)
 	}
-	if err := st.AddMeetingParticipant(m.ID, db.MeetingParticipant{JID: lid, Name: "Nayef"}); err != nil {
+	if err := st.AddMeetingParticipant(m.ID, db.MeetingParticipant{JID: lid, Name: "Nabil"}); err != nil {
 		t.Fatalf("AddMeetingParticipant: %v", err)
 	}
 
@@ -284,10 +284,10 @@ func TestMeetingInheritsCircles(t *testing.T) {
 	for _, c := range got {
 		names[c.Name] = true
 	}
-	if !names["OneStudio"] {
+	if !names["NorthStudio"] {
 		t.Errorf("meeting should inherit the circle of the group it was arranged in")
 	}
-	if !names["MoFA"] {
+	if !names["MinX"] {
 		t.Errorf("meeting should inherit a participant's circle across the LID/phone split")
 	}
 	if names["Unrelated"] {
@@ -301,9 +301,147 @@ func TestMeetingInheritsCircles(t *testing.T) {
 	}
 	got, _ = st.MeetingCircles(m.ID)
 	for _, c := range got {
-		if c.Name == "MoFA" {
-			t.Errorf("removing the only MoFA person should drop that circle")
+		if c.Name == "MinX" {
+			t.Errorf("removing the only MinX person should drop that circle")
 		}
+	}
+}
+
+// TestMeetingOriginTS: a meeting found today from a conversation held months
+// ago must report when the conversation happened, not when it was found.
+func TestMeetingOriginTS(t *testing.T) {
+	st := newTestStore(t)
+	chat := "9055@s.whatsapp.net"
+	said := time.Date(2026, 6, 5, 15, 0, 0, 0, time.UTC)
+	if err := st.StoreChat(&db.Chat{JID: chat, Name: "Karim"}); err != nil {
+		t.Fatalf("StoreChat: %v", err)
+	}
+	if err := st.StoreMessage(&db.Message{ID: "m1", ChatJID: chat, Sender: chat,
+		Content: "لازم نجتمع قريب", Timestamp: said.Unix()}); err != nil {
+		t.Fatalf("StoreMessage: %v", err)
+	}
+	m, err := st.CreateMeeting(&db.Meeting{Title: "Catch up", OriginChatJID: chat, OriginMessageID: "m1"})
+	if err != nil {
+		t.Fatalf("CreateMeeting: %v", err)
+	}
+	list, err := st.ListMeetings(db.MeetingFilter{})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListMeetings: %v (%d)", err, len(list))
+	}
+	if list[0].OriginTS != said.Unix() {
+		t.Errorf("list origin_ts = %d, want the message time %d", list[0].OriginTS, said.Unix())
+	}
+	got, _ := st.GetMeeting(m.ID)
+	if got.OriginTS != said.Unix() {
+		t.Errorf("get origin_ts = %d, want %d", got.OriginTS, said.Unix())
+	}
+}
+
+// TestMeetingCirclesWeighPeople is the "one person in every circle" case. A
+// person spread across many circles must not stamp all of them on a meeting;
+// a person in one circle, or the circle's name in the title, still decides it.
+func TestMeetingCirclesWeighPeople(t *testing.T) {
+	st := newTestStore(t)
+
+	// Karim sits in five circles. Sami sits in one.
+	alaa := "905500@s.whatsapp.net"
+	sami := "974500@s.whatsapp.net"
+	for _, name := range []string{"Acme", "Borealis", "ZED", "Souq", "Orbit"} {
+		c, err := st.CreateCircle(name, "", "")
+		if err != nil {
+			t.Fatalf("CreateCircle(%s): %v", name, err)
+		}
+		if err := st.AddCircleMember(c.ID, db.MemberContact, alaa); err != nil {
+			t.Fatalf("AddCircleMember: %v", err)
+		}
+	}
+	minx, _ := st.CreateCircle("MinX", "", "")
+	if err := st.AddCircleMember(minx.ID, db.MemberContact, sami); err != nil {
+		t.Fatalf("AddCircleMember: %v", err)
+	}
+	qrt, _ := st.CreateCircle("QRT", "", "")
+	if err := st.UpdateCircle(qrt.ID, "QRT", "", "", []string{"Quarterly Review Team"}); err != nil {
+		t.Fatalf("UpdateCircle: %v", err)
+	}
+
+	circlesOf := func(title string, people ...string) map[string]bool {
+		t.Helper()
+		// Arranged in a DM with Karim, and Karim is also listed as a participant:
+		// the same person twice, who must still only vote once.
+		m, err := st.CreateMeeting(&db.Meeting{Title: title, OriginChatJID: alaa, OriginMessageID: title})
+		if err != nil {
+			t.Fatalf("CreateMeeting: %v", err)
+		}
+		for _, p := range append(people, alaa) {
+			if err := st.AddMeetingParticipant(m.ID, db.MeetingParticipant{JID: p}); err != nil {
+				t.Fatalf("AddMeetingParticipant: %v", err)
+			}
+		}
+		got, err := st.MeetingCircles(m.ID)
+		if err != nil {
+			t.Fatalf("MeetingCircles: %v", err)
+		}
+		names := map[string]bool{}
+		for _, c := range got {
+			names[c.Name] = true
+		}
+		return names
+	}
+
+	if got := circlesOf("Quick decisions"); len(got) != 0 {
+		t.Errorf("a meeting with only a many-circle person should get no circle, got %v", got)
+	}
+	if got := circlesOf("Acme Meeting"); len(got) != 1 || !got["Acme"] {
+		t.Errorf("the circle named in the title should be the only one, got %v", got)
+	}
+	if got := circlesOf("Next steps", sami); len(got) != 1 || !got["MinX"] {
+		t.Errorf("a one-circle person should decide the circle, got %v", got)
+	}
+	if got := circlesOf("مناقشة قصة الـQRT مع الشركة"); !got["QRT"] {
+		t.Errorf("a Latin name glued to an Arabic article should still match, got %v", got)
+	}
+	if got := circlesOf("Visit to the quarterly review team"); !got["QRT"] {
+		t.Errorf("a circle keyword should match, got %v", got)
+	}
+	if got := circlesOf("Zedric launch party"); got["ZED"] {
+		t.Errorf("a circle name must match whole words only, got %v", got)
+	}
+}
+
+// TestMeetingCirclesIgnoreOwner: the account owner is in every meeting, so the
+// circles they are filed under must not land on all of them — also when the
+// meeting names their @lid and the contact row stores the LID bare.
+func TestMeetingCirclesIgnoreOwner(t *testing.T) {
+	st := newTestStore(t)
+
+	me := "966500@s.whatsapp.net"
+	if err := st.StoreContact(&db.Contact{JID: me, LID: "63800", Name: "Me"}); err != nil {
+		t.Fatalf("StoreContact: %v", err)
+	}
+	zed, _ := st.CreateCircle("ZED", "", "")
+	if err := st.AddCircleMember(zed.ID, db.MemberContact, "63800@lid"); err != nil {
+		t.Fatalf("AddCircleMember: %v", err)
+	}
+
+	m, err := st.CreateMeeting(&db.Meeting{Title: "Weekly sync"})
+	if err != nil {
+		t.Fatalf("CreateMeeting: %v", err)
+	}
+	if err := st.AddMeetingParticipant(m.ID, db.MeetingParticipant{JID: me}); err != nil {
+		t.Fatalf("AddMeetingParticipant: %v", err)
+	}
+	if got, _ := st.MeetingCircles(m.ID); len(got) != 1 {
+		t.Fatalf("before the owner is known they vote like anyone, got %v", got)
+	}
+
+	if err := st.PutSyncState(db.OwnJIDKey, me); err != nil {
+		t.Fatalf("PutSyncState: %v", err)
+	}
+	if err := st.SyncMeetingCircles(m.ID); err != nil {
+		t.Fatalf("SyncMeetingCircles: %v", err)
+	}
+	if got, _ := st.MeetingCircles(m.ID); len(got) != 0 {
+		t.Errorf("the owner's circles should not be inherited, got %v", got)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"whatsapp-bridge-v2/internal/db"
+	"whatsapp-bridge-v2/internal/llmlog"
 )
 
 // The run: select, read, chunk, ask, check, write.
@@ -144,6 +145,12 @@ func Run(ctx context.Context, d Deps, spec RunSpec, progress func(string)) (Resu
 	say("%d new messages in %d chunk(s)", len(lines), len(chunks))
 
 	meta := RunMeta{RunID: spec.RunID, Engine: d.Extractor.Name(), ChatJID: spec.ChatJID}
+
+	// Every model call below is tagged with the run and the chat, so the debug
+	// screen can group a run's calls together and show what was actually sent.
+	ctx = llmlog.With(ctx, llmlog.Tag{
+		RunID: spec.RunID, Service: "tasks", ChatJID: spec.ChatJID,
+	})
 
 	// A message carried into the next chunk as context can now produce a task,
 	// which means the same message can be reported twice in one run. The

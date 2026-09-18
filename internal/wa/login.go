@@ -206,6 +206,16 @@ func (m *AuthManager) onConnected() {
 	})
 }
 
+// onFatal shows an error the user must act on. The library will not retry
+// on its own after these errors, so the GUI must not keep saying "connecting".
+func (m *AuthManager) onFatal(msg string) {
+	m.set(func(s *AuthState) {
+		s.State = StateError
+		s.QRCode = ""
+		s.Error = msg
+	})
+}
+
 // onLoggedOut clears state and restarts the QR flow so the GUI shows a new code.
 func (m *AuthManager) onLoggedOut() {
 	m.set(func(s *AuthState) {

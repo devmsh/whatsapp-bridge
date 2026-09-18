@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"whatsapp-bridge-v2/internal/extract"
+	"whatsapp-bridge-v2/internal/llmlog"
 )
 
 // Ollama runs the detection step on a model on this machine.
@@ -49,7 +50,7 @@ func (o *Ollama) Extract(ctx context.Context, in extract.ExtractInput) (extract.
 	user := "Conversation slice:\n\n" + in.Chunk.Rendered
 
 	var out extract.ExtractOutput
-	if err := o.chat(ctx, system, user, extractSchema, &out); err != nil {
+	if err := o.chat(ctx, "extract", system, user, extractSchema, &out); err != nil {
 		return extract.ExtractOutput{}, err
 	}
 	return out, nil
@@ -60,7 +61,7 @@ func (o *Ollama) Judge(ctx context.Context, in extract.JudgeInput) (extract.Judg
 		return extract.JudgeOutput{}, nil
 	}
 	var out extract.JudgeOutput
-	if err := o.chat(ctx, judgeSystem, judgeUser(in), judgeSchema, &out); err != nil {
+	if err := o.chat(ctx, "judge", judgeSystem, judgeUser(in), judgeSchema, &out); err != nil {
 		return extract.JudgeOutput{}, err
 	}
 	return out, nil
@@ -83,7 +84,7 @@ func (o *Ollama) CheckCompletion(ctx context.Context, in extract.CompletionInput
 	b.WriteString(in.Chunk.Rendered)
 
 	var out extract.CompletionOutput
-	if err := o.chat(ctx, completionSystem, b.String(), completionSchema, &out); err != nil {
+	if err := o.chat(ctx, "completion", completionSystem, b.String(), completionSchema, &out); err != nil {
 		return extract.CompletionOutput{}, err
 	}
 	return out, nil
@@ -127,7 +128,7 @@ type ollamaResponse struct {
 // Retries once on unusable JSON. Structured output makes that rare, but a
 // model can still return an empty string under load, and one retry is much
 // cheaper than losing the chunk.
-func (o *Ollama) chat(ctx context.Context, system, user string, schema any, dst any) error {
+func (o *Ollama) chat(ctx context.Context, kind, system, user string, schema any, dst any) error {
 	body := ollamaRequest{
 		Model: o.model,
 		Messages: []ollamaMessage{
@@ -151,11 +152,27 @@ func (o *Ollama) chat(ctx context.Context, system, user string, schema any, dst 
 		return err
 	}
 
+	tag := llmlog.From(ctx)
 	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 1; attempt <= 2; attempt++ {
+		// Every attempt is recorded on its own, including the one that failed.
+		// "It worked on the retry" is exactly the kind of thing that is
+		// invisible in a summary and obvious in a log.
+		started := time.Now()
+		answer := ""
+		record := func(err error) {
+			llmlog.Record(llmlog.Call{
+				RunID: tag.RunID, Service: orDefault(tag.Service, "tasks"),
+				Engine: "ollama", Model: o.model, Kind: kind, ChatJID: tag.ChatJID,
+				System: system, Prompt: user, Response: answer,
+				Latency: time.Since(started), Attempt: attempt, Err: err,
+			})
+		}
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 			o.baseURL+"/api/chat", bytes.NewReader(raw))
 		if err != nil {
+			record(err)
 			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -163,6 +180,7 @@ func (o *Ollama) chat(ctx context.Context, system, user string, schema any, dst 
 		resp, err := o.client.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("ollama unreachable at %s: %w", o.baseURL, err)
+			record(lastErr)
 			continue
 		}
 		var parsed ollamaResponse
@@ -170,24 +188,40 @@ func (o *Ollama) chat(ctx context.Context, system, user string, schema any, dst 
 		resp.Body.Close()
 		if decodeErr != nil {
 			lastErr = fmt.Errorf("ollama returned unreadable response: %w", decodeErr)
+			record(lastErr)
 			continue
 		}
 		if parsed.Error != "" {
 			// A bad model name or an out-of-memory is not worth retrying.
-			return fmt.Errorf("ollama: %s", parsed.Error)
+			err := fmt.Errorf("ollama: %s", parsed.Error)
+			record(err)
+			return err
 		}
 		content := strings.TrimSpace(parsed.Message.Content)
+		answer = content
 		if content == "" {
 			lastErr = fmt.Errorf("ollama returned an empty answer")
+			record(lastErr)
 			continue
 		}
 		if err := json.Unmarshal([]byte(content), dst); err != nil {
 			lastErr = fmt.Errorf("ollama returned invalid JSON: %w", err)
+			record(lastErr)
 			continue
 		}
+		record(nil)
 		return nil
 	}
 	return lastErr
+}
+
+// orDefault names the service when the caller did not tag the context. Better
+// a plausible label than an empty column nobody can filter on.
+func orDefault(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 // OllamaModels lists what is installed locally, so a settings screen can offer

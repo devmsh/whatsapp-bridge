@@ -3,30 +3,52 @@ package wa
 import (
 	"time"
 
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-
 )
 
+// chatJIDForms resolves an app-state event's JID (which arrives LID-based,
+// see the package comment on handleDeleteForMe) to the phone-form JID that
+// chat rows are keyed under, and returns both forms when they differ so the
+// caller can write to whichever one the chat is actually stored under.
+func chatJIDForms(c *Client, jid types.JID) []string {
+	raw := jid.String()
+	resolved := resolveLIDToPhone(c, jid, raw)
+	if resolved == raw {
+		return []string{raw}
+	}
+	return []string{resolved, raw}
+}
+
 func handlePin(c *Client, evt *events.Pin) {
-	jid := evt.JID.String()
 	pinned := evt.Action.GetPinned()
-	c.Store.SetChatPinned(jid, pinned)
-	c.Log.Debugf("Chat %s pinned=%v", jid, pinned)
+	for _, jid := range chatJIDForms(c, evt.JID) {
+		if err := c.Store.SetChatPinned(jid, pinned); err != nil {
+			c.Log.Errorf("SetChatPinned (%s) failed: %v", jid, err)
+		}
+	}
+	c.Log.Debugf("Chat %s pinned=%v", evt.JID, pinned)
 }
 
 func handleMute(c *Client, evt *events.Mute) {
-	jid := evt.JID.String()
 	muted := evt.Action.GetMuted()
 	muteEnd := evt.Action.GetMuteEndTimestamp()
-	c.Store.SetChatMuted(jid, muted, muteEnd)
-	c.Log.Debugf("Chat %s muted=%v until=%d", jid, muted, muteEnd)
+	for _, jid := range chatJIDForms(c, evt.JID) {
+		if err := c.Store.SetChatMuted(jid, muted, muteEnd); err != nil {
+			c.Log.Errorf("SetChatMuted (%s) failed: %v", jid, err)
+		}
+	}
+	c.Log.Debugf("Chat %s muted=%v until=%d", evt.JID, muted, muteEnd)
 }
 
 func handleArchive(c *Client, evt *events.Archive) {
-	jid := evt.JID.String()
 	archived := evt.Action.GetArchived()
-	c.Store.SetChatArchived(jid, archived)
-	c.Log.Debugf("Chat %s archived=%v", jid, archived)
+	for _, jid := range chatJIDForms(c, evt.JID) {
+		if err := c.Store.SetChatArchived(jid, archived); err != nil {
+			c.Log.Errorf("SetChatArchived (%s) failed: %v", jid, err)
+		}
+	}
+	c.Log.Debugf("Chat %s archived=%v", evt.JID, archived)
 }
 
 func handleMarkChatAsRead(c *Client, evt *events.MarkChatAsRead) {
