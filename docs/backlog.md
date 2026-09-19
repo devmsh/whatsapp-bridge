@@ -180,7 +180,7 @@ Where: `agent/circle-digest.mjs`, `briefing.mjs`, `draft-reply.mjs`,
 `profile.mjs` → calls through `internal/extract/adapters`.
 Size: M
 Added: 2026-09-12
-Depends on: task extraction engine (the adapter port)
+Depends on: nothing
 
 ## Embedding-based duplicate detection
 
@@ -191,7 +191,7 @@ Where: `internal/extract/dedupe.go`; Ollama `POST /api/embed`; store vectors
 per task in a new table.
 Size: M
 Added: 2026-09-12
-Depends on: task extraction engine
+Depends on: nothing
 
 ## Escalate low-confidence chunks to Claude
 
@@ -201,7 +201,7 @@ Where: `internal/extract/pipeline.go`; the Claude chunk adapter already
 exists after phase 1.
 Size: S
 Added: 2026-09-12
-Depends on: task extraction engine, eval numbers showing where local is weak
+Depends on: eval numbers showing where local is weak
 
 ## Stop tracking the 14 MB `whatsapp-mcp` binary in git
 
