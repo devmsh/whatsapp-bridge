@@ -34,7 +34,7 @@ func main() {
 		to       = flag.String("to", "", "end date YYYY-MM-DD (inclusive)")
 		today    = flag.Bool("today", false, "just today")
 		days     = flag.Int("days", 0, "the last N days")
-		model    = flag.String("model", envOr("EXTRACT_MODEL", "qwen3:30b-a3b-instruct-2507-q4_K_M"), "ollama model")
+		model    = flag.String("model", envOr("EXTRACT_MODEL", "qwen3.6:35b-a3b-mtp-q4_K_M"), "ollama model")
 		ollama   = flag.String("ollama", envOr("OLLAMA_URL", ""), "ollama base url")
 		write    = flag.Bool("write", false, "actually save the meetings (default is a dry run)")
 		keysOnly = flag.Bool("keywords-only", false, "only run the keyword pass, no model")
