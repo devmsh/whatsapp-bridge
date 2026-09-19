@@ -28,11 +28,12 @@ const (
 	// The default is local: no quota, no network, and every answer is checked
 	// afterwards anyway.
 	defaultEngine = engineOllama
-	// Chosen by measurement, not by size. Against the hand-labelled set this
-	// model scores 0.65 precision and 0.54 recall where qwen2.5:14b scores
-	// 0.54 and 0.51 — and it is twice as fast, because only 3B of its 30B
-	// parameters are active per token. See cmd/extract-eval.
-	defaultModel = "qwen3:30b-a3b-instruct-2507-q4_K_M"
+	// Chosen by measurement, not by size. On 2026-09-19, against the
+	// hand-labelled set, this model scores 0.70 precision and 0.57 recall at
+	// 2.6 s per chunk, where qwen3:30b-a3b-instruct-2507 scores 0.45 and 0.35
+	// at 4.0 s. It is a thinking model: the adapter sends "think": false, or
+	// it answers very late. See cmd/extract-eval.
+	defaultModel = "qwen3.6:35b-a3b-mtp-q4_K_M"
 )
 
 // extractorFor builds the engine named in settings, unless the caller asked
