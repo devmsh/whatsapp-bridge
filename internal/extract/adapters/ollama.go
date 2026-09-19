@@ -111,6 +111,11 @@ type ollamaRequest struct {
 	Format    any             `json:"format,omitempty"`
 	Options   map[string]any  `json:"options,omitempty"`
 	KeepAlive string          `json:"keep_alive,omitempty"`
+	// Think turns off the model's hidden thinking step. Always sent as
+	// false, even for a model that cannot think (harmless there), so a
+	// thinking model never writes thousands of hidden tokens before it
+	// answers.
+	Think bool `json:"think"`
 }
 
 type ollamaMessage struct {
