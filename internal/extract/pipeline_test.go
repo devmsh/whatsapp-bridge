@@ -53,7 +53,7 @@ func seedChat(t *testing.T, st *db.Store, chat string) int64 {
 	}
 	for _, c := range []db.Contact{
 		{JID: "966500000001@s.whatsapp.net", Phone: "966500000001", Name: "Sara Haddad"},
-		{JID: "966500000002@s.whatsapp.net", Phone: "966500000002", Name: "Omar Nasser"},
+		{JID: "966500000002@s.whatsapp.net", Phone: "966500000002", Name: "Sami Nasser"},
 	} {
 		cc := c
 		if err := st.StoreContact(&cc); err != nil {

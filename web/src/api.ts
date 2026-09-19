@@ -260,6 +260,16 @@ export interface Message {
   vcard_data?: string
 }
 
+// Mention is one @-mention of the current user, with a little context: the
+// message right before and right after it in that chat (or two before, when
+// the mention is the last message in the chat — there's nothing after it
+// yet). Returned by GET /api/v2/mentions.
+export interface Mention extends Message {
+  chat_name?: string
+  context_before?: Message[]
+  context_after?: Message[]
+}
+
 // One row per (message, recipient, receipt-type) — what GET
 // /api/v2/messages/{id}/receipts returns. receipt_type maps to WA's
 // receipt state: "" (delivered), "read", "played" (audio/video).
@@ -467,7 +477,7 @@ export interface Meeting {
   id: number
   title: string
   purpose?: string
-  status: 'proposed' | 'confirmed' | 'held' | 'cancelled'
+  status: 'proposed' | 'confirmed' | 'held' | 'cancelled' | 'lapsed' | 'resolved'
   starts_at?: number
   ends_at?: number
   /** JSON array of slots still being argued over, when no time is agreed. */
@@ -493,6 +503,44 @@ export interface Meeting {
   messages?: MeetingMessage[]
   /** Derived, never set by hand: the circles of the chats and people involved. */
   circles?: Circle[]
+  /** Messages in this meeting's chats up to this time were already read for
+      changes. 0 means never checked. */
+  checked_ts?: number
+  /** When the message that caused this meeting was SENT (not when the engine
+      found it). Falls back to created_at on the server when unknown. */
+  origin_ts?: number
+  /** Every change made to this meeting since it was found, newest first. */
+  changes?: MeetingChange[]
+}
+
+// One change to a meeting: what field, old and new value, why, and where it
+// came from. Written by the "what changed?" pass, a status rule, or a person.
+export interface MeetingChange {
+  id: number
+  meeting_id: number
+  field: string
+  old_value: string
+  new_value: string
+  note: string
+  source: 'model' | 'rule' | 'user'
+  chat_jid: string
+  message_id: string
+  run_id: string
+  created_at: number
+}
+
+// Status of the background pass that re-reads chats for meeting changes.
+export interface MeetingsRefreshStatus {
+  running: boolean
+  run_id: string
+  waiting_chats: number
+  last?: {
+    chats: number
+    calls: number
+    changes: number
+    lapsed: number
+    finished_at: number
+  }
 }
 
 // A recently-started chat that reads like an introduction — someone you just
@@ -963,10 +1011,12 @@ export const api = {
     if (!res.ok) throw new Error('chat ' + res.status)
     return res.json()
   },
-  messages: async (jid: string, limit = 100): Promise<Message[]> => {
-    const res = await fetch(
-      `/api/v2/messages?chat_jid=${encodeURIComponent(jid)}&limit=${limit}`,
-    )
+  // includeTs: when landing on one specific old message (e.g. from the
+  // Mentions page), pass its timestamp so the bridge loads far back enough
+  // to include it, instead of just the newest `limit` messages.
+  messages: async (jid: string, limit = 100, includeTs?: number): Promise<Message[]> => {
+    const q = `/api/v2/messages?chat_jid=${encodeURIComponent(jid)}&limit=${limit}`
+    const res = await fetch(includeTs ? `${q}&include_ts=${includeTs}` : q)
     return res.json()
   },
   send: (
@@ -1287,6 +1337,21 @@ export const api = {
     if (!res.ok) return []
     return res.json()
   },
+  // mentions returns every message where the user was @-mentioned, newest
+  // first, each with a little surrounding context. See the Mention type.
+  mentions: async (): Promise<Mention[]> => {
+    const res = await fetch('/api/v2/mentions')
+    if (!res.ok) return []
+    return res.json()
+  },
+  // dismissMention hides a mention from the page without replying to it.
+  // Pass dismissed: false to undo.
+  dismissMention: (jid: string, messageID: string, dismissed = true) =>
+    postBody<{ success: boolean; dismissed: boolean }>('/api/v2/mentions/dismiss', {
+      chat_jid: jid,
+      message_id: messageID,
+      dismissed,
+    }),
   // refreshContactProfile asks the bridge to re-fetch this contact's WA-side
   // identity (verified business name, plain business name, push name, is_business)
   // via GetUserInfo + GetBusinessProfile and upsert it locally. The bridge
@@ -1813,6 +1878,95 @@ export const api = {
     del(`/api/v2/meetings/${id}/items/${itemID}`),
   extractMeetings: (chat_jid: string, chat_name?: string, since?: number) =>
     postBody<{ run_id: string }>('/api/v2/meetings/extract', { chat_jid, chat_name, since }),
+  meetingsRefreshStatus: async (): Promise<MeetingsRefreshStatus> => {
+    const res = await fetch('/api/v2/meetings/refresh')
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
+  // Starts a background pass that re-reads chats for meeting changes. On
+  // failure the thrown Error carries `status` (the HTTP code), so a caller
+  // can tell "one is already running" (409) from a real failure.
+  meetingsRefresh: async (
+    body: { all?: boolean; chat_jid?: string; meeting_id?: number },
+  ): Promise<{ run_id: string; chats: number }> => {
+    const res = await fetch('/api/v2/meetings/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const err = new Error((data as { error?: string }).error || `${res.status}`) as Error & {
+        status?: number
+      }
+      err.status = res.status
+      throw err
+    }
+    return data as { run_id: string; chats: number }
+  },
+
+  // ── Debugging ──────────────────────────────────────────────────────────────
+  debugOverview: async (): Promise<DebugOverview> => {
+    const res = await fetch('/api/v2/debug/overview')
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
+  debugRuns: async (opts: { service?: string; status?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (opts.service) q.set('service', opts.service)
+    if (opts.status) q.set('status', opts.status)
+    if (opts.limit) q.set('limit', String(opts.limit))
+    const res = await fetch(`/api/v2/debug/runs?${q}`)
+    if (!res.ok) throw new Error(await res.text())
+    const body = (await res.json()) as { runs: ServiceRun[] | null }
+    return body.runs ?? []
+  },
+  debugRun: async (id: string): Promise<{ run: ServiceRun; calls: LLMCall[] }> => {
+    const res = await fetch(`/api/v2/debug/runs/${encodeURIComponent(id)}`)
+    if (!res.ok) throw new Error(await res.text())
+    const body = await res.json()
+    return { run: body.run, calls: body.calls ?? [] }
+  },
+  debugLLM: async (
+    opts: { service?: string; engine?: string; chat?: string; failed?: boolean; limit?: number } = {},
+  ) => {
+    const q = new URLSearchParams()
+    if (opts.service) q.set('service', opts.service)
+    if (opts.engine) q.set('engine', opts.engine)
+    if (opts.chat) q.set('chat', opts.chat)
+    if (opts.failed) q.set('failed', '1')
+    if (opts.limit) q.set('limit', String(opts.limit))
+    const res = await fetch(`/api/v2/debug/llm?${q}`)
+    if (!res.ok) throw new Error(await res.text())
+    const body = await res.json()
+    return { calls: (body.calls ?? []) as LLMCall[], usage: body.usage }
+  },
+  debugLLMCall: async (id: number): Promise<LLMCall> => {
+    const res = await fetch(`/api/v2/debug/llm/${id}`)
+    if (!res.ok) throw new Error(await res.text())
+    return res.json()
+  },
+  debugLogs: async (lines = 200): Promise<{ path: string; lines: string[]; note?: string }> => {
+    const res = await fetch(`/api/v2/debug/logs?lines=${lines}`)
+    if (!res.ok) throw new Error(await res.text())
+    const body = await res.json()
+    return { path: body.path, lines: body.lines ?? [], note: body.note }
+  },
+
+  // ── Meeting scanner ────────────────────────────────────────────────────────
+  meetingScan: async (): Promise<{ status: MeetingScanStatus; queue: MeetingScanRow[] }> => {
+    const res = await fetch('/api/v2/meetings/scan')
+    if (!res.ok) throw new Error(await res.text())
+    const body = await res.json()
+    return { status: body.status, queue: body.queue ?? [] }
+  },
+  setMeetingScan: (patch: {
+    enabled?: boolean
+    cooldown_hours?: number
+    run_now?: boolean
+    chat_jid?: string
+  }) =>
+    postBody<{ status: MeetingScanStatus; run_id?: string }>('/api/v2/meetings/scan', patch),
   unassignedGroups: async (): Promise<UnassignedResponse> => {
     const res = await fetch('/api/v2/circles/unassigned')
     return res.json()
@@ -1831,6 +1985,125 @@ export const api = {
     )
     return res.json()
   },
+}
+
+
+// ── Debugging ────────────────────────────────────────────────────────────────
+// One shape per background worker, so the screen renders one card each with no
+// special cases. See internal/api/handler_debug.go.
+
+export type ServiceHealth = 'ok' | 'idle' | 'off' | 'broken'
+
+export type DebugService = {
+  name: string
+  does: string
+  enabled: boolean
+  running: boolean
+  health: ServiceHealth
+  schedule: string
+  tick_seconds: number
+  last_ticked_at?: number
+  next_tick_at?: number
+  last_run_id?: string
+  detail?: Record<string, unknown>
+  note?: string
+}
+
+export type DebugDependency = {
+  name: string
+  what: string
+  ok: boolean
+  path?: string
+  url?: string
+  models?: number
+  error?: string
+}
+
+export type DebugOverview = {
+  now: number
+  services: DebugService[]
+  dependencies: DebugDependency[]
+  engine: {
+    engine: string
+    model: string
+    meetings_supported: boolean
+    meetings_error?: string
+  }
+  llm_log: { rows: number; bytes: number; oldest_at?: number; failed: number }
+  process: {
+    pid: number
+    host: string
+    go: string
+    goroutines: number
+    heap_mb: number
+    started_at: number
+    uptime_s: number
+    workdir: string
+  }
+  database: Record<string, number | string>
+  active_runs: ExtractionRunState[] | null
+}
+
+export type ServiceRun = {
+  id: string
+  service: string
+  kind: string
+  subject?: string
+  label: string
+  trigger: string
+  status: string
+  started_at: number
+  ended_at?: number
+  created: number
+  summary?: string
+  error?: string
+  session_id?: string
+  events?: { ts: number; seq: number; kind: string; name?: string; text?: string }[]
+}
+
+export type LLMCall = {
+  id: number
+  run_id?: string
+  service: string
+  engine: string
+  model: string
+  kind: string
+  chat_jid?: string
+  system_prompt?: string
+  prompt?: string
+  response?: string
+  prompt_chars: number
+  reply_chars: number
+  latency_ms: number
+  attempt: number
+  ok: boolean
+  error?: string
+  created_at: number
+}
+
+export type MeetingScanStatus = {
+  enabled: boolean
+  cooldown_hours: number
+  tick_seconds: number
+  running: boolean
+  last_run_id?: string
+  last_ticked_at?: number
+  next_tick_at?: number
+  last_scanned: number
+  last_flagged: number
+  waiting: number
+}
+
+export type MeetingScanRow = {
+  chat_jid: string
+  chat_name: string
+  last_msg_ts: number
+  last_run_at: number
+  last_run_id?: string
+  hits: number
+  last_hit_ts: number
+  found: number
+  updated_at: number
 }
 
 // Human labels for the history-period presets.

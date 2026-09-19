@@ -19,8 +19,8 @@ function byName(a: Circle, b: Circle) {
 
 // flattenCircleTree walks the circle tree depth-first and returns one row per
 // circle, in the order you see them in the sidebar, each carrying its depth.
-// A picker built from this reads the same as the tree: "ZOD" shows under "BIV",
-// which shows under "OneStudio", instead of a flat A–Z list where a sub-circle
+// A picker built from this reads the same as the tree: "ZED" shows under "BVX",
+// which shows under "NorthStudio", instead of a flat A–Z list where a sub-circle
 // looks like a top-level one.
 //
 // Circles are a graph, not a strict tree — a circle can sit under more than one

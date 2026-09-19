@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"whatsapp-bridge-v2/internal/llmlog"
 )
 
 // Codex is the local OpenAI Codex CLI, authenticated via the ChatGPT
@@ -58,7 +60,7 @@ func codexAvailable() bool {
 // via --output-last-message and returned (code fences stripped). The timeout
 // covers only the exec itself — time spent waiting for a concurrency slot does
 // not count against it.
-func codexExec(timeout time.Duration, prompt string, imagePaths ...string) (string, error) {
+func codexExecRaw(timeout time.Duration, prompt string, imagePaths ...string) (string, error) {
 	bin := envOr("CODEX_BIN", "codex")
 	if _, err := exec.LookPath(bin); err != nil {
 		return "", fmt.Errorf("codex CLI not found (install it or set CODEX_BIN)")
@@ -119,4 +121,42 @@ func codexExec(timeout time.Duration, prompt string, imagePaths ...string) (stri
 		out = strings.TrimSpace(m[1])
 	}
 	return out, nil
+}
+
+// codexExec runs one Codex call and records it in the LLM log.
+//
+// kind says which job it was ("describe", "refine"), so the debug screen can
+// tell an image description apart from a transcript tidy-up. The recording
+// never changes the result: a log write that fails is dropped.
+func codexExec(kind string, timeout time.Duration, prompt string, imagePaths ...string) (string, error) {
+	started := time.Now()
+	out, err := codexExecRaw(timeout, prompt, imagePaths...)
+	llmlog.Record(llmlog.Call{
+		Service: "media",
+		Engine:  "codex",
+		Model:   envOr("CODEX_MODEL", "default"),
+		Kind:    kind,
+		Prompt:  prompt,
+		// The images themselves are not stored — only the fact that there
+		// were some, and where they came from.
+		System:   imageNote(imagePaths),
+		Response: out,
+		Latency:  time.Since(started),
+		Attempt:  1,
+		Err:      err,
+	})
+	return out, err
+}
+
+func imageNote(paths []string) string {
+	var kept []string
+	for _, p := range paths {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return "attached images:\n" + strings.Join(kept, "\n")
 }

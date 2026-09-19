@@ -78,9 +78,9 @@ func handleHistorySync(c *Client, evt *events.HistorySync) {
 
 		// Store chat with unread info
 		chat := &db.Chat{
-			JID:              chatJID,
-			Name:             chatName,
-			UnreadCount:      int(conv.GetUnreadCount()),
+			JID:               chatJID,
+			Name:              chatName,
+			UnreadCount:       int(conv.GetUnreadCount()),
 			DisappearingTimer: int64(conv.GetDisappearingMode().GetInitiator()),
 		}
 
@@ -89,7 +89,7 @@ func handleHistorySync(c *Client, evt *events.HistorySync) {
 			// Not spam, regular chat
 		}
 
-		if err := c.Store.StoreChat(chat); err != nil {
+		if err := c.Store.StoreChatFromHistorySync(chat); err != nil {
 			c.Log.Warnf("Failed to store chat %s: %v", chatJID, err)
 		}
 

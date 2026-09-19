@@ -4,7 +4,7 @@ A self-hosted WhatsApp REST API bridge built on [whatsmeow](https://github.com/t
 
 ## Why I Built This
 
-I run a startup studio ([One Studio](https://one-studio.co)) with multiple ventures across Saudi Arabia, Qatar, Turkey, and Palestine. WhatsApp is the primary communication layer — clients, teams, partners, investors all live there. I manage 40+ groups and hundreds of DMs across these ventures.
+I run a startup studio ([North Studio](https://one-studio.co)) with multiple ventures across Saudi Arabia, Qatar, Turkey, and Palestine. WhatsApp is the primary communication layer — clients, teams, partners, investors all live there. I manage 40+ groups and hundreds of DMs across these ventures.
 
 I'm building an agentic command center (HQ) where AI agents autonomously monitor these conversations, extract signals, update tasks, and even respond on my behalf. The agents needed a way to talk to WhatsApp programmatically.
 
@@ -157,7 +157,7 @@ whatsapp-bridge/
 
 1. **Map, don't abstract** — every whatsmeow type gets a 1:1 database table and API endpoint. No "simplified" models that lose data.
 2. **Timestamps are integers** — Unix epoch everywhere. No timezone bugs, no format parsing.
-3. **JIDs are the primary key** — `966535435254@s.whatsapp.net` for contacts, `120363406028992067@g.us` for groups. Stored as full strings.
+3. **JIDs are the primary key** — `966500000101@s.whatsapp.net` for contacts, `120363000000000001@g.us` for groups. Stored as full strings.
 4. **Media is local** — all images, audio, video, documents downloaded to `store/` on receipt. No external dependencies.
 5. **One binary, one process** — no Python wrappers, no MCP servers, no subprocess chains.
 

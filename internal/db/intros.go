@@ -60,7 +60,7 @@ var introSignals = []introSignal{
 
 // looksLikeNameCard reports whether a message is one of the two parties' names
 // being handed over — the exchange that happens when people swap numbers in a
-// room. "باسم العكل", "Mohammed Shurrab\n\nOne Studio", "احمد حمدي شراب".
+// room. "باسم العكل", "Mohammed Hasan\n\nNorth Studio", "احمد حمدي حسن".
 //
 // The test is overlap with a name, not the shape of the text. An earlier
 // version accepted any short two-to-four-word message, which works in English

@@ -26,7 +26,7 @@ func toolHealth() mcp.Tool {
 func toolReadMessages() mcp.Tool {
 	return mcp.NewTool("wa_read_messages",
 		mcp.WithDescription("Read messages from a WhatsApp chat. Returns messages with sender names resolved. Use chat_jid from wa_list_chats or wa_find_contact."),
-		mcp.WithString("chat_jid", mcp.Required(), mcp.Description("Chat JID (e.g. 966535435254@s.whatsapp.net or 120363406393924600@g.us)")),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description("Chat JID (e.g. 966500000101@s.whatsapp.net or 120363000000000002@g.us)")),
 		mcp.WithNumber("since", mcp.Description("Unix epoch timestamp — only messages after this time. Default: last 24 hours")),
 		mcp.WithNumber("limit", mcp.Description("Max messages to return (default 50, max 500)")),
 		mcp.WithString("search", mcp.Description("Filter messages containing this text")),
@@ -50,7 +50,7 @@ func toolListChats() mcp.Tool {
 
 func toolFindGroup() mcp.Tool {
 	return mcp.NewTool("wa_find_group",
-		mcp.WithDescription("Search WhatsApp groups by name. Returns the group JID, name, participant count, and last activity. Use this to find a group's JID from its name (e.g. 'ID8 Sports', 'One Studio')."),
+		mcp.WithDescription("Search WhatsApp groups by name. Returns the group JID, name, participant count, and last activity. Use this to find a group's JID from its name (e.g. 'IDX Sports', 'North Studio')."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Group name to search for (partial match, case-insensitive)")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
@@ -88,7 +88,7 @@ func toolFindContact() mcp.Tool {
 func toolGroupInfo() mcp.Tool {
 	return mcp.NewTool("wa_group_info",
 		mcp.WithDescription("Get WhatsApp group details: name, participants (with admin status), and optionally recent messages."),
-		mcp.WithString("jid", mcp.Required(), mcp.Description("Group JID (e.g. 120363406393924600@g.us)")),
+		mcp.WithString("jid", mcp.Required(), mcp.Description("Group JID (e.g. 120363000000000002@g.us)")),
 		mcp.WithBoolean("include_messages", mcp.Description("Include recent messages (default false)")),
 		mcp.WithNumber("message_limit", mcp.Description("Number of recent messages to include (default 20)")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -356,7 +356,7 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 	q := "%" + query + "%"
 	// kunya and how_we_met are the user's own notes, and they are the most
 	// useful thing here: WhatsApp knows a display name, but only the user knows
-	// that this is "أبو يمان" and that Abdullah sent him about the CVB file.
+	// that this is "أبو يمان" and that Abdullah sent him about the QRT file.
 	// Searching them too means the agent can find someone by how they were
 	// introduced, not just by name.
 	rows, err := s.db.Query(`SELECT jid, lid, phone, name, push_name, business_name,

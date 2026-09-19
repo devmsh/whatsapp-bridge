@@ -6,7 +6,7 @@
 //
 // Flags:
 //
-//	--jid   Filter to a specific chat JID (e.g. 972592604155@s.whatsapp.net).
+//	--jid   Filter to a specific chat JID (e.g. 972500000101@s.whatsapp.net).
 //	        Omit to receive all incoming messages.
 //	--host  Bridge base URL (default: http://localhost:8082).
 //
@@ -17,7 +17,7 @@
 //
 // Example:
 //
-//	wa-watch --jid 972592604155@s.whatsapp.net
+//	wa-watch --jid 972500000101@s.whatsapp.net
 //	wa-watch | jq '{from: .push_name, text: .content}'
 package main
 

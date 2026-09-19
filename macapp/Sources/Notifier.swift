@@ -7,7 +7,8 @@ import UserNotifications
 ///   1. Own messages never notify.
 ///   2. Deletions never notify.
 ///   3. Muted chats never notify — the bridge owns mute state.
-///   4. The chat you are already looking at, in a focused window, never notifies.
+///   4. Archived chats never notify — same reasoning as mute.
+///   5. The chat you are already looking at, in a focused window, never notifies.
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let directory: ChatDirectory
     private var unreadCount = 0
@@ -55,6 +56,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let chat = directory.chat(for: msg.chatJID)
         if chat?.isMuted == true {
             log("suppressed \(msg.id): chat muted")
+            return
+        }
+
+        if chat?.isArchived == true {
+            log("suppressed \(msg.id): chat archived")
             return
         }
 

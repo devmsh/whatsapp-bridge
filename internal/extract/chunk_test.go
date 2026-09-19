@@ -17,7 +17,7 @@ func line(id string, ts int64, sender, text string) extract.Line {
 func TestChunkKeepsRepliesWithTheirTarget(t *testing.T) {
 	var lines []extract.Line
 	for i := 0; i < 12; i++ {
-		lines = append(lines, line(string(rune('a'+i)), int64(1000+i), "Omar", "filler filler"))
+		lines = append(lines, line(string(rune('a'+i)), int64(1000+i), "Sami", "filler filler"))
 	}
 	// The last line answers the very first one, which will fall outside.
 	last := line("z", 2000, "Sara", "تمام")
@@ -50,7 +50,7 @@ func TestChunkKeepsRepliesWithTheirTarget(t *testing.T) {
 func TestChunkOverlapIsContext(t *testing.T) {
 	var lines []extract.Line
 	for i := 0; i < 10; i++ {
-		lines = append(lines, line(string(rune('a'+i)), int64(1000+i), "Omar", "x"))
+		lines = append(lines, line(string(rune('a'+i)), int64(1000+i), "Sami", "x"))
 	}
 	chunks := extract.Split(lines, "c@g.us",
 		extract.ChunkOptions{MaxMessages: 5, MaxChars: 100000, Overlap: 2})
@@ -70,9 +70,9 @@ func TestChunkOverlapIsContext(t *testing.T) {
 // prefilter. Skipping is an optimisation; skipping something real is a bug.
 func TestSkippableOnlyWhenNothingCouldBeWork(t *testing.T) {
 	quiet := extract.Chunk{Lines: []extract.Line{
-		line("1", 1, "Omar", "صباح الخير"),
+		line("1", 1, "Sami", "صباح الخير"),
 		line("2", 2, "Sara", "الله يصبحك بالخير"),
-		line("3", 3, "Omar", "😂😂"),
+		line("3", 3, "Sami", "😂😂"),
 	}}
 	if !extract.Skippable(quiet, nil) {
 		t.Errorf("a chunk of greetings has nothing to extract")
@@ -85,7 +85,7 @@ func TestSkippableOnlyWhenNothingCouldBeWork(t *testing.T) {
 		"can you follow up with them?",
 	} {
 		busy := extract.Chunk{Lines: []extract.Line{
-			line("1", 1, "Omar", "صباح الخير"),
+			line("1", 1, "Sami", "صباح الخير"),
 			line("2", 2, "Sara", text),
 		}}
 		if extract.Skippable(busy, nil) {
