@@ -123,11 +123,13 @@ Depends on: nothing
 
 ## Reach the extraction quality bar, or agree a lower one
 
-Why: the engine scores 0.65 precision and 0.54 recall against a bar of 0.85
-and 0.75 (design §7). Known: it is not the model (four are within ten points),
-not confidence (the range barely separates), and not code rules (five rounds
-bought four points). The second-opinion call bought twenty-three points and is
-the only lever that has moved it. Options not yet tried: a third pass on what
+Why: the engine scores 0.70 precision and 0.57 recall against a bar of 0.85
+and 0.75 (design §7). A new default model on 2026-09-19 (qwen3.6:35b-a3b-mtp,
+thinking off) bought five points and halved the time per chunk, but the bar is
+still far. Known: confidence does not help (the range barely separates), and
+code rules do not help (five rounds bought four points). The second-opinion
+call bought twenty-three points and is the biggest lever so far. Options not
+yet tried: a third pass on what
 survives; sending only the doubtful chunks to Claude; merging bursts of
 messages from one sender into one line so a list of examples cannot become six
 tasks. Or accept the number: every task lands in a review queue, and two in
