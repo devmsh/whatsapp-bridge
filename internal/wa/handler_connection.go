@@ -64,6 +64,9 @@ func handleTemporaryBan(c *Client, evt *events.TemporaryBan) {
 
 func handleClientOutdated(c *Client, _ *events.ClientOutdated) {
 	c.Log.Errorf("Client outdated — please update whatsmeow")
+	// whatsmeow stops auto-reconnect after this error. Tell the GUI, or it
+	// would show "Connecting…" forever.
+	c.Auth.onFatal("WhatsApp rejected this app version as too old. Update the bridge (whatsmeow) and restart it.")
 }
 
 func handleUndecryptable(c *Client, evt *events.UndecryptableMessage) {

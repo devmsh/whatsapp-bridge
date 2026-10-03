@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
+
+	"whatsapp-bridge-v2/internal/db"
 )
 
 // RunStatus is the lifecycle state of one extraction run.
@@ -31,10 +34,13 @@ type RunEvent struct {
 
 // Run is the live state of one extraction.
 type Run struct {
-	ID        string     `json:"id"`
-	Kind      string     `json:"kind"`    // chat | circle
-	Subject   string     `json:"subject"` // chat JID or circle id (string)
-	Label     string     `json:"label"`   // human title
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`    // chat | circle | meetings
+	Subject string `json:"subject"` // chat JID or circle id (string)
+	Label   string `json:"label"`   // human title
+	// Trigger says what started it: a person, the scheduler, or boot. Without
+	// it, run history cannot answer "did the timer actually fire last night".
+	Trigger   string     `json:"trigger"`
 	Status    RunStatus  `json:"status"`
 	StartedAt int64      `json:"started_at"`
 	EndedAt   int64      `json:"ended_at,omitempty"`
@@ -48,17 +54,65 @@ type Run struct {
 	seq    int64
 	subs   map[chan RunEvent]bool
 	cancel context.CancelFunc
+	store  *db.Store
+}
+
+// persist mirrors the run into service_runs. Called when it starts and again
+// when it ends; a run interrupted by a restart keeps its "running" row until
+// startup marks it interrupted.
+func (r *Run) persist() {
+	if r.store == nil {
+		return
+	}
+	r.mu.Lock()
+	row := db.ServiceRun{
+		ID: r.ID, Service: serviceOf(r.Kind), Kind: r.Kind, Subject: r.Subject,
+		Label: r.Label, Trigger: r.Trigger, Status: string(r.Status),
+		StartedAt: r.StartedAt, EndedAt: r.EndedAt, Created: r.Created,
+		Summary: r.Summary, Error: r.Error, SessionID: r.SessionID,
+	}
+	// Events are only written on the terminal save. Writing them on every
+	// event would rewrite a growing JSON blob hundreds of times per run.
+	if r.Status == RunDone || r.Status == RunFailed || r.Status == RunCancelled {
+		if b, err := json.Marshal(r.Events); err == nil {
+			row.Events = b
+		}
+	}
+	r.mu.Unlock()
+	r.store.SaveServiceRun(row)
+}
+
+// serviceOf names the background service a run belongs to, from its kind.
+// "chat" and "circle" runs are both the task extractor.
+func serviceOf(kind string) string {
+	switch kind {
+	case "meetings", "meeting-refresh":
+		return "meetings"
+	case "profile", "profiles":
+		return "profiles"
+	case "digest":
+		return "digest"
+	default:
+		return "tasks"
+	}
 }
 
 const runEventsCap = 2000 // ring-buffer of recent events kept in memory
 
 // RunManager tracks live and recent extraction runs.
+//
+// It keeps them in memory for the progress stream, and mirrors every one into
+// service_runs so the history survives a restart. The in-memory map is a
+// window; the table is the record.
 type RunManager struct {
-	mu   sync.Mutex
-	runs map[string]*Run
+	mu    sync.Mutex
+	runs  map[string]*Run
+	store *db.Store
 }
 
-func newRunManager() *RunManager { return &RunManager{runs: map[string]*Run{}} }
+func newRunManager(store *db.Store) *RunManager {
+	return &RunManager{runs: map[string]*Run{}, store: store}
+}
 
 func newID() string {
 	b := make([]byte, 8)
@@ -66,22 +120,34 @@ func newID() string {
 	return hex.EncodeToString(b)
 }
 
-// Start creates a new Run with its own cancellable context.
+// Start creates a new Run with its own cancellable context. Runs started this
+// way are marked as triggered by a person, which is what every handler does.
 func (m *RunManager) Start(kind, subject, label string) (*Run, context.Context) {
+	return m.StartTagged(kind, subject, label, "manual")
+}
+
+// StartTagged is Start, saying what set the run going: manual | auto | startup.
+func (m *RunManager) StartTagged(kind, subject, label, trigger string) (*Run, context.Context) {
 	ctx, cancel := context.WithCancel(context.Background())
+	if trigger == "" {
+		trigger = "manual"
+	}
 	r := &Run{
 		ID:        newID(),
 		Kind:      kind,
 		Subject:   subject,
 		Label:     label,
+		Trigger:   trigger,
 		Status:    RunStarting,
 		StartedAt: time.Now().Unix(),
 		subs:      map[chan RunEvent]bool{},
 		cancel:    cancel,
+		store:     m.store,
 	}
 	m.mu.Lock()
 	m.runs[r.ID] = r
 	m.mu.Unlock()
+	r.persist()
 	// Auto-clean finished runs after 30 minutes to keep the map small.
 	go func() {
 		t := time.NewTicker(30 * time.Minute)
@@ -168,6 +234,7 @@ func (r *Run) SetRunning() {
 	r.mu.Lock()
 	r.Status = RunRunning
 	r.mu.Unlock()
+	r.persist()
 }
 
 // Finish records the terminal state and final summary; closes all subscriptions.
@@ -198,6 +265,7 @@ func (r *Run) Finish(status RunStatus, sessionID, summary string, created int, e
 		}
 		close(c)
 	}
+	r.persist()
 }
 
 // Cancel triggers the run's context cancellation (kills the sidecar).

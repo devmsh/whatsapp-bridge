@@ -134,6 +134,10 @@ func (s *Server) meetingEntity(w http.ResponseWriter, r *http.Request, id int64)
 			jsonError(w, 404, "meeting not found")
 			return
 		}
+		// A copy of the meeting before the edit, so the change trail can
+		// record what a person actually changed, same as the model does for
+		// its own patches (see docs/superpowers/specs/2026-09-18-live-meetings-design.md).
+		before := *cur
 		// Patch semantics: only the fields present in the body change, so a
 		// partial edit from the UI cannot blank the rest of the meeting.
 		var req struct {
@@ -207,6 +211,11 @@ func (s *Server) meetingEntity(w http.ResponseWriter, r *http.Request, id int64)
 		if err := s.store.UpdateMeeting(cur); err != nil {
 			jsonError(w, 500, err.Error())
 			return
+		}
+		// Keep a trail of what the user changed, so a later model patch knows
+		// this field was touched by hand and must not be overwritten.
+		if err := s.store.RecordMeetingEdit(&before, cur, db.ChangeByUser); err != nil {
+			fmt.Printf("meeting edit: record change failed for meeting %d: %v\n", id, err)
 		}
 		full, _ := s.store.GetMeeting(id)
 		jsonOK(w, full)
@@ -453,7 +462,7 @@ func (s *Server) handleMeetingExtract(w http.ResponseWriter, r *http.Request) {
 
 // handleMeetingsResyncCircles re-derives the circles of every meeting.
 //
-// Circles change after the fact: you file a group into "OneStudio" today, and
+// Circles change after the fact: you file a group into "NorthStudio" today, and
 // every meeting ever held in it should belong there too. Rather than watch for
 // circle edits from the meeting side, this recomputes the lot on demand — it is
 // a cheap query per meeting and there will never be many.
@@ -463,6 +472,7 @@ func (s *Server) handleMeetingsResyncCircles(w http.ResponseWriter, r *http.Requ
 		methodNotAllowed(w)
 		return
 	}
+	s.rememberOwnJID()
 	list, err := s.store.ListMeetings(db.MeetingFilter{})
 	if err != nil {
 		jsonError(w, 500, err.Error())

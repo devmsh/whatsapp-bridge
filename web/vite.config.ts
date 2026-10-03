@@ -8,6 +8,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
+    // Lets the dev server be reached at https://whatsapp-bridge-dev.test
+    // (via Caddy + devdomain) instead of a bare http://localhost:5173.
+    allowedHosts: ['whatsapp-bridge-dev.test'],
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8082',

@@ -18,6 +18,8 @@ import { CirclesPanel } from './CirclesPanel'
 import { RecommendationsView } from './RecommendationsView'
 import { usePoll } from '../hooks/usePoll'
 import { UnassignedView } from './UnassignedView'
+import { DebugView } from './DebugView'
+import { MentionsView } from './MentionsView'
 import { MeetingsView } from './MeetingsView'
 import { TasksSidebar, type TasksSelection } from './TasksSidebar'
 import { TasksView } from './TasksView'
@@ -53,7 +55,7 @@ import { useScheduledAutopilot } from '../hooks/useScheduledMessages'
 import { ShortcutsHelp } from './ShortcutsHelp'
 import { NewChatModal } from './NewChatModal'
 
-type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls' | 'meetings'
+type Tab = 'chats' | 'contacts' | 'circles' | 'tasks' | 'calls' | 'meetings' | 'debug' | 'mentions'
 
 // Explorer is the main app after onboarding: a chat list / contacts sidebar and
 // a message thread, with live updates over SSE.
@@ -124,11 +126,13 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
   const [dndOpen, setDndOpen] = useState(false)
-  // Message ID the universal search asked us to land on after the chat
-  // opens. MessageThread watches it, fires jumpToMessage once the row is
-  // in the loaded window, then calls onJumpHandled to clear it so the
-  // next chat-switch doesn't re-trigger an old jump.
-  const [pendingJumpId, setPendingJumpId] = useState<string | null>(null)
+  // Message the universal search (or the Mentions page) asked us to land on
+  // after the chat opens. MessageThread watches it, fires jumpToMessage once
+  // the row is in the loaded window (fetching a bigger anchored window
+  // first when `ts` is supplied and the row isn't there yet), then calls
+  // onJumpHandled to clear it so the next chat-switch doesn't re-trigger an
+  // old jump.
+  const [pendingJumpId, setPendingJumpId] = useState<{ id: string; ts?: number } | null>(null)
   const [showProfiling, setShowProfiling] = useState(false)
   const [showBriefing, setShowBriefing] = useState(false)
   const [showStarred, setShowStarred] = useState(false)
@@ -257,6 +261,33 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   // polling all night. Two minutes is plenty for something edited by hand.
   usePoll(reloadTags, 120_000, [reloadTags])
 
+  // A background worker that has stopped ticking is invisible by definition —
+  // nothing fails, things just quietly stop happening. So the count of broken
+  // ones rides on the Debugging row in the sidebar. Two minutes: this is a
+  // "something has been wrong for a while" signal, not a live meter.
+  const [brokenServices, setBrokenServices] = useState(0)
+  usePoll(() => {
+    api
+      .debugOverview()
+      .then((d) => setBrokenServices(d.services.filter((x) => x.health === 'broken').length))
+      .catch(() => setBrokenServices(0))
+  }, 120_000, [])
+
+  // Count for the Mentions rail badge. A minute is plenty — mentions don't
+  // need to feel instant, and usePoll stops the moment the window is hidden.
+  // MentionsView also fires 'wa.mentions-changed' right after a dismiss or
+  // reply so the badge doesn't wait up to a minute to catch up with what the
+  // user just did — same shape as 'wa.chats-changed'.
+  const [mentionsCount, setMentionsCount] = useState(0)
+  const reloadMentionsCount = useCallback(() => {
+    api.mentions().then((m) => setMentionsCount(m.length)).catch(() => setMentionsCount(0))
+  }, [])
+  usePoll(reloadMentionsCount, 60_000, [])
+  useEffect(() => {
+    window.addEventListener('wa.mentions-changed', reloadMentionsCount)
+    return () => window.removeEventListener('wa.mentions-changed', reloadMentionsCount)
+  }, [reloadMentionsCount])
+
   // Live message stream: append to the open chat and reorder the chat list.
   useEffect(() => {
     let closed = false
@@ -374,6 +405,18 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
     // Fallthrough B: still unknown — we genuinely can't route here.
     alert('This chat is locked or not available.')
   }, [contacts, extraChats, device?.jid])
+
+  // "Open in chat" from the Mentions page: open the chat and land on the
+  // exact message, fetching a bigger window anchored on its timestamp if
+  // it's older than what the thread would normally load (see MessageThread's
+  // pendingJumpId handling).
+  const navigateToMention = useCallback(
+    (chatJID: string, messageID: string, ts: number) => {
+      openChat(chatJID)
+      setPendingJumpId({ id: messageID, ts })
+    },
+    [openChat],
+  )
 
   // Esc = panic relock.
   //
@@ -719,7 +762,8 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
   const detailOpen = recoOpen || unassignedOpen || selected != null || selectedTask != null
   // The Tasks tab renders its list in <main> (the sidebar holds only the
   // scope picker), so treat that tab as "show main" on mobile too.
-  const showMainMobile = detailOpen || tab === 'tasks' || tab === 'meetings'
+  const showMainMobile =
+    detailOpen || tab === 'tasks' || tab === 'meetings' || tab === 'debug' || tab === 'mentions'
   // Back steps up one level: detail → its list, then list → chats.
   const closeMobileDetail = () => {
     if (selected != null) return setSelected(null)
@@ -731,6 +775,8 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
       return setTab('chats')
     }
     if (tab === 'tasks') return setTab('chats')
+    if (tab === 'debug') return setTab('chats')
+    if (tab === 'mentions') return setTab('chats')
   }
 
   if (focusCircleId != null)
@@ -919,18 +965,23 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             (n, c) => n + (c.is_archived && !c.is_hidden ? 1 : 0),
             0,
           )}
+          mentionsCount={mentionsCount}
           upcomingMeetings={upcomingMeetings}
+          brokenServices={brokenServices}
           profileName={device?.push_name || 'You'}
           onProfile={() => setShowSelfProfile(true)}
         />
       </div>
 
       {/* Meetings brings its own list column, so the shared sidebar would be a
-          second, empty panel next to it. */}
+          second, empty panel next to it. Mentions and Debugging are single
+          scrollable pages with no separate list either. */}
       <aside
         className={
           'w-full shrink-0 flex-col border-r border-neutral-800 md:w-80 ' +
-          (tab === 'meetings' ? 'hidden md:hidden ' : 'md:flex ') +
+          (tab === 'meetings' || tab === 'debug' || tab === 'mentions'
+            ? 'hidden md:hidden '
+            : 'md:flex ') +
           (showMainMobile ? 'hidden' : 'flex')
         }
       >
@@ -1112,7 +1163,7 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
                 // the row lands in the loaded window — same flash as
                 // tapping a quoted-reply chip.
                 openChat(h.chat_jid)
-                setPendingJumpId(h.id)
+                setPendingJumpId({ id: h.id, ts: h.ts })
               }
             }}
           />
@@ -1213,6 +1264,16 @@ export function Explorer({ device }: { device?: DeviceInfo }) {
             onChanged={reloadCircles}
             onOpenCircle={openCircle}
             onOpenReco={openReco}
+          />
+        ) : tab === 'debug' ? (
+          <DebugView />
+        ) : tab === 'mentions' ? (
+          <MentionsView
+            nameMap={nameMap}
+            mentionIndex={mentionIndex}
+            selfDigits={selfDigits}
+            onOpenChat={openChat}
+            onNavigate={navigateToMention}
           />
         ) : tab === 'meetings' ? (
           <MeetingsView

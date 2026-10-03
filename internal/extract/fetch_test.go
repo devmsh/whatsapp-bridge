@@ -42,7 +42,7 @@ func TestFetchLinesEnriches(t *testing.T) {
 		t.Fatalf("StoreContact: %v", err)
 	}
 	if err := st.StoreContact(&db.Contact{
-		JID: "966500000002@s.whatsapp.net", Name: "Omar Nasser",
+		JID: "966500000002@s.whatsapp.net", Name: "Sami Nasser",
 	}); err != nil {
 		t.Fatalf("StoreContact: %v", err)
 	}
@@ -96,8 +96,8 @@ func TestFetchLinesEnriches(t *testing.T) {
 	if len(lines[2].Mentions) != 1 || lines[2].Mentions[0] != "966500000001@s.whatsapp.net" {
 		t.Errorf("mention JID should be kept in phone form, got %v", lines[2].Mentions)
 	}
-	if lines[0].Sender != "Omar Nasser" {
-		t.Errorf("sender name = %q, want Omar Nasser", lines[0].Sender)
+	if lines[0].Sender != "Sami Nasser" {
+		t.Errorf("sender name = %q, want Sami Nasser", lines[0].Sender)
 	}
 }
 
@@ -127,7 +127,7 @@ func TestFetchLinesWindow(t *testing.T) {
 func TestRenderQuotesMessageIDs(t *testing.T) {
 	c := extract.Chunk{Lines: []extract.Line{
 		{MessageID: "AAA", TS: 1_760_000_000, Sender: "Sara", Text: "جهز العقد"},
-		{MessageID: "BBB", TS: 1_760_000_060, Sender: "Omar", Text: "تمام", ReplyTo: "AAA"},
+		{MessageID: "BBB", TS: 1_760_000_060, Sender: "Sami", Text: "تمام", ReplyTo: "AAA"},
 		{MessageID: "CCC", TS: 1_760_000_120, Sender: "Sara", Text: "old", Context: true},
 	}}
 	out := extract.Render(c, riyadh(t))
@@ -152,7 +152,7 @@ func TestRosterCarriesKunya(t *testing.T) {
 	// Written through the notes path on purpose: contact sync never touches
 	// these two columns, which is what keeps them safe from a refresh.
 	if err := st.SetContactNotes("966500000003@s.whatsapp.net",
-		"أبو يمان", "Introduced by Abdullah about the CVB file"); err != nil {
+		"أبو يمان", "Introduced by Abdullah about the QRT file"); err != nil {
 		t.Fatalf("SetContactNotes: %v", err)
 	}
 	if err := st.StoreGroupParticipant(&db.GroupParticipant{
@@ -176,7 +176,7 @@ func TestRosterCarriesKunya(t *testing.T) {
 	}
 
 	block := extract.RenderRoster(people, own)
-	if !strings.Contains(block, "أبو يمان") || !strings.Contains(block, "CVB") {
+	if !strings.Contains(block, "أبو يمان") || !strings.Contains(block, "QRT") {
 		t.Errorf("rendered roster should mention both:\n%s", block)
 	}
 	if !strings.Contains(block, "[admin]") {
@@ -195,15 +195,15 @@ func TestNameResolverPrefersRealNumbers(t *testing.T) {
 
 	// The real person: a phone number, with their LID recorded.
 	if err := st.StoreContact(&db.Contact{
-		JID: "966535435254@s.whatsapp.net", LID: "63840813367480", Phone: "966535435254",
-		Name: "Mohammed Shurrab",
+		JID: "966500000101@s.whatsapp.net", LID: "10000000000101", Phone: "966500000101",
+		Name: "Mohammed Hasan",
 	}); err != nil {
 		t.Fatalf("StoreContact: %v", err)
 	}
 	// The artefacts: the same LID as its own contact, twice over.
-	for _, jid := range []string{"63840813367480@lid", "63840813367480@s.whatsapp.net"} {
+	for _, jid := range []string{"10000000000101@lid", "10000000000101@s.whatsapp.net"} {
 		if err := st.StoreContact(&db.Contact{
-			JID: jid, Phone: "63840813367480", Name: "Mohammed Sufian Shurrab",
+			JID: jid, Phone: "10000000000101", Name: "Mohammed Ali Hasan",
 		}); err != nil {
 			t.Fatalf("StoreContact(%s): %v", jid, err)
 		}
@@ -211,7 +211,7 @@ func TestNameResolverPrefersRealNumbers(t *testing.T) {
 
 	if err := st.StoreMessage(&db.Message{
 		ID: "M1", ChatJID: chat, Sender: "966500000009@s.whatsapp.net",
-		Content: "@63840813367480 جهز العقد", Mentions: `["63840813367480@lid"]`,
+		Content: "@10000000000101 جهز العقد", Mentions: `["10000000000101@lid"]`,
 		Timestamp: 1000,
 	}); err != nil {
 		t.Fatalf("StoreMessage: %v", err)
@@ -224,7 +224,7 @@ func TestNameResolverPrefersRealNumbers(t *testing.T) {
 	if len(lines) != 1 || len(lines[0].Mentions) != 1 {
 		t.Fatalf("expected one message with one mention, got %+v", lines)
 	}
-	if got := lines[0].Mentions[0]; got != "966535435254@s.whatsapp.net" {
+	if got := lines[0].Mentions[0]; got != "966500000101@s.whatsapp.net" {
 		t.Errorf("mention resolved to %q, want the real number — a LID under the\n"+
 			"phone server is a sync artefact, not somebody's contact", got)
 	}

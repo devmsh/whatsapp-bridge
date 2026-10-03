@@ -50,6 +50,28 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		chatJIDs = append(chatJIDs, pn)
 	}
 
+	// include_ts: the caller wants to land on one specific old message (e.g.
+	// jumping in from the Mentions page). Rather than a second pagination
+	// mode, just make sure `limit` is big enough to reach that far back:
+	// count how many messages are newer, pad a little, and load that many.
+	// Capped so a very old target can't force loading the whole history.
+	if v := r.URL.Query().Get("include_ts"); v != "" {
+		if ts, err := strconv.ParseInt(v, 10, 64); err == nil {
+			needed := 0
+			for _, jid := range chatJIDs {
+				n, _ := s.store.CountMessagesSince(jid, ts)
+				needed += n
+			}
+			if want := needed + 20; want > limit {
+				limit = want
+			}
+			const maxLimit = 2000
+			if limit > maxLimit {
+				limit = maxLimit
+			}
+		}
+	}
+
 	msgs, err := s.store.GetMessagesMerged(chatJIDs, since, limit)
 	if err != nil {
 		jsonError(w, 500, err.Error())

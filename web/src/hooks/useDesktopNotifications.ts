@@ -16,7 +16,7 @@ import { chatTitle, isGroup, senderTitle } from '../explorer/format'
 // fire(msg) is the one-shot helper Explorer calls from its SSE
 // onmessage. It applies WA-style gating before showing anything:
 //   • own messages are silent (you already know)
-//   • muted chats are silent
+//   • muted or archived chats are silent
 //   • already-focused chat is silent (you're reading it live)
 //   • window-visible but a different chat is open: still fires —
 //     the user has lots of chats; a ping on a different one is the
@@ -103,9 +103,9 @@ export function useDesktopNotifications({
     if (Math.floor(Date.now() / 1000) < readDndUntil()) return
     // Own messages: silent. You already know.
     if (m.is_from_me) return
-    // Muted: silent. Same as WA.
+    // Muted or archived: silent. Same as WA.
     const chat = chatsRef.current.find((c) => c.jid === m.chat_jid)
-    if (chat?.is_muted) return
+    if (chat?.is_muted || chat?.is_archived) return
     // The chat is open and the user is looking at it: skip — they're
     // reading it live. Otherwise (different chat OR window hidden) fire.
     const isOpenAndFocused =

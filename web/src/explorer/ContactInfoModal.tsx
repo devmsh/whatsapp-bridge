@@ -259,7 +259,7 @@ export function ContactInfoModal({
 
 // ContactNotes is where you write the two things WhatsApp can never tell you:
 // the kunya someone is actually addressed by, and how you came to know them.
-// Both feed the AI — "the person Abdullah sent me about the CVB file" is worth
+// Both feed the AI — "the person Abdullah sent me about the QRT file" is worth
 // far more to it than a display name.
 function ContactNotes({ jid }: { jid: string }) {
   const [kunya, setKunya] = useState('')

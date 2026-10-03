@@ -34,7 +34,7 @@ func Roster(store *db.Store, chatJID string) ([]RosterPerson, string, bool, erro
 //
 // One person can hold three contact rows — a phone JID, a "@lid", and a junk
 // row where the LID digits were written under the phone server. Left alone,
-// an owner resolved from the roster comes out as "63840813367480@lid", which
+// an owner resolved from the roster comes out as "10000000000101@lid", which
 // matches nothing else in the app and reads as a number to a human.
 func canonicalise(store *db.Store, people []RosterPerson) []RosterPerson {
 	names := newNameResolver(store)

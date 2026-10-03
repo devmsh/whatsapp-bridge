@@ -98,7 +98,7 @@ func (c *Client) GetWhatsmeowClient() *whatsmeow.Client {
 	return c.WA
 }
 
-// ResolveLIDForJID takes a phone JID (e.g. "972592604155@s.whatsapp.net") and returns
+// ResolveLIDForJID takes a phone JID (e.g. "972500000101@s.whatsapp.net") and returns
 // the corresponding LID JID if one exists, or empty string if not found.
 // This is used by the API layer to merge LID-stored messages with phone-stored messages.
 func (c *Client) ResolveLIDForJID(phoneJID string) string {
@@ -130,7 +130,7 @@ func (c *Client) ResolvePhoneForLID(lidJID string) string {
 // Returns nil when no device is linked.
 // SelfMentionPatterns returns the substrings that identify "the current user"
 // inside the messages.mentions JSON column. WhatsApp emits @-mention
-// identifiers as a JID string like "63840813367480@lid" (LID form for newer
+// identifiers as a JID string like "10000000000101@lid" (LID form for newer
 // accounts) — we return both LID and phone forms so an old message that
 // happens to store the phone JID still matches. Empty when not logged in.
 func (c *Client) SelfMentionPatterns() []string {

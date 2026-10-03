@@ -337,7 +337,7 @@ func (s *Server) handleIntroChats(w http.ResponseWriter, r *http.Request) {
 //
 // This is the context the AI cannot get from anywhere else. WhatsApp knows a
 // display name and a number; it does not know that Abdullah sent this person to
-// you about the CVB file.
+// you about the QRT file.
 //
 // GET  /api/v2/contacts/{jid}/notes
 // PUT  /api/v2/contacts/{jid}/notes  {"kunya":"...","how_we_met":"..."}

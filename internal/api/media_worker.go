@@ -520,7 +520,7 @@ func buildRefinePrompt(rawText string, recent []string) string {
 // NEVER costs us the transcript).
 func (m *MediaUnderstandingManager) refineTranscript(chatJID, msgID, rawText string) string {
 	ctx := m.recentChatLinesBefore(chatJID, msgID, 10)
-	out, err := codexExec(2*time.Minute, buildRefinePrompt(rawText, ctx))
+	out, err := codexExec("refine", 2*time.Minute, buildRefinePrompt(rawText, ctx))
 	if err != nil || strings.TrimSpace(out) == "" {
 		return rawText
 	}
@@ -627,7 +627,7 @@ Do not run any commands or use any tools. Output only the description text.`
 
 // describeImage runs Codex vision on a single image file.
 func (m *MediaUnderstandingManager) describeImage(path string) (string, error) {
-	out, err := codexExec(2*time.Minute, imageDescribePrompt, path)
+	out, err := codexExec("describe", 2*time.Minute, imageDescribePrompt, path)
 	if err != nil {
 		return "", fmt.Errorf("codex vision failed: %v", err)
 	}

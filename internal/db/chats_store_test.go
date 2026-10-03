@@ -17,7 +17,7 @@ func TestMarkingReadKeepsChatFlags(t *testing.T) {
 	jid := "one-studio@g.us"
 	if err := st.StoreChat(&db.Chat{
 		JID:           jid,
-		Name:          "One Studio",
+		Name:          "North Studio",
 		LastMessageAt: 1700,
 		UnreadCount:   4,
 		IsPinned:      true,
@@ -51,8 +51,8 @@ func TestMarkingReadKeepsChatFlags(t *testing.T) {
 	if got.LastMessageAt != 1700 {
 		t.Errorf("last_message_at = %d, want 1700 — marking read wiped the timestamp", got.LastMessageAt)
 	}
-	if got.Name != "One Studio" {
-		t.Errorf("name = %q, want %q", got.Name, "One Studio")
+	if got.Name != "North Studio" {
+		t.Errorf("name = %q, want %q", got.Name, "North Studio")
 	}
 }
 

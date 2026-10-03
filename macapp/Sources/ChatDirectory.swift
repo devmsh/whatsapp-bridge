@@ -8,17 +8,20 @@ import Foundation
 /// /api/v2/groups and /api/v2/contacts. Getting this wrong is very visible —
 /// every group banner reads "Group".
 ///
-/// Mute matters too: a muted chat must not raise a banner, and the bridge
-/// already owns that state (including the working-hours auto-mute), so the app
-/// honours what the bridge says rather than keeping a second notion of muted.
+/// Mute and archive matter too: a muted or archived chat must not raise a
+/// banner, and the bridge already owns that state (including the
+/// working-hours auto-mute), so the app honours what the bridge says rather
+/// than keeping a second notion of either.
 final class ChatDirectory {
     struct Chat {
         let jid: String
         let name: String
         let isMuted: Bool
+        let isArchived: Bool
     }
 
     private var muted: Set<String> = []
+    private var archived: Set<String> = []
     private var rawChatName: [String: String] = [:]
     /// JID → display name, from groups and contacts (incl. phone and LID forms).
     private var names: [String: String] = [:]
@@ -43,7 +46,9 @@ final class ChatDirectory {
     func chat(for jid: String) -> Chat? {
         lock.lock()
         defer { lock.unlock() }
-        return Chat(jid: jid, name: resolvedNameLocked(jid), isMuted: muted.contains(jid))
+        return Chat(
+            jid: jid, name: resolvedNameLocked(jid),
+            isMuted: muted.contains(jid), isArchived: archived.contains(jid))
     }
 
     /// The contact-book name for a JID, or nil when it is genuinely unknown.
@@ -76,14 +81,17 @@ final class ChatDirectory {
         fetchJSONArray("chats?limit=1000") { [weak self] rows in
             guard let self else { return }
             var mutedSet: Set<String> = []
+            var archivedSet: Set<String> = []
             var raw: [String: String] = [:]
             for row in rows {
                 guard let jid = row["jid"] as? String else { continue }
                 raw[jid] = (row["name"] as? String) ?? ""
                 if (row["is_muted"] as? Bool) == true { mutedSet.insert(jid) }
+                if (row["is_archived"] as? Bool) == true { archivedSet.insert(jid) }
             }
             self.lock.lock()
             self.muted = mutedSet
+            self.archived = archivedSet
             self.rawChatName = raw
             self.lock.unlock()
         }

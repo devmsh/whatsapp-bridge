@@ -48,6 +48,25 @@ func (s *Store) StoreChat(c *Chat) error {
 	return err
 }
 
+// StoreChatFromHistorySync upserts only the fields a history-sync batch
+// actually knows: name, unread count, disappearing timer. Archive/pin/mute
+// state and last-message time are left untouched, the same reasoning as
+// SetChatUnread below — history sync has no opinion on them, and running them
+// through the full StoreChat upsert used to silently un-archive, un-pin and
+// un-mute a chat (back to the Go zero value) the moment any sync batch
+// touched it, even long after the user had genuinely archived or muted it.
+func (s *Store) StoreChatFromHistorySync(c *Chat) error {
+	_, err := s.DB.Exec(`INSERT INTO chats (jid, name, unread_count, disappearing_timer)
+		VALUES (?,?,?,?)
+		ON CONFLICT(jid) DO UPDATE SET
+			name               = CASE WHEN excluded.name != '' THEN excluded.name ELSE chats.name END,
+			unread_count       = excluded.unread_count,
+			disappearing_timer = excluded.disappearing_timer`,
+		c.JID, c.Name, c.UnreadCount, c.DisappearingTimer,
+	)
+	return err
+}
+
 // SetChatUnread sets just the unread count, leaving every other flag alone.
 // This is what "mark as read" needs — it knows nothing about pins or archives
 // and must not overwrite them.

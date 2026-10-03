@@ -76,6 +76,11 @@ func NewStore(path string) (*Store, error) {
 		`ALTER TABLE tasks ADD COLUMN evidence TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN engine TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE tasks ADD COLUMN confidence REAL NOT NULL DEFAULT 0`,
+		// checked_ts is the live-meetings follow-up watermark: messages in the
+		// meeting's chats up to this time were already read for changes. Added
+		// after the meetings table shipped, so existing databases need it bolted
+		// on the same way location_url was above.
+		`ALTER TABLE meetings ADD COLUMN checked_ts INTEGER NOT NULL DEFAULT 0`,
 		// Indexes after the columns they depend on exist (so re-runs are safe).
 		`CREATE INDEX IF NOT EXISTS idx_tasks_review ON tasks(review_status)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)`,

@@ -73,7 +73,7 @@ export function FocusMode({
   onOpenTasks: (id: number) => void
   onOpenCircle: (id: number) => void
   onSent?: (m: Message) => void
-  pendingJumpId?: string | null
+  pendingJumpId?: { id: string; ts?: number } | null
   onJumpHandled?: () => void
 }) {
   const circle = circles.find((c) => c.id === circleId)

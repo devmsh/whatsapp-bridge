@@ -277,6 +277,14 @@ func (s *Server) ownPhone() string {
 	return ""
 }
 
+// rememberOwnJID saves the linked account's JID where the store can read it.
+// Meeting circles need it: the owner is in every meeting and must not count.
+func (s *Server) rememberOwnJID() {
+	if phone := s.ownPhone(); phone != "" {
+		s.store.PutSyncState(db.OwnJIDKey, phone+"@s.whatsapp.net")
+	}
+}
+
 // handleCircleSuggestions returns keyword-matched groups/contacts not yet in the circle.
 // GET /api/v2/circles/{id}/suggestions
 func (s *Server) handleCircleSuggestions(w http.ResponseWriter, r *http.Request, id int64) {
