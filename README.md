@@ -103,7 +103,8 @@ All endpoints under `/api/v2/`:
 - `POST /api/v2/messages/{id}/revoke` — Delete a message
 
 ### Contacts & Groups
-- `GET /api/v2/contacts` — List all contacts
+- `GET /api/v2/contacts` — List all contacts (`?q=` searches name/push name/phone/business name/username; `?username=` exact case-insensitive username, leading `@` optional)
+- `GET /api/v2/contacts/by-username/{username}` — Stored-data lookup by WhatsApp username (case-insensitive, leading `@` stripped). **404 if this bridge has never been sent that handle** — it does not live-query WhatsApp
 - `GET /api/v2/groups` — List all groups with full metadata
 - `GET /api/v2/groups/discover` — Discover groups from contacts
 - `POST /api/v2/groups/join` — Join via invite link
@@ -116,11 +117,21 @@ Both accept `&exclude=JID1,JID2` to filter out noise.
 
 ### Other
 - `GET /api/v2/health` — Connection status, uptime, DB stats
+- `GET /api/v2/capabilities` — Pinned whatsmeow version (from `runtime/debug.ReadBuildInfo`) and a feature map (`username_stored_lookup`, `username_live_lookup=false`, newsletters, polls, reactions, edits, LID mapping, …)
 - `POST /api/v2/polls` — Create a poll
 - `POST /api/v2/presence/typing` — Send typing indicator
 - `POST /api/v2/sync/contacts` — Trigger contact sync
 - `GET /api/v2/newsletters` — List newsletter subscriptions
+- `GET /api/v2/newsletters/{jid}/messages` — Newsletter messages, including `views_count` and `forwards_count`
 - `GET /api/v2/calls` — Call history
+
+### Usernames
+
+WhatsApp usernames (`@handle`) are stored when WhatsApp has already sent them — from the contact app-state action (`ContactAction.Username`) or history-sync `InlineContact.Username`. Many contacts will have an empty `username`: that means we do not know it, not that they have none. There is no live username lookup (`username_live_lookup=false` on `/api/v2/capabilities`). A later contact upsert never overwrites a stored username with empty.
+
+MCP tools `find_contact_by_username` and `get_capabilities` call these REST endpoints (not SQL). Contact and group-participant tool outputs include `username` when we have one.
+
+To see what a newer whatsmeow would add, run `scripts/whatsmeow-diff.sh` (commits, new exported `Client` methods, new `types`/`events` structs between the go.mod pin and `@latest`).
 
 ## Architecture
 
