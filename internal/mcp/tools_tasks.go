@@ -16,7 +16,7 @@ func toolCreateTask() mcp.Tool {
 		mcp.WithDescription("Create a task extracted from WhatsApp content. Returns the created task as JSON including its numeric id (use that id with wa_link_task_message to attach more messages). The origin message is linked automatically."),
 		mcp.WithString("title", mcp.Required(), mcp.Description("Short task title")),
 		mcp.WithString("description", mcp.Description("Longer description / context")),
-		mcp.WithString("assignee_jid", mcp.Description("JID of the person the task is assigned to (e.g. 966535435254@s.whatsapp.net). Resolve names/mentions with wa_find_contact or wa_group_info first.")),
+		mcp.WithString("assignee_jid", mcp.Description("JID of the person the task is assigned to (e.g. 966500000101@s.whatsapp.net). Resolve names/mentions with wa_find_contact or wa_group_info first.")),
 		mcp.WithString("priority", mcp.Description("low | normal | high")),
 		mcp.WithNumber("due_at", mcp.Description("Due date as a Unix epoch timestamp (seconds), or omit for none")),
 		mcp.WithString("origin_chat_jid", mcp.Description("Chat JID where the task started")),

@@ -42,7 +42,7 @@ if (tasks.length < 2) {
 const systemPrompt = `You are a task organizer. You receive a flat list of TASKS extracted from WhatsApp messages, all belonging to the same Circle. Your job is to identify groups of related tasks that share a single concrete goal, and propose a parent task for each group so the user sees structure instead of a flat list.
 
 WHAT COUNTS AS A CLUSTER (≥2 tasks):
-- Same PROJECT or DELIVERABLE (e.g. "the PlayBook", "Salla MCP Studio MVP", "Mahmoud Atef client engagement")
+- Same PROJECT or DELIVERABLE (e.g. "the PlayBook", "Souq MCP Studio MVP", "Mahmoud Adel client engagement")
 - Same DECISION being worked toward (e.g. "the Q4 hiring round", "rollout timing for X")
 - Same EXTERNAL PERSON whose engagement is the unifying goal (e.g. "everything around onboarding Salman")
 - A clear UMBRELLA + SUBTASKS pattern (one big outcome and its prerequisites)

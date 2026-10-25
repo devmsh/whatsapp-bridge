@@ -90,12 +90,16 @@ export function MessageThread({
   onOpenChat?: (jid: string, draft?: string) => void
   onOpenCircle?: (id: number) => void
   onSent?: (m: Message) => void
-  /** Message id the parent (Explorer) wants us to jump to once it's in
-   *  the loaded window — set when the universal search picks a message
-   *  result. The thread fires jumpToMessage(id) + calls onJumpHandled
-   *  to clear it; if the message isn't in the current page we silently
-   *  give up (Load earlier will eventually surface it). */
-  pendingJumpId?: string | null
+  /** Message the parent (Explorer) wants us to jump to — set when the
+   *  universal search or the Mentions page picks a message result. The
+   *  thread fires jumpToMessage(id) + calls onJumpHandled to clear it. When
+   *  `ts` is supplied and the message isn't in the loaded window, the
+   *  thread asks the bridge for a bigger window anchored on that timestamp
+   *  (see api.messages' includeTs) instead of giving up — this is what lets
+   *  the Mentions page land on a mention older than the default page. Search
+   *  hits don't carry a timestamp, so they keep the old "Load earlier is the
+   *  escape hatch" behaviour. */
+  pendingJumpId?: { id: string; ts?: number } | null
   onJumpHandled?: () => void
 }) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -229,6 +233,14 @@ export function MessageThread({
   // doesn't get permanently overridden by a one-shot jump.
   const [flashId, setFlashId] = useState<string | null>(null)
   const flashTimer = useRef<number | null>(null)
+  // Which pendingJumpId.id we've already tried an anchored (includeTs)
+  // fetch for, so a target that genuinely doesn't exist (deleted, wrong
+  // chat) fails once instead of refetching on every render.
+  const triedAnchorRef = useRef<string | null>(null)
+  // Which pendingJumpId.id we've already scheduled jumpToMessage for, so
+  // the pendingJumpId effect re-running (e.g. right after its own anchored
+  // fetch lands) doesn't schedule a second jump for the same target.
+  const jumpedForRef = useRef<string | null>(null)
   // Snapshot of unread_count taken when we first open this chat — drives
   // the "X unread messages" divider that splits the timeline between read
   // and unread. We freeze it here so the divider stays put even as the
@@ -375,6 +387,11 @@ export function MessageThread({
       window.clearTimeout(flashTimer.current)
       flashTimer.current = null
     }
+    // A new chat deserves its own shot at an anchored (includeTs) fetch and
+    // its own jump, even if the previous chat happened to land on (or was
+    // asked to land on) the same message id.
+    triedAnchorRef.current = null
+    jumpedForRef.current = null
     // Snapshot the chat's unread count for the divider. `chats` may still
     // be loading (chat undefined → 0), in which case no divider — same as
     // WA when there's nothing unread.
@@ -526,7 +543,12 @@ export function MessageThread({
   function loadEarlier() {
     stickToBottom.current = false
     setAtBottom(false)
-    setLimit((l) => l + PAGE)
+    // Grow from whichever is bigger: `limit` (what we last asked the server
+    // for) or `messages.length` (what's actually shown). An anchored jump
+    // (see the pendingJumpId effect) can load more messages than `limit`
+    // tracks without bumping it — basing this off `limit` alone would ask
+    // for fewer messages than are already on screen and look like a shrink.
+    setLimit((l) => Math.max(l, messages.length) + PAGE)
   }
 
   // Optimistic star/unstar: flip is_starred in the local message immediately
@@ -703,24 +725,65 @@ export function MessageThread({
     return true
   }
 
-  // Honor a parent-driven jump request (universal search → message hit).
-  // Wait until the messages window contains the target, then call
-  // jumpToMessage + notify the parent so the same id doesn't keep firing
-  // on every re-render. We deliberately don't auto-load earlier pages —
-  // a search hit outside the loaded window is the user's cue to "Load
-  // earlier" themselves; auto-loading could thrash if the message is far
-  // back in history.
+  // Honor a parent-driven jump request (universal search / Mentions page →
+  // message hit). If the target is already in the loaded window, just jump
+  // + notify the parent so the same id doesn't keep firing on every
+  // re-render. Otherwise, when the caller supplied the message's timestamp
+  // (Mentions does; search hits don't), fetch a bigger window anchored on
+  // it — see api.messages' includeTs — instead of giving up. Without a
+  // timestamp we keep the old behaviour: a search hit outside the loaded
+  // window is the user's cue to click "Load earlier" themselves.
+  //
+  // The "already loaded" branch below is deliberately the ONLY place that
+  // schedules jumpToMessage, reached either directly (target was already in
+  // view) or via this same effect re-running once the anchored fetch's
+  // setMessages lands (messages.length is a dependency). `jumpedForRef`
+  // stops that re-run from scheduling a second, redundant jump for the same
+  // target. `triedAnchorRef` and `setLimit` are deliberately NOT set again
+  // once the fetch resolves — bumping `limit` here used to trigger the
+  // ordinary [jid, limit] load effect to refetch a moment later, which
+  // raced this effect's own scroll (see loadEarlier for how "Load earlier"
+  // still grows correctly from an anchored fetch that didn't touch `limit`).
   useEffect(() => {
-    if (!pendingJumpId) return
-    if (!messages.some((m) => m.id === pendingJumpId)) return
-    // Defer to next frame so layout-effect's pin-to-bottom doesn't fight
-    // us on the same render.
-    requestAnimationFrame(() => {
-      jumpToMessage(pendingJumpId)
-      onJumpHandled?.()
-    })
+    if (!pendingJumpId || loading) return
+    const { id, ts } = pendingJumpId
+    if (jumpedForRef.current === id) return
+    if (messages.some((m) => m.id === id)) {
+      jumpedForRef.current = id
+      // Defer to next frame so layout-effect's pin-to-bottom doesn't fight
+      // us on the same render.
+      requestAnimationFrame(() => {
+        jumpToMessage(id)
+        onJumpHandled?.()
+      })
+      return
+    }
+    if (!ts || triedAnchorRef.current === id) return
+    triedAnchorRef.current = id
+    setLoading(true)
+    api
+      .messages(jid, limit, ts)
+      .then((msgs) => {
+        // Apply only if we're still after this same target — stale if the
+        // user jumped elsewhere (a new id) or switched chats (which resets
+        // the ref) while this was in flight. Deliberately NOT a per-effect
+        // `cancelled` closure: React 18 StrictMode's dev-only double-invoke
+        // runs this effect's cleanup immediately after the first mount,
+        // which would cancel the one fetch we just started before it had a
+        // chance to resolve, while the second invocation skips starting a
+        // new one because the ref is already set. The ref survives that
+        // dance; a closure flag doesn't.
+        if (triedAnchorRef.current !== id) return
+        setMessages(msgs || [])
+        setHasMore((msgs?.length || 0) >= limit)
+        setLoading(false)
+        // No jumpToMessage call here — messages.length just changed, so
+        // this effect re-runs and the "already loaded" branch above takes
+        // it from here, exactly once (guarded by jumpedForRef).
+      })
+      .catch(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingJumpId, messages.length])
+  }, [pendingJumpId, messages.length, loading])
 
   // Jump to a specific message in the thread (used when the user clicks a
   // quoted-reply preview to find the original). Reuses the same data-msg-id
@@ -3143,7 +3206,7 @@ function formatDisappearing(sec: number): string {
 
 function formatGroupTyping(jids: string[], nameMap: Map<string, string>): string {
   if (jids.length === 0) return ''
-  // Resolve to first names (split on whitespace so "Mohammed Shurrab" → "Mohammed")
+  // Resolve to first names (split on whitespace so "Mohammed Ali" → "Mohammed")
   const names = jids.map((j) => {
     const full = nameMap.get(j) || ''
     if (full) return full.split(/\s+/)[0]

@@ -481,16 +481,36 @@ func (s *Server) handleGroupInviteLink(w http.ResponseWriter, r *http.Request, j
 }
 
 func (s *Server) handleGroupSubGroups(w http.ResponseWriter, r *http.Request, jid string) {
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w)
-		return
-	}
 	parsedJID, err := types.ParseJID(jid)
 	if err != nil {
 		jsonError(w, 400, "invalid JID")
 		return
 	}
 	wa := s.client.GetWhatsmeowClient()
+
+	// DELETE unlinks one sub-group from this community. The group itself stays.
+	if r.Method == http.MethodDelete {
+		var req struct {
+			JID string `json:"jid"`
+		}
+		decodeJSON(r, &req)
+		child, err := types.ParseJID(req.JID)
+		if err != nil || req.JID == "" {
+			jsonError(w, 400, "invalid sub-group JID")
+			return
+		}
+		if err := wa.UnlinkGroup(context.Background(), parsedJID, child); err != nil {
+			jsonError(w, 500, fmt.Sprintf("unlink group: %v", err))
+			return
+		}
+		jsonOK(w, map[string]bool{"success": true})
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
 	subs, err := wa.GetSubGroups(context.Background(), parsedJID)
 	if err != nil {
 		jsonError(w, 500, fmt.Sprintf("get sub-groups: %v", err))

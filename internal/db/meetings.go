@@ -1,8 +1,10 @@
 package db
 
 import (
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Meeting status. A meeting is usually born "proposed" — a time is being
@@ -12,6 +14,15 @@ const (
 	MeetingConfirmed = "confirmed"
 	MeetingHeld      = "held"
 	MeetingCancelled = "cancelled"
+	// MeetingLapsed is set by code rules, not by the model (see
+	// CloseStaleMeetings): the chat went quiet and the meeting is presumed
+	// dead. It can come back to "proposed" if a new message is attached.
+	MeetingLapsed = "lapsed"
+	// MeetingResolved means the meeting is no longer needed: the question it
+	// was for got answered in the chat itself. "Should I join, yes or no?"
+	// followed by "yes, do it" leaves nothing to meet about. Set by the model
+	// from later messages, with the decision kept in the change note.
+	MeetingResolved = "resolved"
 )
 
 // Kinds of meeting_items. They share a table because they share a shape: a
@@ -53,12 +64,24 @@ type Meeting struct {
 	ReviewStatus      string  `json:"review_status"`
 	CreatedAt         int64   `json:"created_at"`
 	UpdatedAt         int64   `json:"updated_at"`
+	// CheckedTS: messages in this meeting's chats up to this time were
+	// already read for changes. See meeting_changes.go.
+	CheckedTS int64 `json:"checked_ts,omitempty"`
+
+	// OriginTS is when the message that caused this meeting was SENT. It is
+	// not CreatedAt, which is when the engine found it: a backfill finds a
+	// June conversation in September, and a list ordered by CreatedAt would
+	// call that meeting new. Filled by GetMeeting and ListMeetings.
+	OriginTS int64 `json:"origin_ts,omitempty"`
 
 	// Loaded on demand by GetMeeting / ListMeetings.
 	Participants []MeetingParticipant `json:"participants,omitempty"`
 	Items        []MeetingItem        `json:"items,omitempty"`
 	Messages     []MeetingMessage     `json:"messages,omitempty"`
 	Circles      []Circle             `json:"circles,omitempty"`
+	// Changes is the edit history, newest first. Only GetMeeting loads it —
+	// ListMeetings would mean one extra query per row in the list.
+	Changes []MeetingChange `json:"changes,omitempty"`
 }
 
 type MeetingParticipant struct {
@@ -223,7 +246,8 @@ func (s *Store) FindMeetingByCode(code string) (*Meeting, error) {
 const meetingCols = `id, title, purpose, status, starts_at, ends_at, tz, time_options, mode,
 	location, location_url, location_lat, location_lng,
 	link, link_code, notes, prepares_meeting_id, recurrence, source, external_id,
-	origin_chat_jid, origin_message_id, confidence, review_status, created_at, updated_at`
+	origin_chat_jid, origin_message_id, confidence, review_status, created_at, updated_at,
+	checked_ts`
 
 func scanMeeting(sc interface{ Scan(...any) error }) (*Meeting, error) {
 	m := &Meeting{}
@@ -232,7 +256,7 @@ func scanMeeting(sc interface{ Scan(...any) error }) (*Meeting, error) {
 		&m.Link, &m.LinkCode, &m.Notes,
 		&m.PreparesMeetingID, &m.Recurrence, &m.Source, &m.ExternalID,
 		&m.OriginChatJID, &m.OriginMessageID, &m.Confidence, &m.ReviewStatus,
-		&m.CreatedAt, &m.UpdatedAt)
+		&m.CreatedAt, &m.UpdatedAt, &m.CheckedTS)
 	if err != nil {
 		return nil, err
 	}
@@ -249,6 +273,8 @@ func (s *Store) GetMeeting(id int64) (*Meeting, error) {
 	m.Items, _ = s.MeetingItems(id)
 	m.Messages, _ = s.MeetingMessages(id)
 	m.Circles, _ = s.MeetingCircles(id)
+	m.Changes, _ = s.ListMeetingChanges(id)
+	m.OriginTS = s.meetingOriginTS(m)
 	return m, nil
 }
 
@@ -278,8 +304,10 @@ func (s *Store) ListMeetings(f MeetingFilter) ([]Meeting, error) {
 	}
 	if f.Upcoming {
 		// A meeting you rejected is not ahead of you — it was never a meeting.
+		// A lapsed meeting is not ahead of you either: the chat went quiet and
+		// nobody is coming back to it (unless a new message revives it).
 		q += ` AND review_status != 'rejected'
-		       AND status NOT IN ('held','cancelled')
+		       AND status NOT IN ('held','cancelled','lapsed','resolved')
 		       AND (starts_at = 0 OR starts_at >= ?)`
 		args = append(args, time.Now().Unix()-12*3600)
 	}
@@ -310,8 +338,30 @@ func (s *Store) ListMeetings(f MeetingFilter) ([]Meeting, error) {
 		out[i].Participants, _ = s.MeetingParticipants(out[i].ID)
 		out[i].Items, _ = s.MeetingItems(out[i].ID)
 		out[i].Circles, _ = s.MeetingCircles(out[i].ID)
+		out[i].OriginTS = s.meetingOriginTS(&out[i])
 	}
 	return out, nil
+}
+
+// meetingOriginTS is when the conversation that caused a meeting happened: the
+// origin message's own time, else the earliest message linked to the meeting,
+// else the day the row was created.
+func (s *Store) meetingOriginTS(m *Meeting) int64 {
+	var ts int64
+	if m.OriginMessageID != "" {
+		s.DB.QueryRow(`SELECT COALESCE(timestamp, 0) FROM messages WHERE id = ? AND chat_jid = ?`,
+			m.OriginMessageID, m.OriginChatJID).Scan(&ts)
+	}
+	if ts == 0 {
+		s.DB.QueryRow(`SELECT COALESCE(MIN(msg.timestamp), 0)
+			FROM meeting_messages mm
+			JOIN messages msg ON msg.id = mm.message_id AND msg.chat_jid = mm.chat_jid
+			WHERE mm.meeting_id = ?`, m.ID).Scan(&ts)
+	}
+	if ts == 0 {
+		ts = m.CreatedAt
+	}
+	return ts
 }
 
 // MeetingsForChat returns the meetings this chat is involved in — either it
@@ -362,55 +412,31 @@ func (s *Store) MeetingsForChat(chatJID string, withinDays int) ([]Meeting, erro
 }
 
 // SyncMeetingCircles recomputes which circles a meeting belongs to, from the
-// chats it was arranged in and the people in it.
+// chats it was arranged in, the people in it, and what it is about.
 //
-// A meeting is never filed by hand: it inherits the circles of its group chats
-// and its participants. That is the useful direction — you already sorted the
-// group into "OneStudio", so a meeting held there is OneStudio work without
-// anyone saying so.
+// A meeting is never filed by hand: it inherits circles. But not every link is
+// equal proof. The first version took the circles of everyone in the meeting,
+// and one person who sits in sixteen circles put sixteen circles on every
+// meeting they joined. So each link now votes, and a vote is worth less the
+// more circles its owner is spread across:
 //
-// The contact lookup goes through every identity form, because a person can be
-// filed under their phone JID while the meeting names their @lid (or the
-// reverse), and matching on one form alone would silently drop the circle.
+//   - a group chat the meeting was arranged in: a full vote for each of its
+//     circles. You sorted the group into "NorthStudio", so a meeting held there
+//     is NorthStudio work.
+//   - a person (a participant, or the other side of a DM that carried it):
+//     1/n for each of their n circles. Someone in one circle decides it;
+//     someone in sixteen says almost nothing. The account owner is left
+//     out: they are in every meeting.
+//   - the circle's name or a keyword in the title or purpose: a full vote.
+//
+// A circle is kept at meetingCircleMinScore or more. A meeting nothing speaks
+// for clearly gets no circle, which is more honest than sixteen.
 //
 // It replaces the set rather than adding to it, so removing a chat or a person
 // from the meeting also drops a circle that no longer applies.
 func (s *Store) SyncMeetingCircles(meetingID int64) error {
-	rows, err := s.DB.Query(`
-		SELECT DISTINCT cm.circle_id
-		FROM circle_members cm
-		WHERE
-		  -- groups the meeting was arranged in
-		  (cm.member_type = 'group' AND cm.member_ref IN (
-		      SELECT chat_jid FROM meeting_messages WHERE meeting_id = ?1))
-		  OR
-		  -- people in the meeting, or whose DM carried it, in any identity form
-		  (cm.member_type = 'contact' AND cm.member_ref IN (
-		      SELECT p.jid FROM meeting_participants p WHERE p.meeting_id = ?1
-		      UNION
-		      SELECT mm.chat_jid FROM meeting_messages mm
-		       WHERE mm.meeting_id = ?1 AND mm.chat_jid NOT LIKE '%@g.us'
-		      UNION
-		      SELECT c.jid FROM contacts c WHERE c.jid != '' AND (
-		          c.jid IN (SELECT p.jid FROM meeting_participants p WHERE p.meeting_id = ?1)
-		       OR c.lid IN (SELECT p.jid FROM meeting_participants p WHERE p.meeting_id = ?1))
-		      UNION
-		      SELECT c.lid FROM contacts c WHERE c.lid != '' AND (
-		          c.jid IN (SELECT p.jid FROM meeting_participants p WHERE p.meeting_id = ?1)
-		       OR c.lid IN (SELECT p.jid FROM meeting_participants p WHERE p.meeting_id = ?1))))`,
-		meetingID)
+	ids, err := s.scoreMeetingCircles(meetingID)
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	ids := []int64{}
-	for rows.Next() {
-		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
-		}
-	}
-	if err := rows.Err(); err != nil {
 		return err
 	}
 
@@ -461,13 +487,13 @@ func (s *Store) UpcomingMeetingChatJIDs() (map[string]bool, error) {
 		    SELECT mm.chat_jid AS jid
 		      FROM meeting_messages mm JOIN meetings m ON m.id = mm.meeting_id
 		     WHERE m.review_status != 'rejected'
-		       AND m.status NOT IN ('held','cancelled')
+		       AND m.status NOT IN ('held','cancelled','lapsed','resolved')
 		       AND (m.starts_at = 0 OR m.starts_at >= ?)
 		    UNION
 		    SELECT mp.jid AS jid
 		      FROM meeting_participants mp JOIN meetings m ON m.id = mp.meeting_id
 		     WHERE m.review_status != 'rejected'
-		       AND m.status NOT IN ('held','cancelled')
+		       AND m.status NOT IN ('held','cancelled','lapsed','resolved')
 		       AND (m.starts_at = 0 OR m.starts_at >= ?)
 		)`, now-12*3600, now-12*3600)
 	if err != nil {
@@ -503,7 +529,11 @@ func (s *Store) UpdateMeeting(m *Meeting) error {
 		m.Location, m.LocationURL, m.LocationLat, m.LocationLng,
 		m.Link, m.LinkCode, m.Notes, m.PreparesMeetingID, m.Recurrence,
 		m.Source, m.ExternalID, m.ReviewStatus, m.UpdatedAt, m.ID)
-	return err
+	if err != nil {
+		return err
+	}
+	// The title and purpose vote for circles, so an edit can change the answer.
+	return s.SyncMeetingCircles(m.ID)
 }
 
 func (s *Store) DeleteMeeting(id int64) error {
@@ -673,4 +703,191 @@ func (s *Store) MeetingItems(meetingID int64) ([]MeetingItem, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+// OwnJIDKey is the sync_state key holding the linked account's phone JID. The
+// store cannot see the WhatsApp client, so the API layer writes it here.
+const OwnJIDKey = "own_jid"
+
+// A person in two circles gives each a half vote and both are kept. A person
+// in three needs someone else, or the text, to agree.
+const meetingCircleMinScore = 0.5
+
+// scoreMeetingCircles returns the circles a meeting has earned. See
+// SyncMeetingCircles for the rule.
+func (s *Store) scoreMeetingCircles(meetingID int64) ([]int64, error) {
+	var title, purpose string
+	if err := s.DB.QueryRow(`SELECT COALESCE(title,''), COALESCE(purpose,'')
+		FROM meetings WHERE id = ?`, meetingID).Scan(&title, &purpose); err != nil {
+		return nil, err
+	}
+
+	chats, err := s.queryStrings(`SELECT DISTINCT chat_jid FROM meeting_messages
+		WHERE meeting_id = ? AND chat_jid != ''`, meetingID)
+	if err != nil {
+		return nil, err
+	}
+	people, err := s.queryStrings(`SELECT jid FROM meeting_participants
+		WHERE meeting_id = ? AND jid != ''`, meetingID)
+	if err != nil {
+		return nil, err
+	}
+
+	score := map[int64]float64{}
+
+	for _, chat := range chats {
+		if strings.HasSuffix(chat, "@g.us") {
+			for _, id := range s.memberCircles(MemberGroup, []string{chat}) {
+				score[id]++
+			}
+		} else {
+			people = append(people, chat) // a DM is its other person
+		}
+	}
+
+	// The same person can arrive twice — as a participant and as the DM, or
+	// under their phone JID and their @lid — and must only vote once. The
+	// account owner never votes: they are in every meeting, so their circles
+	// say nothing about this one.
+	voted := map[string]bool{}
+	if own, _, _ := s.GetSyncState(OwnJIDKey); own != "" {
+		voted[s.identityForms(own)[0]] = true
+	}
+	for _, p := range people {
+		forms := s.identityForms(p)
+		if voted[forms[0]] {
+			continue
+		}
+		voted[forms[0]] = true
+		circles := s.memberCircles(MemberContact, forms)
+		for _, id := range circles {
+			score[id] += 1 / float64(len(circles))
+		}
+	}
+
+	text := wordKey(title + " " + purpose)
+	rows, err := s.DB.Query(`SELECT id, name, keywords FROM circles`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var name, keywords string
+		if rows.Scan(&id, &name, &keywords) != nil {
+			continue
+		}
+		for _, term := range append(parseKeywords(keywords), name) {
+			if t := wordKey(term); strings.TrimSpace(t) != "" && strings.Contains(text, t) {
+				score[id]++
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	ids := []int64{}
+	for id, sc := range score {
+		if sc >= meetingCircleMinScore-1e-9 {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// identityForms returns every way one person can be written: their phone JID,
+// their bare LID and their "@lid" JID. The smallest form comes first, so it
+// can stand as a key for the person. contacts.lid is stored bare while a
+// meeting often names "<lid>@lid", so all three are needed to find them.
+func (s *Store) identityForms(jid string) []string {
+	set := map[string]bool{jid: true}
+	bare := strings.TrimSuffix(jid, "@lid")
+	rows, err := s.DB.Query(`SELECT jid, lid FROM contacts
+		WHERE jid = ?1 OR (lid != '' AND lid IN (?1, ?2))`, jid, bare)
+	if err == nil {
+		for rows.Next() {
+			var j, l string
+			if rows.Scan(&j, &l) != nil {
+				continue
+			}
+			set[j] = true
+			if l = strings.TrimSuffix(l, "@lid"); l != "" {
+				set[l] = true
+				set[l+"@lid"] = true
+			}
+		}
+		rows.Close()
+	}
+	out := make([]string, 0, len(set))
+	for f := range set {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// memberCircles returns the distinct circles that hold any of refs.
+func (s *Store) memberCircles(memberType string, refs []string) []int64 {
+	seen := map[int64]bool{}
+	out := []int64{}
+	for _, ref := range refs {
+		rows, err := s.DB.Query(`SELECT circle_id FROM circle_members
+			WHERE member_type = ? AND member_ref = ?`, memberType, ref)
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil && !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+		rows.Close()
+	}
+	return out
+}
+
+func (s *Store) queryStrings(query string, args ...any) ([]string, error) {
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var v string
+		if rows.Scan(&v) == nil {
+			out = append(out, v)
+		}
+	}
+	return out, rows.Err()
+}
+
+// wordKey rewrites text as lowercase whole words with a space on both sides of
+// each, so strings.Contains on two keys is a whole-word match: "ZED" is found
+// in "ZED review" but not in "Zedric". A word also ends where the script
+// changes, because Arabic glues its article onto a Latin name: "الـQRT".
+func wordKey(text string) string {
+	var b strings.Builder
+	b.WriteByte(' ')
+	var prevArabic, inWord bool
+	for _, r := range strings.ToLower(text) {
+		isWord := (unicode.IsLetter(r) || unicode.IsDigit(r)) && r != 'ـ'
+		arabic := unicode.Is(unicode.Arabic, r)
+		if inWord && (!isWord || arabic != prevArabic) {
+			b.WriteByte(' ')
+			inWord = false
+		}
+		if isWord {
+			b.WriteRune(r)
+			inWord, prevArabic = true, arabic
+		}
+	}
+	if inWord {
+		b.WriteByte(' ')
+	}
+	return b.String()
 }

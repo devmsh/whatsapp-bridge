@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ func toolHealth() mcp.Tool {
 func toolReadMessages() mcp.Tool {
 	return mcp.NewTool("wa_read_messages",
 		mcp.WithDescription("Read messages from a WhatsApp chat. Returns messages with sender names resolved. Use chat_jid from wa_list_chats or wa_find_contact."),
-		mcp.WithString("chat_jid", mcp.Required(), mcp.Description("Chat JID (e.g. 966535435254@s.whatsapp.net or 120363406393924600@g.us)")),
+		mcp.WithString("chat_jid", mcp.Required(), mcp.Description("Chat JID (e.g. 966500000101@s.whatsapp.net or 120363000000000002@g.us)")),
 		mcp.WithNumber("since", mcp.Description("Unix epoch timestamp — only messages after this time. Default: last 24 hours")),
 		mcp.WithNumber("limit", mcp.Description("Max messages to return (default 50, max 500)")),
 		mcp.WithString("search", mcp.Description("Filter messages containing this text")),
@@ -50,7 +51,7 @@ func toolListChats() mcp.Tool {
 
 func toolFindGroup() mcp.Tool {
 	return mcp.NewTool("wa_find_group",
-		mcp.WithDescription("Search WhatsApp groups by name. Returns the group JID, name, participant count, and last activity. Use this to find a group's JID from its name (e.g. 'ID8 Sports', 'One Studio')."),
+		mcp.WithDescription("Search WhatsApp groups by name. Returns the group JID, name, participant count, and last activity. Use this to find a group's JID from its name (e.g. 'IDX Sports', 'North Studio')."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Group name to search for (partial match, case-insensitive)")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
@@ -73,12 +74,45 @@ func toolSearchMessages() mcp.Tool {
 
 func toolFindContact() mcp.Tool {
 	return mcp.NewTool("wa_find_contact",
-		mcp.WithDescription("Search WhatsApp contacts by name, phone number, JID, kunya, or by how the user met them. "+
+		mcp.WithDescription("Search WhatsApp contacts by name, phone number, JID, kunya, username, or by how the user met them. "+
 			"Results carry the user's OWN notes, which WhatsApp does not have and which are often the most useful "+
 			"thing about a person: `kunya` is the name they are actually addressed by (\"أبو فلان\"), and "+
 			"`how_we_met` says who introduced them, when and why. Read both before describing or writing to anyone, "+
-			"and use the kunya when it is how they are really called."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Search term — matches name, push_name, phone, business_name, kunya and how_we_met")),
+			"and use the kunya when it is how they are really called. `username` is the WhatsApp @handle when we have "+
+			"been sent one — many contacts have none stored."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search term — matches name, push_name, phone, business_name, username, kunya and how_we_met")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint: mcp.ToBoolPtr(true),
+		}),
+	)
+}
+
+func toolFindContactByUsername() mcp.Tool {
+	return mcp.NewTool("find_contact_by_username",
+		mcp.WithDescription("Look up a WhatsApp contact by @username from stored data only. Case-insensitive, leading @ optional. "+
+			"Returns 404/error if this bridge has never been sent that username. For a live WhatsApp query use lookup_username."),
+		mcp.WithString("username", mcp.Required(), mcp.Description("WhatsApp username, with or without a leading @")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint: mcp.ToBoolPtr(true),
+		}),
+	)
+}
+
+func toolLookupUsername() mcp.Tool {
+	return mcp.NewTool("lookup_username",
+		mcp.WithDescription("Live-query WhatsApp for a user by @username and return their LID / phone JID. "+
+			"Leading @ is optional. Unlike find_contact_by_username this talks to WhatsApp, not only the local store."),
+		mcp.WithString("username", mcp.Required(), mcp.Description("WhatsApp username, with or without a leading @")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint: mcp.ToBoolPtr(true),
+		}),
+	)
+}
+
+func toolGetCapabilities() mcp.Tool {
+	return mcp.NewTool("get_capabilities",
+		mcp.WithDescription("Report the pinned whatsmeow version and which bridge features are available "+
+			"(username stored lookup, username live lookup, newsletters, polls, reactions, edits, LID mapping, ...)."),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
 		}),
@@ -88,7 +122,7 @@ func toolFindContact() mcp.Tool {
 func toolGroupInfo() mcp.Tool {
 	return mcp.NewTool("wa_group_info",
 		mcp.WithDescription("Get WhatsApp group details: name, participants (with admin status), and optionally recent messages."),
-		mcp.WithString("jid", mcp.Required(), mcp.Description("Group JID (e.g. 120363406393924600@g.us)")),
+		mcp.WithString("jid", mcp.Required(), mcp.Description("Group JID (e.g. 120363000000000002@g.us)")),
 		mcp.WithBoolean("include_messages", mcp.Description("Include recent messages (default false)")),
 		mcp.WithNumber("message_limit", mcp.Description("Number of recent messages to include (default 20)")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -356,16 +390,16 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 	q := "%" + query + "%"
 	// kunya and how_we_met are the user's own notes, and they are the most
 	// useful thing here: WhatsApp knows a display name, but only the user knows
-	// that this is "أبو يمان" and that Abdullah sent him about the CVB file.
+	// that this is "أبو يمان" and that Abdullah sent him about the QRT file.
 	// Searching them too means the agent can find someone by how they were
 	// introduced, not just by name.
 	rows, err := s.db.Query(`SELECT jid, lid, phone, name, push_name, business_name,
 		is_business, status_text, COALESCE(kunya,''), COALESCE(how_we_met,''),
-		first_seen, last_seen
+		COALESCE(username,''), first_seen, last_seen
 		FROM contacts
 		WHERE name LIKE ? OR push_name LIKE ? OR phone LIKE ? OR business_name LIKE ? OR jid LIKE ?
-		   OR kunya LIKE ? OR how_we_met LIKE ?
-		ORDER BY last_seen DESC LIMIT 20`, q, q, q, q, q, q, q)
+		   OR kunya LIKE ? OR how_we_met LIKE ? OR username LIKE ?
+		ORDER BY last_seen DESC LIMIT 20`, q, q, q, q, q, q, q, q)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
@@ -384,6 +418,7 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 		// HowWeMet is where the relationship came from.
 		Kunya     string `json:"kunya,omitempty"`
 		HowWeMet  string `json:"how_we_met,omitempty"`
+		Username  string `json:"username,omitempty"`
 		FirstSeen int64  `json:"first_seen,omitempty"`
 		LastSeen  int64  `json:"last_seen,omitempty"`
 	}
@@ -392,7 +427,7 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 	for rows.Next() {
 		var c contact
 		if err := rows.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName,
-			&c.IsBusiness, &c.StatusText, &c.Kunya, &c.HowWeMet,
+			&c.IsBusiness, &c.StatusText, &c.Kunya, &c.HowWeMet, &c.Username,
 			&c.FirstSeen, &c.LastSeen); err != nil {
 			continue
 		}
@@ -408,6 +443,30 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 		"count":    len(contacts),
 		"contacts": contacts,
 	})
+}
+
+func (s *Server) handleFindContactByUsername(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	username, _ := args["username"].(string)
+	username = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(username), "@"))
+	if username == "" {
+		return mcp.NewToolResultError("username is required"), nil
+	}
+	return s.getAPI("/contacts/by-username/" + url.PathEscape(username))
+}
+
+func (s *Server) handleLookupUsername(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	username, _ := args["username"].(string)
+	username = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(username), "@"))
+	if username == "" {
+		return mcp.NewToolResultError("username is required"), nil
+	}
+	return s.postAPIAccept("/contacts/lookup-username", map[string]string{"username": username}, http.StatusNotFound)
+}
+
+func (s *Server) handleGetCapabilities(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return s.getAPI("/capabilities")
 }
 
 func (s *Server) handleGroupInfo(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -443,12 +502,16 @@ func (s *Server) handleGroupInfo(ctx context.Context, req mcp.CallToolRequest) (
 		JID          string `json:"jid"`
 		Phone        string `json:"phone,omitempty"`
 		DisplayName  string `json:"display_name,omitempty"`
+		Username     string `json:"username,omitempty"`
 		IsAdmin      bool   `json:"is_admin"`
 		IsSuperAdmin bool   `json:"is_super_admin"`
 	}
 
-	pRows, err := s.db.Query(`SELECT gp.jid, gp.phone, gp.display_name, gp.is_admin, gp.is_super_admin
-		FROM group_participants gp WHERE gp.group_jid = ?`, jid)
+	pRows, err := s.db.Query(`SELECT gp.jid, gp.phone, gp.display_name, gp.is_admin, gp.is_super_admin,
+		COALESCE(NULLIF(gp.username,''), ct.username, '')
+		FROM group_participants gp
+		LEFT JOIN contacts ct ON ct.jid = gp.jid
+		WHERE gp.group_jid = ?`, jid)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("participants query failed: %v", err)), nil
 	}
@@ -457,7 +520,7 @@ func (s *Server) handleGroupInfo(ctx context.Context, req mcp.CallToolRequest) (
 	var participants []participant
 	for pRows.Next() {
 		var p participant
-		if err := pRows.Scan(&p.JID, &p.Phone, &p.DisplayName, &p.IsAdmin, &p.IsSuperAdmin); err != nil {
+		if err := pRows.Scan(&p.JID, &p.Phone, &p.DisplayName, &p.IsAdmin, &p.IsSuperAdmin, &p.Username); err != nil {
 			continue
 		}
 		participants = append(participants, p)

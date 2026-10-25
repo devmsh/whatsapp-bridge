@@ -4,7 +4,7 @@ A self-hosted WhatsApp REST API bridge built on [whatsmeow](https://github.com/t
 
 ## Why I Built This
 
-I run a startup studio ([One Studio](https://one-studio.co)) with multiple ventures across Saudi Arabia, Qatar, Turkey, and Palestine. WhatsApp is the primary communication layer — clients, teams, partners, investors all live there. I manage 40+ groups and hundreds of DMs across these ventures.
+I run a startup studio ([North Studio](https://one-studio.co)) with multiple ventures across Saudi Arabia, Qatar, Turkey, and Palestine. WhatsApp is the primary communication layer — clients, teams, partners, investors all live there. I manage 40+ groups and hundreds of DMs across these ventures.
 
 I'm building an agentic command center (HQ) where AI agents autonomously monitor these conversations, extract signals, update tasks, and even respond on my behalf. The agents needed a way to talk to WhatsApp programmatically.
 
@@ -103,7 +103,10 @@ All endpoints under `/api/v2/`:
 - `POST /api/v2/messages/{id}/revoke` — Delete a message
 
 ### Contacts & Groups
-- `GET /api/v2/contacts` — List all contacts
+- `GET /api/v2/contacts` — List all contacts (`?q=` searches name/push name/phone/business name/username; `?username=` exact case-insensitive username, leading `@` optional)
+- `GET /api/v2/contacts/by-username/{username}` — Stored-data lookup by WhatsApp username (case-insensitive, leading `@` stripped). **404 if this bridge has never been sent that handle**
+- `POST /api/v2/contacts/lookup-username` — Live WhatsApp usync lookup `{"username":"..."}` (leading `@` stripped, lowercased). Returns `{username,jid,lid,phone_jid,found}`. **404 `{"found":false}`** if the server returns nothing. `?debug=1` adds the raw response node as `debug`
+- `POST /api/v2/contacts/fetch-usernames` — Live usync for known JIDs `{"jids":["..."]}` → `{results:[...]}`
 - `GET /api/v2/groups` — List all groups with full metadata
 - `GET /api/v2/groups/discover` — Discover groups from contacts
 - `POST /api/v2/groups/join` — Join via invite link
@@ -116,11 +119,45 @@ Both accept `&exclude=JID1,JID2` to filter out noise.
 
 ### Other
 - `GET /api/v2/health` — Connection status, uptime, DB stats
+- `GET /api/v2/capabilities` — Pinned whatsmeow version (from `runtime/debug.ReadBuildInfo`) and a feature map (`username_stored_lookup`, `username_live_lookup`, newsletters, polls, reactions, edits, LID mapping, …)
 - `POST /api/v2/polls` — Create a poll
 - `POST /api/v2/presence/typing` — Send typing indicator
 - `POST /api/v2/sync/contacts` — Trigger contact sync
 - `GET /api/v2/newsletters` — List newsletter subscriptions
+- `GET /api/v2/newsletters/{jid}/messages` — Newsletter messages, including `views_count` and `forwards_count`
 - `GET /api/v2/calls` — Call history
+
+### Usernames
+
+WhatsApp usernames (`@handle`) are stored when WhatsApp has already sent them — from the contact app-state action (`ContactAction.Username`) or history-sync `InlineContact.Username` — and after a live usync lookup. Many contacts will have an empty `username`: that means we do not know it, not that they have none. A later contact upsert never overwrites a stored username with empty.
+
+Live lookup (`username_live_lookup=true` on `/api/v2/capabilities`) sends a usync IQ through whatsmeow's `DangerousInternals().SendIQ` — no whatsmeow fork. The IQ is `xmlns="usync"` `type="get"` to `s.whatsapp.net`:
+
+```
+<iq xmlns="usync" type="get" to="s.whatsapp.net">
+  <usync sid="..." mode="query" last="true" index="0" context="interactive">
+    <query>
+      <contact addressing_mode="lid"/>
+      <username/>
+      <lid/>
+    </query>
+    <list>
+      <user>
+        <username>name</username>
+        <contact username="name"/>
+      </user>
+    </list>
+  </usync>
+</iq>
+```
+
+`fetch-usernames` uses `DangerousInternals().Usync` on known JIDs with the same query protocols. A found result is written to `contacts.username` and, when both LID and phone JID are present, to whatsmeow's LID↔PN map (`StoreLIDPNMapping`).
+
+**Uncertainty:** official Android (and Baileys `onWhatsAppUsername`) identify the lookup target as `<contact username="name"/>` only; they do not put the name in a `<username>` child of `<user>`. This bridge sends both. The response parser accepts username as child text/bytes, as a user attribute, or as `contact@username`. LID is read from `jid` / `lid@val` / `lid@jid`; phone from `pn_jid`. This has not been confirmed against a live WhatsApp session from this repo.
+
+MCP tools `find_contact_by_username` (stored), `lookup_username` (live), and `get_capabilities` call these REST endpoints (not SQL). Contact and group-participant tool outputs include `username` when we have one.
+
+To see what a newer whatsmeow would add, run `scripts/whatsmeow-diff.sh` (commits, new exported `Client` methods, new `types`/`events` structs between the go.mod pin and `@latest`).
 
 ## Architecture
 
@@ -157,7 +194,7 @@ whatsapp-bridge/
 
 1. **Map, don't abstract** — every whatsmeow type gets a 1:1 database table and API endpoint. No "simplified" models that lose data.
 2. **Timestamps are integers** — Unix epoch everywhere. No timezone bugs, no format parsing.
-3. **JIDs are the primary key** — `966535435254@s.whatsapp.net` for contacts, `120363406028992067@g.us` for groups. Stored as full strings.
+3. **JIDs are the primary key** — `966500000101@s.whatsapp.net` for contacts, `120363000000000001@g.us` for groups. Stored as full strings.
 4. **Media is local** — all images, audio, video, documents downloaded to `store/` on receipt. No external dependencies.
 5. **One binary, one process** — no Python wrappers, no MCP servers, no subprocess chains.
 

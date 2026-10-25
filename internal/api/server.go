@@ -7,6 +7,7 @@ import (
 
 	"whatsapp-bridge-v2/internal/config"
 	"whatsapp-bridge-v2/internal/db"
+	"whatsapp-bridge-v2/internal/llmlog"
 	"whatsapp-bridge-v2/internal/wa"
 )
 
@@ -24,16 +25,30 @@ type Server struct {
 	runs               *RunManager
 	autoExtract        *AutoExtractor
 	mediaUnderstanding *MediaUnderstandingManager
-	hiddenUnlocker     *HiddenUnlocker
+	meetingScan        *MeetingScanner
+	meetingRefresh     *MeetingRefresher
+	// meetingModel is the one shared "may I call the model" slot for meeting
+	// work. The finder and the refresher both claim it before they start,
+	// and release it when they finish, so the two never overlap. See
+	// meetingModelSlot in meeting_refresh.go.
+	meetingModel   *meetingModelSlot
+	hiddenUnlocker *HiddenUnlocker
 }
 
 // StartProfiler starts the background entity-profiling worker and daily refresh.
 // Also starts the continuous-extraction scheduler and media-understanding
 // workers (all idle unless enabled).
 func (s *Server) StartProfiler() {
+	// Runs left "running" by a crash can never finish. Close them out before
+	// anything new starts, so the debug screen shows the truth.
+	if n := s.store.MarkStaleRunsInterrupted(); n > 0 {
+		fmt.Printf("Marked %d run(s) interrupted by the last restart\n", n)
+	}
 	s.profiles.Start()
 	s.autoExtract.Start()
 	s.mediaUnderstanding.Start()
+	s.meetingScan.Start()
+	s.startDebugHousekeeping()
 }
 
 // NewServer creates a new API server. webFS is the embedded web UI (may be nil).
@@ -51,10 +66,17 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 		s.fileServer = http.FileServerFS(webFS)
 	}
 	s.profiles = newProfileManager(s)
-	s.runs = newRunManager()
+	s.runs = newRunManager(store)
 	s.autoExtract = newAutoExtractor(s)
 	s.mediaUnderstanding = newMediaManager(s)
+	s.meetingModel = &meetingModelSlot{}
+	s.meetingScan = newMeetingScanner(s)
+	s.meetingRefresh = newMeetingRefresher(s)
 	s.hiddenUnlocker = newHiddenUnlocker()
+
+	// From here on, every model call is recorded. Set before any worker
+	// starts, so nothing is missed at boot.
+	llmlog.SetSink(store)
 	s.registerRoutes()
 	return s
 }
@@ -62,6 +84,15 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 func (s *Server) registerRoutes() {
 	// Health
 	s.mux.HandleFunc("/api/v2/health", s.handleHealth)
+	s.mux.HandleFunc("/api/v2/capabilities", s.handleCapabilities)
+
+	// Debugging: what the background services did, and every model call.
+	s.mux.HandleFunc("/api/v2/debug/overview", s.handleDebugOverview)
+	s.mux.HandleFunc("/api/v2/debug/runs", s.handleDebugRuns)
+	s.mux.HandleFunc("/api/v2/debug/runs/", s.handleDebugRun)
+	s.mux.HandleFunc("/api/v2/debug/llm", s.handleDebugLLM)
+	s.mux.HandleFunc("/api/v2/debug/llm/", s.handleDebugLLMCall)
+	s.mux.HandleFunc("/api/v2/debug/logs", s.handleDebugLogs)
 
 	// Auth / onboarding
 	s.mux.HandleFunc("/api/v2/auth/status", s.handleAuthStatus)
@@ -89,6 +120,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v2/messages/", s.handleMessageByID)
 	s.mux.HandleFunc("/api/v2/unread", s.handleUnread)
 	s.mux.HandleFunc("/api/v2/starred", s.handleStarredList)
+	s.mux.HandleFunc("/api/v2/mentions", s.handleMentionsList)
+	s.mux.HandleFunc("/api/v2/mentions/dismiss", s.handleMentionDismiss)
 
 	// Chats
 	s.mux.HandleFunc("/api/v2/chats", s.handleChats)
@@ -97,6 +130,9 @@ func (s *Server) registerRoutes() {
 	// Contacts
 	s.mux.HandleFunc("/api/v2/contacts", s.handleContacts)
 	s.mux.HandleFunc("/api/v2/contacts/check", s.handleContactsCheck)
+	s.mux.HandleFunc("/api/v2/contacts/lookup-username", s.handleLookupUsername)
+	s.mux.HandleFunc("/api/v2/contacts/fetch-usernames", s.handleFetchUsernames)
+	s.mux.HandleFunc("/api/v2/contacts/by-username/", s.handleContactByUsername)
 	s.mux.HandleFunc("/api/v2/contacts/tags", s.handleContactTagsMap)
 	s.mux.HandleFunc("/api/v2/contacts/intros", s.handleIntroChats)
 	s.mux.HandleFunc("/api/v2/contacts/intros/labelled", s.handleIntroLabelled)
@@ -169,8 +205,10 @@ func (s *Server) registerRoutes() {
 	// Meetings (prepared meetings: agenda, requirements, cross-chat trail)
 	s.mux.HandleFunc("/api/v2/meetings", s.handleMeetings)
 	s.mux.HandleFunc("/api/v2/meetings/extract", s.handleMeetingExtract)
+	s.mux.HandleFunc("/api/v2/meetings/scan", s.handleMeetingScan)
 	s.mux.HandleFunc("/api/v2/meetings/chats", s.handleMeetingChats)
 	s.mux.HandleFunc("/api/v2/meetings/resync-circles", s.handleMeetingsResyncCircles)
+	s.mux.HandleFunc("/api/v2/meetings/refresh", s.handleMeetingRefresh)
 	s.mux.HandleFunc("/api/v2/meetings/", s.handleMeetingByID)
 
 	// Tasks (work items on top of WhatsApp content)

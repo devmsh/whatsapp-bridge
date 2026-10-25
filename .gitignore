@@ -1,5 +1,7 @@
 store/
 /whatsapp-bridge-v2
+/meeting-eval
+/extract-eval
 /whatsapp-bridge
 /wa-watch
 vendor/

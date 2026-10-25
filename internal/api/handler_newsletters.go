@@ -175,7 +175,30 @@ func (s *Server) handleNewsletterMessages(w http.ResponseWriter, r *http.Request
 		jsonError(w, 500, fmt.Sprintf("get messages: %v", err))
 		return
 	}
-	jsonOK(w, msgs)
+	jsonOK(w, newsletterMessagesOut(msgs))
+}
+
+func newsletterMessagesOut(msgs []*types.NewsletterMessage) []map[string]any {
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		item := map[string]any{
+			"server_id":      m.MessageServerID,
+			"message_id":     m.MessageID,
+			"type":           m.Type,
+			"timestamp":      m.Timestamp.Unix(),
+			"views_count":    m.ViewsCount,
+			"forwards_count": m.ForwardsCount,
+			"message":        m.Message,
+		}
+		if m.ReactionCounts != nil {
+			item["reaction_counts"] = m.ReactionCounts
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func (s *Server) handleNewsletterReact(w http.ResponseWriter, r *http.Request, jid string) {

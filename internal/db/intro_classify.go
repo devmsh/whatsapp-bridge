@@ -40,7 +40,7 @@ func (s *Store) SetIntroTagID(id int64) error {
 }
 
 // IntroOwnName is your own display name, used to spot a name card carrying it
-// — someone sending "Mohammed Shurrab / One Studio" back to you is confirming
+// — someone sending "Mohammed Hasan / North Studio" back to you is confirming
 // who they just saved.
 func (s *Store) IntroOwnName() string {
 	v, _, _ := s.GetSyncState(introOwnNameKey)

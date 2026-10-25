@@ -119,8 +119,8 @@ func init() {
 }
 
 // brandable reports whether a token looks like a coined brand/name rather than a
-// common word: an acronym (BIV, NEO), camelCase (xSpace, FamCare), or a
-// letter+digit mix (Reson8, 2Pass). These are strong venture identifiers.
+// common word: an acronym (ABC, XYZ), camelCase (xOrbit, FamPlan), or a
+// letter+digit mix (Echo8, 2Go). These are strong venture identifiers.
 func brandable(s string) bool {
 	rs := []rune(s)
 	letters, upper, lower, digit := 0, 0, 0, 0

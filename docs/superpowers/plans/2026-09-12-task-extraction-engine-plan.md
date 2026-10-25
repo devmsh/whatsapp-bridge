@@ -149,8 +149,8 @@ and `how_we_met`. For DMs return the contact and the user.
 `Render(chunk)` produces exactly this per line:
 
 ```
-[#3EB0…] [Mon 27 Jul 11:27] Fady Mondy: ↳ replying to #A1B2… (شباب رجاء استخدام…)
-[forwarded] text… @Alaa Saqer …
+[#3EB0…] [Mon 27 Jul 11:27] Rami Saleh: ↳ replying to #A1B2… (شباب رجاء استخدام…)
+[forwarded] text… @Karim Saqer …
 ```
 
 with `[context]` prepended on context lines. Mentions are shown as `@Name`.

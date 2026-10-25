@@ -41,7 +41,7 @@ func (s *Server) handleBlocklist(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		blocklist, err := wa.GetBlocklist(context.Background())
+		blocklist, err := wa.GetBlocklist(context.Background(), "")
 		if err != nil {
 			jsonError(w, 500, fmt.Sprintf("get blocklist: %v", err))
 			return
@@ -73,7 +73,7 @@ func (s *Server) handleBlocklist(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		_, err = wa.UpdateBlocklist(context.Background(), parsedJID, action)
+		_, err = wa.UpdateBlocklist(context.Background(), parsedJID, action, "")
 		if err != nil {
 			jsonError(w, 500, fmt.Sprintf("update blocklist: %v", err))
 			return

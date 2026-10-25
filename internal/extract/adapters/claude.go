@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"whatsapp-bridge-v2/internal/extract"
+	"whatsapp-bridge-v2/internal/llmlog"
 )
 
 // Claude, doing exactly the same single job as the local model.
@@ -44,7 +46,7 @@ func (c *Claude) Name() string {
 
 func (c *Claude) Extract(ctx context.Context, in extract.ExtractInput) (extract.ExtractOutput, error) {
 	var out extract.ExtractOutput
-	err := c.ask(ctx,
+	err := c.ask(ctx, "extract",
 		fmt.Sprintf(extractSystem, rosterBlock(in)),
 		"Conversation slice:\n\n"+in.Chunk.Rendered,
 		extractSchema, &out)
@@ -56,7 +58,7 @@ func (c *Claude) Judge(ctx context.Context, in extract.JudgeInput) (extract.Judg
 		return extract.JudgeOutput{}, nil
 	}
 	var out extract.JudgeOutput
-	err := c.ask(ctx, judgeSystem, judgeUser(in), judgeSchema, &out)
+	err := c.ask(ctx, "judge", judgeSystem, judgeUser(in), judgeSchema, &out)
 	return out, err
 }
 
@@ -77,11 +79,11 @@ func (c *Claude) CheckCompletion(ctx context.Context, in extract.CompletionInput
 	b.WriteString(in.Chunk.Rendered)
 
 	var out extract.CompletionOutput
-	err := c.ask(ctx, completionSystem, b.String(), completionSchema, &out)
+	err := c.ask(ctx, "completion", completionSystem, b.String(), completionSchema, &out)
 	return out, err
 }
 
-func (c *Claude) ask(ctx context.Context, system, user string, schema any, dst any) error {
+func (c *Claude) ask(ctx context.Context, kind, system, user string, schema any, dst any) error {
 	if c.run == nil {
 		return fmt.Errorf("no agent runner configured")
 	}
@@ -95,20 +97,40 @@ func (c *Claude) ask(ctx context.Context, system, user string, schema any, dst a
 		return err
 	}
 
+	tag := llmlog.From(ctx)
+	started := time.Now()
+	answer := ""
+	record := func(err error) {
+		llmlog.Record(llmlog.Call{
+			RunID: tag.RunID, Service: orDefault(tag.Service, "tasks"),
+			Engine: "claude", Model: orDefault(c.model, "default"), Kind: kind,
+			ChatJID: tag.ChatJID, System: system, Prompt: user, Response: answer,
+			Latency: time.Since(started), Attempt: 1, Err: err,
+		})
+	}
+
 	out, err := c.run(ctx, string(payload), "extract-chunk.mjs")
+	answer = out
 	if err != nil && strings.TrimSpace(out) == "" {
-		return fmt.Errorf("claude sidecar: %w", err)
+		err = fmt.Errorf("claude sidecar: %w", err)
+		record(err)
+		return err
 	}
 
 	// The sidecar prints progress on stderr and one JSON object on stdout, so
 	// the last non-empty line is the answer.
 	line := lastLine(out)
 	if line == "" {
-		return fmt.Errorf("claude sidecar returned nothing")
+		err := fmt.Errorf("claude sidecar returned nothing")
+		record(err)
+		return err
 	}
 	if err := json.Unmarshal([]byte(line), dst); err != nil {
-		return fmt.Errorf("claude sidecar returned invalid JSON: %w", err)
+		err = fmt.Errorf("claude sidecar returned invalid JSON: %w", err)
+		record(err)
+		return err
 	}
+	record(nil)
 	return nil
 }
 

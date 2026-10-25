@@ -16,7 +16,7 @@ import (
 func toolSend() mcp.Tool {
 	return mcp.NewTool("wa_send",
 		mcp.WithDescription("Send a WhatsApp message (text and/or media). Requires the bridge daemon to be running."),
-		mcp.WithString("jid", mcp.Required(), mcp.Description("Recipient JID (e.g. 966535435254@s.whatsapp.net or 120363406393924600@g.us)")),
+		mcp.WithString("jid", mcp.Required(), mcp.Description("Recipient JID (e.g. 966500000101@s.whatsapp.net or 120363000000000002@g.us)")),
 		mcp.WithString("message", mcp.Description("Text message to send")),
 		mcp.WithString("media_path", mcp.Description("Absolute path to media file to send")),
 		mcp.WithBoolean("ptt", mcp.Description("Send audio as voice note (push-to-talk). Only applies to audio files.")),
@@ -57,7 +57,7 @@ func toolReact() mcp.Tool {
 func toolTTSSend() mcp.Tool {
 	return mcp.NewTool("wa_voice",
 		mcp.WithDescription("Generate speech from text using ElevenLabs TTS and send it as a WhatsApp voice note. Requires ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID env vars (or pass voice_id)."),
-		mcp.WithString("jid", mcp.Required(), mcp.Description("Recipient JID (e.g. 966535435254@s.whatsapp.net or 120363406393924600@g.us)")),
+		mcp.WithString("jid", mcp.Required(), mcp.Description("Recipient JID (e.g. 966500000101@s.whatsapp.net or 120363000000000002@g.us)")),
 		mcp.WithString("text", mcp.Required(), mcp.Description("Text to convert to speech and send as voice note")),
 		mcp.WithString("voice_id", mcp.Description("ElevenLabs voice ID (defaults to ELEVENLABS_VOICE_ID env var)")),
 		mcp.WithString("model_id", mcp.Description("ElevenLabs model ID (defaults to eleven_multilingual_v2)")),
@@ -72,8 +72,8 @@ func toolMention() mcp.Tool {
 	return mcp.NewTool("wa_mention",
 		mcp.WithDescription("Send a WhatsApp message that mentions specific people. Automatically resolves phone numbers to JIDs/LIDs from the contacts database. Use this instead of wa_send whenever you need to @mention someone in a group."),
 		mcp.WithString("jid", mcp.Required(), mcp.Description("Chat JID to send to (e.g. group JID)")),
-		mcp.WithString("message", mcp.Required(), mcp.Description("Message text, include @phone_number for each mention (e.g. '@96171626971 check this out')")),
-		mcp.WithString("mentioned_phones", mcp.Required(), mcp.Description("Comma-separated phone numbers to mention (e.g. '96171626971,966535435254'). The tool resolves JIDs/LIDs automatically.")),
+		mcp.WithString("message", mcp.Required(), mcp.Description("Message text, include @phone_number for each mention (e.g. '@96170000101 check this out')")),
+		mcp.WithString("mentioned_phones", mcp.Required(), mcp.Description("Comma-separated phone numbers to mention (e.g. '96170000101,966500000101'). The tool resolves JIDs/LIDs automatically.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint:    mcp.ToBoolPtr(false),
 			DestructiveHint: mcp.ToBoolPtr(false),
@@ -301,11 +301,28 @@ func (s *Server) handleMarkRead(ctx context.Context, req mcp.CallToolRequest) (*
 
 // ── REST API helpers ────────────────────────────────────────────────
 
+func (s *Server) getAPI(path string) (*mcp.CallToolResult, error) {
+	resp, err := http.Get(s.apiURL + path)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("bridge unreachable at %s: %v", s.apiURL, err)), nil
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return mcp.NewToolResultError(fmt.Sprintf("bridge returned %d: %s", resp.StatusCode, string(respBody))), nil
+	}
+	return mcp.NewToolResultText(string(respBody)), nil
+}
+
 func (s *Server) postAPI(path string, payload map[string]string) (*mcp.CallToolResult, error) {
 	return s.postAPIAny(path, payload)
 }
 
 func (s *Server) postAPIAny(path string, payload any) (*mcp.CallToolResult, error) {
+	return s.postAPIAccept(path, payload)
+}
+
+func (s *Server) postAPIAccept(path string, payload any, accept ...int) (*mcp.CallToolResult, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("marshal error: %v", err)), nil
@@ -320,11 +337,20 @@ func (s *Server) postAPIAny(path string, payload any) (*mcp.CallToolResult, erro
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 400 && !containsStatus(accept, resp.StatusCode) {
 		return mcp.NewToolResultError(fmt.Sprintf("bridge returned %d: %s", resp.StatusCode, string(respBody))), nil
 	}
 
 	return mcp.NewToolResultText(string(respBody)), nil
+}
+
+func containsStatus(codes []int, code int) bool {
+	for _, c := range codes {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
 
 func splitAndTrim(s string) []string {

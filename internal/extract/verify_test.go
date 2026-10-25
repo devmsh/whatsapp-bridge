@@ -56,7 +56,7 @@ func TestVerifyRejectsFabrication(t *testing.T) {
 // away fourteen correct tasks in a single run, so the rule was removed and the
 // duplicate it allows is handled in dedupe, where duplicates belong.
 func TestVerifyAcceptsContextLines(t *testing.T) {
-	ctx := line("M0", 50, "Omar", "جهز العقد قبل الخميس")
+	ctx := line("M0", 50, "Sami", "جهز العقد قبل الخميس")
 	ctx.Context = true
 	c := chunkWith(ctx, line("M1", 100, "Sara", "تمام"))
 
@@ -73,9 +73,9 @@ func TestVerifyAcceptsContextLines(t *testing.T) {
 func TestVerifyDropsBareQuestions(t *testing.T) {
 	c := chunkWith(
 		line("Q1", 100, "Sara", "ممكن مثال؟"),
-		line("Q2", 101, "Omar", "شو رايكم؟"),
+		line("Q2", 101, "Sami", "شو رايكم؟"),
 		line("Q3", 102, "Sara", "ممكن تبعتلي الملف؟"),
-		line("Q4", 103, "Omar", "any update?"),
+		line("Q4", 103, "Sami", "any update?"),
 	)
 	for _, id := range []string{"#Q1", "#Q2", "#Q4"} {
 		var quote string
@@ -194,9 +194,9 @@ func TestResolveDuePhrases(t *testing.T) {
 // every run. The rule lives in code because asking did not work.
 func TestVerifyDropsFinishedWork(t *testing.T) {
 	c := chunkWith(
-		line("P1", 100, "Fady", "عملت شوية تعديلات جيدة باذن الله"),
+		line("P1", 100, "Rami", "عملت شوية تعديلات جيدة باذن الله"),
 		line("P2", 101, "Sara", "خلصت التقرير امبارح"),
-		line("P3", 102, "Omar", "I sent it yesterday"),
+		line("P3", 102, "Sami", "I sent it yesterday"),
 		line("P4", 103, "Sara", "عملت التعديلات بس لازم تراجعها انت"),
 	)
 	for _, id := range []string{"#P1", "#P2", "#P3"} {
@@ -223,7 +223,7 @@ func TestVerifyDropsFinishedWork(t *testing.T) {
 // one definite article. The quote must still be anchored to this message, so
 // fabrication stays caught.
 func TestVerifyToleratesSmallEdits(t *testing.T) {
-	c := chunkWith(line("E1", 100, "Alaa", "@Ayman ابعتلي اكسز هلقيت قبل منقلع"))
+	c := chunkWith(line("E1", 100, "Karim", "@Ayham ابعتلي اكسز هلقيت قبل منقلع"))
 
 	if _, reason, ok := extract.Verify(c, proposal("#E1", "ابعتلي الاكسز هلقيت قبل منقلع", "send access")); !ok {
 		t.Errorf("a one-article edit should not lose the task (reason %q)", reason)
@@ -234,14 +234,14 @@ func TestVerifyToleratesSmallEdits(t *testing.T) {
 	}
 }
 
-// TestVerifyStripsRenderedPrefix — shown "Fady Mondy: وما تنسوا…", the model
-// quoted "@Fady Mondy وما تنسوا…", folding the speaker into the message. Four
+// TestVerifyStripsRenderedPrefix — shown "Rami Saleh: وما تنسوا…", the model
+// quoted "@Rami Saleh وما تنسوا…", folding the speaker into the message. Four
 // correct tasks were rejected as fabrications before this was handled.
 func TestVerifyStripsRenderedPrefix(t *testing.T) {
-	c := chunkWith(line("R1", 100, "Fady Mondy", "وما تنسوا تقعدوا مع محمود عبد العال"))
+	c := chunkWith(line("R1", 100, "Rami Saleh", "وما تنسوا تقعدوا مع محمود عبد العال"))
 	for _, quote := range []string{
-		"@Fady Mondy وما تنسوا تقعدوا مع محمود عبد العال",
-		"Fady Mondy: وما تنسوا تقعدوا مع محمود عبد العال",
+		"@Rami Saleh وما تنسوا تقعدوا مع محمود عبد العال",
+		"Rami Saleh: وما تنسوا تقعدوا مع محمود عبد العال",
 		"[#R1] وما تنسوا تقعدوا مع محمود عبد العال",
 	} {
 		if _, reason, ok := extract.Verify(c, proposal("#R1", quote, "meet Mahmoud")); !ok {
@@ -288,9 +288,9 @@ func TestVerifyLeavesMeetingsToTheMeetingsModule(t *testing.T) {
 // because the words were really said; the task was invented around them.
 func TestVerifyNeedsEnoughWordsToNameWork(t *testing.T) {
 	c := chunkWith(
-		line("S1", 100, "Nidal", "فيها مشكله"),
-		line("S2", 101, "Fady", "فل الفل"),
-		line("S3", 102, "Nayef", "وشغلك اخيرة المساعد الذكي"),
+		line("S1", 100, "Tarek", "فيها مشكله"),
+		line("S2", 101, "Rami", "فل الفل"),
+		line("S3", 102, "Nabil", "وشغلك اخيرة المساعد الذكي"),
 	)
 
 	for _, tc := range []struct{ id, quote, title string }{
@@ -317,7 +317,7 @@ func TestVerifyNeedsEnoughWordsToNameWork(t *testing.T) {
 // Odoo to Adi and Malik") came back as "evaluate the Odoo demo". Showing it
 // already happened.
 func TestVerifyPastTenseCoversMoreVerbs(t *testing.T) {
-	c := chunkWith(line("P2", 100, "Shurrab", "عرضت الodoo على عدي ومالك وانهبلوا فيه"))
+	c := chunkWith(line("P2", 100, "Hasan", "عرضت الodoo على عدي ومالك وانهبلوا فيه"))
 	if _, reason, ok := extract.Verify(c,
 		proposal("#P2", "عرضت الodoo على عدي ومالك وانهبلوا فيه", "تقييم عرض Odoo")); ok {
 		t.Errorf("showing it already happened; that is a report")

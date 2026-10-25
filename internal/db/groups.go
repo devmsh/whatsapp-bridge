@@ -43,6 +43,7 @@ type GroupParticipant struct {
 	IsAdmin      bool   `json:"is_admin"`
 	IsSuperAdmin bool   `json:"is_super_admin"`
 	DisplayName  string `json:"display_name,omitempty"`
+	Username     string `json:"username,omitempty"`
 	ErrorCode    int    `json:"error_code,omitempty"`
 	UpdatedAt    int64  `json:"updated_at"`
 }
@@ -220,10 +221,20 @@ func (s *Store) StoreGroupParticipant(p *GroupParticipant) error {
 	if p.UpdatedAt == 0 {
 		p.UpdatedAt = time.Now().Unix()
 	}
-	_, err := s.DB.Exec(`INSERT OR REPLACE INTO group_participants (
-		group_jid, jid, phone, lid, is_admin, is_super_admin, display_name, error_code, updated_at
-	) VALUES (?,?,?,?,?,?,?,?,?)`,
-		p.GroupJID, p.JID, p.Phone, p.LID, p.IsAdmin, p.IsSuperAdmin, p.DisplayName, p.ErrorCode, p.UpdatedAt,
+	p.Username = NormalizeUsername(p.Username)
+	_, err := s.DB.Exec(`INSERT INTO group_participants (
+		group_jid, jid, phone, lid, is_admin, is_super_admin, display_name, error_code, username, updated_at
+	) VALUES (?,?,?,?,?,?,?,?,?,?)
+	ON CONFLICT(group_jid, jid) DO UPDATE SET
+		phone = excluded.phone,
+		lid = excluded.lid,
+		is_admin = excluded.is_admin,
+		is_super_admin = excluded.is_super_admin,
+		display_name = excluded.display_name,
+		error_code = excluded.error_code,
+		username = CASE WHEN excluded.username != '' THEN excluded.username ELSE group_participants.username END,
+		updated_at = excluded.updated_at`,
+		p.GroupJID, p.JID, p.Phone, p.LID, p.IsAdmin, p.IsSuperAdmin, p.DisplayName, p.ErrorCode, p.Username, p.UpdatedAt,
 	)
 	return err
 }
@@ -231,7 +242,7 @@ func (s *Store) StoreGroupParticipant(p *GroupParticipant) error {
 // GetGroupParticipants returns all participants of a group.
 func (s *Store) GetGroupParticipants(groupJID string) ([]GroupParticipant, error) {
 	rows, err := s.DB.Query(`SELECT group_jid, jid, phone, lid, is_admin, is_super_admin,
-		display_name, error_code, updated_at
+		display_name, error_code, username, updated_at
 		FROM group_participants WHERE group_jid = ?`, groupJID)
 	if err != nil {
 		return nil, err
@@ -241,7 +252,7 @@ func (s *Store) GetGroupParticipants(groupJID string) ([]GroupParticipant, error
 	for rows.Next() {
 		var p GroupParticipant
 		if err := rows.Scan(&p.GroupJID, &p.JID, &p.Phone, &p.LID, &p.IsAdmin, &p.IsSuperAdmin,
-			&p.DisplayName, &p.ErrorCode, &p.UpdatedAt); err != nil {
+			&p.DisplayName, &p.ErrorCode, &p.Username, &p.UpdatedAt); err != nil {
 			return parts, err
 		}
 		parts = append(parts, p)

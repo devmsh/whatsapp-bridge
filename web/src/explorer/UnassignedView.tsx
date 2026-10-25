@@ -152,7 +152,7 @@ export function UnassignedView({
   useEffect(load, [])
 
   // The picker mirrors the sidebar tree: a sub-circle shows indented under its
-  // parent, so you can tell "Sentra under ID8" from a top-level circle while
+  // parent, so you can tell "Borealis under IDX" from a top-level circle while
   // filing. A flat A–Z list hid that.
   const options = useMemo(() => flattenCircleTree(circles), [circles])
 

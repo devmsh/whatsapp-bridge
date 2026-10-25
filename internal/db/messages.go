@@ -202,6 +202,86 @@ func (s *Store) GetMessagesMerged(chatJIDs []string, since int64, limit int) ([]
 	return msgs, nil
 }
 
+// messageColumns is the column list shared by the "around a message" queries
+// added for the Mentions feature below. The queries above predate this and
+// keep their own inline copies — left alone rather than reshuffled.
+const messageColumns = `id, chat_jid, sender, sender_name, push_name, content, timestamp,
+	is_from_me, is_group, message_type, device_id,
+	is_ephemeral, is_view_once, is_forwarded, forward_score,
+	is_edit, edit_timestamp, original_id,
+	is_deleted, deleted_at, deleted_by,
+	media_type, media_path, media_mime, media_size, media_caption, media_filename, thumbnail_path,
+	reply_to_id, reply_to_sender, reply_to_content, mentions,
+	latitude, longitude, location_name, location_address,
+	vcard_name, vcard_data, poll_id, sticker_pack, broadcast_list_jid`
+
+// GetMessagesAround returns up to `before` messages right before, and up to
+// `after` messages right after, one message identified by its chat,
+// timestamp and rowid. The message itself is not included in either slice.
+//
+// Timestamps are whole seconds and a fast group burst can share one, so
+// rowid (SQLite's built-in row number) breaks the tie between same-second
+// messages. This runs as two small queries — one per direction, both using
+// the existing (chat_jid, timestamp) index — rather than one combined query.
+func (s *Store) GetMessagesAround(chatJID string, ts, rowID int64, before, after int) (beforeMsgs, afterMsgs []Message, err error) {
+	if before > 0 {
+		if beforeMsgs, err = s.messagesBeforeRow(chatJID, ts, rowID, before); err != nil {
+			return nil, nil, err
+		}
+	}
+	if after > 0 {
+		if afterMsgs, err = s.messagesAfterRow(chatJID, ts, rowID, after); err != nil {
+			return nil, nil, err
+		}
+	}
+	return beforeMsgs, afterMsgs, nil
+}
+
+func (s *Store) messagesBeforeRow(chatJID string, ts, rowID int64, n int) ([]Message, error) {
+	rows, err := s.DB.Query(`SELECT `+messageColumns+`
+		FROM messages
+		WHERE chat_jid = ? AND (timestamp < ? OR (timestamp = ? AND rowid < ?))
+		ORDER BY timestamp DESC, rowid DESC LIMIT ?`,
+		chatJID, ts, ts, rowID, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	msgs, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
+func (s *Store) messagesAfterRow(chatJID string, ts, rowID int64, n int) ([]Message, error) {
+	rows, err := s.DB.Query(`SELECT `+messageColumns+`
+		FROM messages
+		WHERE chat_jid = ? AND (timestamp > ? OR (timestamp = ? AND rowid > ?))
+		ORDER BY timestamp ASC, rowid ASC LIMIT ?`,
+		chatJID, ts, ts, rowID, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMessages(rows)
+}
+
+// CountMessagesSince returns how many messages in chatJID are at or after ts.
+// Used to size a "load enough of this chat to reach an old message" window —
+// one bigger request rather than a second pagination mode.
+func (s *Store) CountMessagesSince(chatJID string, ts int64) (int, error) {
+	var n int
+	err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM messages WHERE chat_jid = ? AND timestamp >= ?`,
+		chatJID, ts,
+	).Scan(&n)
+	return n, err
+}
+
 // GetMessage returns a single message by ID and chat JID.
 func (s *Store) GetMessage(id, chatJID string) (*Message, error) {
 	row := s.DB.QueryRow(`SELECT id, chat_jid, sender, sender_name, push_name, content, timestamp,

@@ -21,10 +21,12 @@ export type RailItem =
   | 'status'
   | 'archived'
   | 'starred'
+  | 'mentions'
   | 'circles'
   | 'focus'
   | 'tasks'
   | 'meetings'
+  | 'debug'
 
 type Entry = {
   id: RailItem
@@ -84,6 +86,16 @@ export const RAIL_ICONS: Record<RailItem, React.ReactNode> = {
       <path d="M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.7l5.9-.9z" />
     </Icon>
   ),
+  // A literal "@" reads unambiguously at this size — a hand-drawn path
+  // risks looking like a generic loop rather than an actual at-sign.
+  mentions: (
+    <span
+      aria-hidden="true"
+      className="flex h-[21px] w-[21px] items-center justify-center text-[17px] font-semibold leading-none"
+    >
+      @
+    </span>
+  ),
   circles: (
     <Icon>
       <circle cx="9" cy="9" r="5" />
@@ -105,6 +117,12 @@ export const RAIL_ICONS: Record<RailItem, React.ReactNode> = {
     <Icon>
       <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
       <path d="M3.5 9.5h17M8 3.5v3M16 3.5v3" />
+    </Icon>
+  ),
+  // A pulse line: what the background services are doing right now.
+  debug: (
+    <Icon>
+      <path d="M3 12h3.5l2-5 3 10 2.5-5H21" />
     </Icon>
   ),
 }
@@ -169,8 +187,10 @@ export default function Rail({
   onPick,
   onSettings,
   onProfile,
+  brokenServices,
   unreadChats,
   archivedCount,
+  mentionsCount,
   openTasks,
   upcomingMeetings,
   hasStatusUpdates,
@@ -183,10 +203,15 @@ export default function Rail({
   onProfile?: () => void
   unreadChats?: number
   archivedCount?: number
+  /** How many mentions are waiting (not dismissed / not yet replied to). */
+  mentionsCount?: number
   openTasks?: number
   /** Meetings still ahead — what the badge counts. */
   upcomingMeetings?: number
   hasStatusUpdates?: boolean
+  /** How many background services are stuck or broken. Shown on Debugging so a
+      stalled worker is visible without opening the screen. */
+  brokenServices?: number
   profileName?: string
   avatar?: React.ReactNode
 }) {
@@ -215,6 +240,7 @@ export default function Rail({
 
   const primary: Entry[] = [
     { id: 'chats', label: 'Chats', icon: RAIL_ICONS.chats, badge: unreadChats },
+    { id: 'mentions', label: 'Mentions', icon: RAIL_ICONS.mentions, badge: mentionsCount },
     { id: 'status', label: 'Updates', icon: RAIL_ICONS.status, dot: hasStatusUpdates },
     { id: 'calls', label: 'Calls', icon: RAIL_ICONS.calls },
   ]
@@ -274,6 +300,15 @@ export default function Rail({
 
       <div className="flex-1" />
 
+      {/* Debugging sits directly above Settings: both are about the app
+          itself rather than about anybody's messages. */}
+      <NavRow
+        icon={RAIL_ICONS.debug}
+        label="Debugging"
+        active={active === 'debug'}
+        badge={brokenServices}
+        onClick={() => onPick('debug')}
+      />
       <NavRow icon={SETTINGS_ICON} label="Settings" onClick={onSettings} />
       {onProfile && (
         <button

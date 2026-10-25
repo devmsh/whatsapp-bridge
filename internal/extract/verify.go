@@ -148,8 +148,8 @@ func quoteMatches(l Line, quote string) bool {
 // stripRenderArtefacts removes the parts of a rendered line that belong to the
 // format rather than to the message.
 //
-// Models copy what they see. Shown "[#3AE9…] [Mon 27 Jul] Fady Mondy: وما
-// تنسوا…", qwen2.5 returned "@Fady Mondy وما تنسوا…" — the words were exact,
+// Models copy what they see. Shown "[#3AE9…] [Mon 27 Jul] Rami Saleh: وما
+// تنسوا…", qwen2.5 returned "@Rami Saleh وما تنسوا…" — the words were exact,
 // but the speaker had been folded into the quote, and four correct tasks were
 // thrown away as fabrications. Asking the prompt to stop helps; refusing to be
 // fooled by it is what makes the check trustworthy.

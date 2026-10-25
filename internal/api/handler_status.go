@@ -41,7 +41,8 @@ func (s *Server) handleStatusAbout(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, 400, "invalid JSON")
 			return
 		}
-		err := wa.SetStatusMessage(context.Background(), req.Text)
+		// Newer whatsmeow takes a struct. Text is a pointer.
+		err := wa.SetStatusMessage(context.Background(), types.SetStatusInput{Text: &req.Text})
 		if err != nil {
 			jsonError(w, 500, fmt.Sprintf("set status: %v", err))
 			return
