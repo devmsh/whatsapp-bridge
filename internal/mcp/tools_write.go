@@ -301,6 +301,19 @@ func (s *Server) handleMarkRead(ctx context.Context, req mcp.CallToolRequest) (*
 
 // ── REST API helpers ────────────────────────────────────────────────
 
+func (s *Server) getAPI(path string) (*mcp.CallToolResult, error) {
+	resp, err := http.Get(s.apiURL + path)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("bridge unreachable at %s: %v", s.apiURL, err)), nil
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return mcp.NewToolResultError(fmt.Sprintf("bridge returned %d: %s", resp.StatusCode, string(respBody))), nil
+	}
+	return mcp.NewToolResultText(string(respBody)), nil
+}
+
 func (s *Server) postAPI(path string, payload map[string]string) (*mcp.CallToolResult, error) {
 	return s.postAPIAny(path, payload)
 }

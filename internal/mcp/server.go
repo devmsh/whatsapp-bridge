@@ -55,6 +55,8 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 	srv.AddTool(toolReadMessages(), s.handleReadMessages)
 	srv.AddTool(toolListChats(), s.handleListChats)
 	srv.AddTool(toolFindContact(), s.handleFindContact)
+	srv.AddTool(toolFindContactByUsername(), s.handleFindContactByUsername)
+	srv.AddTool(toolGetCapabilities(), s.handleGetCapabilities)
 	srv.AddTool(toolFindGroup(), s.handleFindGroup)
 	srv.AddTool(toolSearchMessages(), s.handleSearchMessages)
 

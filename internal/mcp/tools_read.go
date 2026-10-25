@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -73,12 +74,34 @@ func toolSearchMessages() mcp.Tool {
 
 func toolFindContact() mcp.Tool {
 	return mcp.NewTool("wa_find_contact",
-		mcp.WithDescription("Search WhatsApp contacts by name, phone number, JID, kunya, or by how the user met them. "+
+		mcp.WithDescription("Search WhatsApp contacts by name, phone number, JID, kunya, username, or by how the user met them. "+
 			"Results carry the user's OWN notes, which WhatsApp does not have and which are often the most useful "+
 			"thing about a person: `kunya` is the name they are actually addressed by (\"أبو فلان\"), and "+
 			"`how_we_met` says who introduced them, when and why. Read both before describing or writing to anyone, "+
-			"and use the kunya when it is how they are really called."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Search term — matches name, push_name, phone, business_name, kunya and how_we_met")),
+			"and use the kunya when it is how they are really called. `username` is the WhatsApp @handle when we have "+
+			"been sent one — many contacts have none stored."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search term — matches name, push_name, phone, business_name, username, kunya and how_we_met")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint: mcp.ToBoolPtr(true),
+		}),
+	)
+}
+
+func toolFindContactByUsername() mcp.Tool {
+	return mcp.NewTool("find_contact_by_username",
+		mcp.WithDescription("Look up a WhatsApp contact by @username from stored data only. Case-insensitive, leading @ optional. "+
+			"Returns 404/error if this bridge has never been sent that username — it does not live-query WhatsApp."),
+		mcp.WithString("username", mcp.Required(), mcp.Description("WhatsApp username, with or without a leading @")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint: mcp.ToBoolPtr(true),
+		}),
+	)
+}
+
+func toolGetCapabilities() mcp.Tool {
+	return mcp.NewTool("get_capabilities",
+		mcp.WithDescription("Report the pinned whatsmeow version and which bridge features are available "+
+			"(username stored lookup, newsletters, polls, reactions, edits, LID mapping, ...)."),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
 		}),
@@ -361,11 +384,11 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 	// introduced, not just by name.
 	rows, err := s.db.Query(`SELECT jid, lid, phone, name, push_name, business_name,
 		is_business, status_text, COALESCE(kunya,''), COALESCE(how_we_met,''),
-		first_seen, last_seen
+		COALESCE(username,''), first_seen, last_seen
 		FROM contacts
 		WHERE name LIKE ? OR push_name LIKE ? OR phone LIKE ? OR business_name LIKE ? OR jid LIKE ?
-		   OR kunya LIKE ? OR how_we_met LIKE ?
-		ORDER BY last_seen DESC LIMIT 20`, q, q, q, q, q, q, q)
+		   OR kunya LIKE ? OR how_we_met LIKE ? OR username LIKE ?
+		ORDER BY last_seen DESC LIMIT 20`, q, q, q, q, q, q, q, q)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
@@ -384,6 +407,7 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 		// HowWeMet is where the relationship came from.
 		Kunya     string `json:"kunya,omitempty"`
 		HowWeMet  string `json:"how_we_met,omitempty"`
+		Username  string `json:"username,omitempty"`
 		FirstSeen int64  `json:"first_seen,omitempty"`
 		LastSeen  int64  `json:"last_seen,omitempty"`
 	}
@@ -392,7 +416,7 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 	for rows.Next() {
 		var c contact
 		if err := rows.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName,
-			&c.IsBusiness, &c.StatusText, &c.Kunya, &c.HowWeMet,
+			&c.IsBusiness, &c.StatusText, &c.Kunya, &c.HowWeMet, &c.Username,
 			&c.FirstSeen, &c.LastSeen); err != nil {
 			continue
 		}
@@ -408,6 +432,20 @@ func (s *Server) handleFindContact(ctx context.Context, req mcp.CallToolRequest)
 		"count":    len(contacts),
 		"contacts": contacts,
 	})
+}
+
+func (s *Server) handleFindContactByUsername(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	username, _ := args["username"].(string)
+	username = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(username), "@"))
+	if username == "" {
+		return mcp.NewToolResultError("username is required"), nil
+	}
+	return s.getAPI("/contacts/by-username/" + url.PathEscape(username))
+}
+
+func (s *Server) handleGetCapabilities(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return s.getAPI("/capabilities")
 }
 
 func (s *Server) handleGroupInfo(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -443,12 +481,16 @@ func (s *Server) handleGroupInfo(ctx context.Context, req mcp.CallToolRequest) (
 		JID          string `json:"jid"`
 		Phone        string `json:"phone,omitempty"`
 		DisplayName  string `json:"display_name,omitempty"`
+		Username     string `json:"username,omitempty"`
 		IsAdmin      bool   `json:"is_admin"`
 		IsSuperAdmin bool   `json:"is_super_admin"`
 	}
 
-	pRows, err := s.db.Query(`SELECT gp.jid, gp.phone, gp.display_name, gp.is_admin, gp.is_super_admin
-		FROM group_participants gp WHERE gp.group_jid = ?`, jid)
+	pRows, err := s.db.Query(`SELECT gp.jid, gp.phone, gp.display_name, gp.is_admin, gp.is_super_admin,
+		COALESCE(NULLIF(gp.username,''), ct.username, '')
+		FROM group_participants gp
+		LEFT JOIN contacts ct ON ct.jid = gp.jid
+		WHERE gp.group_jid = ?`, jid)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("participants query failed: %v", err)), nil
 	}
@@ -457,7 +499,7 @@ func (s *Server) handleGroupInfo(ctx context.Context, req mcp.CallToolRequest) (
 	var participants []participant
 	for pRows.Next() {
 		var p participant
-		if err := pRows.Scan(&p.JID, &p.Phone, &p.DisplayName, &p.IsAdmin, &p.IsSuperAdmin); err != nil {
+		if err := pRows.Scan(&p.JID, &p.Phone, &p.DisplayName, &p.IsAdmin, &p.IsSuperAdmin, &p.Username); err != nil {
 			continue
 		}
 		participants = append(participants, p)
