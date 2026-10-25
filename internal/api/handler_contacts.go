@@ -24,7 +24,8 @@ func (s *Server) handleContacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query().Get("q")
-	contacts, err := s.store.GetContacts(q)
+	username := r.URL.Query().Get("username")
+	contacts, err := s.store.GetContacts(q, username)
 	if err != nil {
 		jsonError(w, 500, err.Error())
 		return
@@ -60,6 +61,37 @@ func (s *Server) handleContacts(w http.ResponseWriter, r *http.Request) {
 		out = append(out, contactOut{Contact: c, IsHidden: isHidden})
 	}
 	jsonOK(w, out)
+}
+
+// handleContactByUsername looks up a stored contact by WhatsApp @username.
+// GET /api/v2/contacts/by-username/{username}
+// Case-insensitive, leading @ stripped. Stored data only — 404 if we have
+// never been sent that username.
+func (s *Server) handleContactByUsername(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	raw := strings.TrimPrefix(r.URL.Path, "/api/v2/contacts/by-username/")
+	raw = strings.Trim(raw, "/")
+	if slash := strings.IndexByte(raw, '/'); slash >= 0 {
+		raw = raw[:slash]
+	}
+	username := db.NormalizeUsername(raw)
+	if username == "" {
+		jsonError(w, 400, "username required")
+		return
+	}
+	contact, err := s.store.GetContactByUsername(username)
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	if contact == nil {
+		jsonError(w, 404, "contact not found")
+		return
+	}
+	jsonOK(w, contact)
 }
 
 func (s *Server) handleContactsCheck(w http.ResponseWriter, r *http.Request) {
@@ -102,6 +134,10 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v2/contacts/")
 	if path == "check" {
 		s.handleContactsCheck(w, r)
+		return
+	}
+	if path == "by-username" || strings.HasPrefix(path, "by-username/") {
+		s.handleContactByUsername(w, r)
 		return
 	}
 

@@ -84,6 +84,7 @@ func NewServer(store *db.Store, client *wa.Client, mediaDir string, port int, cf
 func (s *Server) registerRoutes() {
 	// Health
 	s.mux.HandleFunc("/api/v2/health", s.handleHealth)
+	s.mux.HandleFunc("/api/v2/capabilities", s.handleCapabilities)
 
 	// Debugging: what the background services did, and every model call.
 	s.mux.HandleFunc("/api/v2/debug/overview", s.handleDebugOverview)
@@ -129,6 +130,7 @@ func (s *Server) registerRoutes() {
 	// Contacts
 	s.mux.HandleFunc("/api/v2/contacts", s.handleContacts)
 	s.mux.HandleFunc("/api/v2/contacts/check", s.handleContactsCheck)
+	s.mux.HandleFunc("/api/v2/contacts/by-username/", s.handleContactByUsername)
 	s.mux.HandleFunc("/api/v2/contacts/tags", s.handleContactTagsMap)
 	s.mux.HandleFunc("/api/v2/contacts/intros", s.handleIntroChats)
 	s.mux.HandleFunc("/api/v2/contacts/intros/labelled", s.handleIntroLabelled)
