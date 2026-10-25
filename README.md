@@ -104,7 +104,9 @@ All endpoints under `/api/v2/`:
 
 ### Contacts & Groups
 - `GET /api/v2/contacts` — List all contacts (`?q=` searches name/push name/phone/business name/username; `?username=` exact case-insensitive username, leading `@` optional)
-- `GET /api/v2/contacts/by-username/{username}` — Stored-data lookup by WhatsApp username (case-insensitive, leading `@` stripped). **404 if this bridge has never been sent that handle** — it does not live-query WhatsApp
+- `GET /api/v2/contacts/by-username/{username}` — Stored-data lookup by WhatsApp username (case-insensitive, leading `@` stripped). **404 if this bridge has never been sent that handle**
+- `POST /api/v2/contacts/lookup-username` — Live WhatsApp usync lookup `{"username":"..."}` (leading `@` stripped, lowercased). Returns `{username,jid,lid,phone_jid,found}`. **404 `{"found":false}`** if the server returns nothing. `?debug=1` adds the raw response node as `debug`
+- `POST /api/v2/contacts/fetch-usernames` — Live usync for known JIDs `{"jids":["..."]}` → `{results:[...]}`
 - `GET /api/v2/groups` — List all groups with full metadata
 - `GET /api/v2/groups/discover` — Discover groups from contacts
 - `POST /api/v2/groups/join` — Join via invite link
@@ -117,7 +119,7 @@ Both accept `&exclude=JID1,JID2` to filter out noise.
 
 ### Other
 - `GET /api/v2/health` — Connection status, uptime, DB stats
-- `GET /api/v2/capabilities` — Pinned whatsmeow version (from `runtime/debug.ReadBuildInfo`) and a feature map (`username_stored_lookup`, `username_live_lookup=false`, newsletters, polls, reactions, edits, LID mapping, …)
+- `GET /api/v2/capabilities` — Pinned whatsmeow version (from `runtime/debug.ReadBuildInfo`) and a feature map (`username_stored_lookup`, `username_live_lookup`, newsletters, polls, reactions, edits, LID mapping, …)
 - `POST /api/v2/polls` — Create a poll
 - `POST /api/v2/presence/typing` — Send typing indicator
 - `POST /api/v2/sync/contacts` — Trigger contact sync
@@ -127,9 +129,33 @@ Both accept `&exclude=JID1,JID2` to filter out noise.
 
 ### Usernames
 
-WhatsApp usernames (`@handle`) are stored when WhatsApp has already sent them — from the contact app-state action (`ContactAction.Username`) or history-sync `InlineContact.Username`. Many contacts will have an empty `username`: that means we do not know it, not that they have none. There is no live username lookup (`username_live_lookup=false` on `/api/v2/capabilities`). A later contact upsert never overwrites a stored username with empty.
+WhatsApp usernames (`@handle`) are stored when WhatsApp has already sent them — from the contact app-state action (`ContactAction.Username`) or history-sync `InlineContact.Username` — and after a live usync lookup. Many contacts will have an empty `username`: that means we do not know it, not that they have none. A later contact upsert never overwrites a stored username with empty.
 
-MCP tools `find_contact_by_username` and `get_capabilities` call these REST endpoints (not SQL). Contact and group-participant tool outputs include `username` when we have one.
+Live lookup (`username_live_lookup=true` on `/api/v2/capabilities`) sends a usync IQ through whatsmeow's `DangerousInternals().SendIQ` — no whatsmeow fork. The IQ is `xmlns="usync"` `type="get"` to `s.whatsapp.net`:
+
+```
+<iq xmlns="usync" type="get" to="s.whatsapp.net">
+  <usync sid="..." mode="query" last="true" index="0" context="interactive">
+    <query>
+      <contact addressing_mode="lid"/>
+      <username/>
+      <lid/>
+    </query>
+    <list>
+      <user>
+        <username>name</username>
+        <contact username="name"/>
+      </user>
+    </list>
+  </usync>
+</iq>
+```
+
+`fetch-usernames` uses `DangerousInternals().Usync` on known JIDs with the same query protocols. A found result is written to `contacts.username` and, when both LID and phone JID are present, to whatsmeow's LID↔PN map (`StoreLIDPNMapping`).
+
+**Uncertainty:** official Android (and Baileys `onWhatsAppUsername`) identify the lookup target as `<contact username="name"/>` only; they do not put the name in a `<username>` child of `<user>`. This bridge sends both. The response parser accepts username as child text/bytes, as a user attribute, or as `contact@username`. LID is read from `jid` / `lid@val` / `lid@jid`; phone from `pn_jid`. This has not been confirmed against a live WhatsApp session from this repo.
+
+MCP tools `find_contact_by_username` (stored), `lookup_username` (live), and `get_capabilities` call these REST endpoints (not SQL). Contact and group-participant tool outputs include `username` when we have one.
 
 To see what a newer whatsmeow would add, run `scripts/whatsmeow-diff.sh` (commits, new exported `Client` methods, new `types`/`events` structs between the go.mod pin and `@latest`).
 
