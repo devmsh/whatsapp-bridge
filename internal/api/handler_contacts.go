@@ -136,6 +136,14 @@ func (s *Server) handleContactByJID(w http.ResponseWriter, r *http.Request) {
 		s.handleContactsCheck(w, r)
 		return
 	}
+	if path == "lookup-username" {
+		s.handleLookupUsername(w, r)
+		return
+	}
+	if path == "fetch-usernames" {
+		s.handleFetchUsernames(w, r)
+		return
+	}
 	if path == "by-username" || strings.HasPrefix(path, "by-username/") {
 		s.handleContactByUsername(w, r)
 		return

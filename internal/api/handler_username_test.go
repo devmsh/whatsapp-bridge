@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"whatsapp-bridge-v2/internal/db"
+	"whatsapp-bridge-v2/internal/wa"
 )
 
 func newUsernameTestServer(t *testing.T) (*Server, *db.Store) {
@@ -20,6 +22,8 @@ func newUsernameTestServer(t *testing.T) (*Server, *db.Store) {
 	s := &Server{store: st, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/api/v2/contacts", s.handleContacts)
 	s.mux.HandleFunc("/api/v2/contacts/by-username/", s.handleContactByUsername)
+	s.mux.HandleFunc("/api/v2/contacts/lookup-username", s.handleLookupUsername)
+	s.mux.HandleFunc("/api/v2/contacts/fetch-usernames", s.handleFetchUsernames)
 	s.mux.HandleFunc("/api/v2/capabilities", s.handleCapabilities)
 	return s, st
 }
@@ -117,12 +121,84 @@ func TestHandleCapabilities(t *testing.T) {
 	if !got.Features["username_stored_lookup"] {
 		t.Error("username_stored_lookup should be true")
 	}
-	if got.Features["username_live_lookup"] {
-		t.Error("username_live_lookup should be false")
+	if !got.Features["username_live_lookup"] {
+		t.Error("username_live_lookup should be true")
 	}
 	for _, f := range []string{"newsletters", "polls", "reactions", "edits", "lid_mapping"} {
 		if !got.Features[f] {
 			t.Errorf("feature %s should be true", f)
 		}
+	}
+}
+
+func TestHandleLookupUsernameValidation(t *testing.T) {
+	s, _ := newUsernameTestServer(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/contacts/lookup-username", nil)
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET status = %d, want 405", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v2/contacts/lookup-username", strings.NewReader(`{"username":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Errorf("empty username status = %d, body %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v2/contacts/lookup-username", strings.NewReader(`{"username":"@Alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != 503 {
+		t.Errorf("no client status = %d, body %s", rec.Code, rec.Body.String())
+	}
+
+	s.client = &wa.Client{}
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v2/contacts/lookup-username", strings.NewReader(`{"username":"alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != 503 {
+		t.Errorf("client not ready status = %d, body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWriteUsernameLookupNotFound(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/contacts/lookup-username?debug=1", nil)
+	writeUsernameLookup(rec, req, wa.UsernameLookupResult{
+		Username: "nobody",
+		Found:    false,
+		RawNode:  `<iq><usync><list/></usync></iq>`,
+	})
+	if rec.Code != 404 {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var got struct {
+		Found    bool   `json:"found"`
+		Username string `json:"username"`
+		Debug    string `json:"debug"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Found || got.Username != "nobody" || got.Debug == "" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestHandleFetchUsernamesEmpty(t *testing.T) {
+	s, _ := newUsernameTestServer(t)
+	s.client = &wa.Client{}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/contacts/fetch-usernames", strings.NewReader(`{"jids":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != 503 {
+		t.Errorf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
 }
