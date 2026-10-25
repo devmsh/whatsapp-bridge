@@ -167,7 +167,6 @@ func usernameLookupUserNode(username string) waBinary.Node {
 	return waBinary.Node{
 		Tag: "user",
 		Content: []waBinary.Node{
-			{Tag: "username", Content: username},
 			{Tag: "contact", Attrs: waBinary.Attrs{"username": username}},
 		},
 	}

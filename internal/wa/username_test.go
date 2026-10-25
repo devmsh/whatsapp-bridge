@@ -41,9 +41,8 @@ func TestUsernameLookupUsyncNode(t *testing.T) {
 
 	list := n.GetChildByTag("list")
 	user := list.GetChildByTag("user")
-	uname := user.GetChildByTag("username")
-	if nodeText(uname) != "alice" {
-		t.Errorf("user username child = %q, want alice", nodeText(uname))
+	if _, ok := user.GetOptionalChildByTag("username"); ok {
+		t.Errorf("user must not carry a <username> child; the key is contact@username")
 	}
 	contact := user.GetChildByTag("contact")
 	if got, _ := contact.Attrs["username"].(string); got != "alice" {
