@@ -319,6 +319,10 @@ func (s *Server) postAPI(path string, payload map[string]string) (*mcp.CallToolR
 }
 
 func (s *Server) postAPIAny(path string, payload any) (*mcp.CallToolResult, error) {
+	return s.postAPIAccept(path, payload)
+}
+
+func (s *Server) postAPIAccept(path string, payload any, accept ...int) (*mcp.CallToolResult, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("marshal error: %v", err)), nil
@@ -333,11 +337,20 @@ func (s *Server) postAPIAny(path string, payload any) (*mcp.CallToolResult, erro
 
 	respBody, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 400 && !containsStatus(accept, resp.StatusCode) {
 		return mcp.NewToolResultError(fmt.Sprintf("bridge returned %d: %s", resp.StatusCode, string(respBody))), nil
 	}
 
 	return mcp.NewToolResultText(string(respBody)), nil
+}
+
+func containsStatus(codes []int, code int) bool {
+	for _, c := range codes {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
 
 func splitAndTrim(s string) []string {

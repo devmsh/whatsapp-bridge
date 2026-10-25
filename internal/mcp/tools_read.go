@@ -90,7 +90,18 @@ func toolFindContact() mcp.Tool {
 func toolFindContactByUsername() mcp.Tool {
 	return mcp.NewTool("find_contact_by_username",
 		mcp.WithDescription("Look up a WhatsApp contact by @username from stored data only. Case-insensitive, leading @ optional. "+
-			"Returns 404/error if this bridge has never been sent that username — it does not live-query WhatsApp."),
+			"Returns 404/error if this bridge has never been sent that username. For a live WhatsApp query use lookup_username."),
+		mcp.WithString("username", mcp.Required(), mcp.Description("WhatsApp username, with or without a leading @")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			ReadOnlyHint: mcp.ToBoolPtr(true),
+		}),
+	)
+}
+
+func toolLookupUsername() mcp.Tool {
+	return mcp.NewTool("lookup_username",
+		mcp.WithDescription("Live-query WhatsApp for a user by @username and return their LID / phone JID. "+
+			"Leading @ is optional. Unlike find_contact_by_username this talks to WhatsApp, not only the local store."),
 		mcp.WithString("username", mcp.Required(), mcp.Description("WhatsApp username, with or without a leading @")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
@@ -101,7 +112,7 @@ func toolFindContactByUsername() mcp.Tool {
 func toolGetCapabilities() mcp.Tool {
 	return mcp.NewTool("get_capabilities",
 		mcp.WithDescription("Report the pinned whatsmeow version and which bridge features are available "+
-			"(username stored lookup, newsletters, polls, reactions, edits, LID mapping, ...)."),
+			"(username stored lookup, username live lookup, newsletters, polls, reactions, edits, LID mapping, ...)."),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			ReadOnlyHint: mcp.ToBoolPtr(true),
 		}),
@@ -442,6 +453,16 @@ func (s *Server) handleFindContactByUsername(ctx context.Context, req mcp.CallTo
 		return mcp.NewToolResultError("username is required"), nil
 	}
 	return s.getAPI("/contacts/by-username/" + url.PathEscape(username))
+}
+
+func (s *Server) handleLookupUsername(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := req.GetArguments()
+	username, _ := args["username"].(string)
+	username = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(username), "@"))
+	if username == "" {
+		return mcp.NewToolResultError("username is required"), nil
+	}
+	return s.postAPIAccept("/contacts/lookup-username", map[string]string{"username": username}, http.StatusNotFound)
 }
 
 func (s *Server) handleGetCapabilities(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

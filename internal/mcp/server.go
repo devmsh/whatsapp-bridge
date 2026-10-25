@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mark3labs/mcp-go/server"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // Server is the WhatsApp MCP server. It reads directly from SQLite
@@ -56,6 +56,7 @@ func (s *Server) registerTools(srv *server.MCPServer) {
 	srv.AddTool(toolListChats(), s.handleListChats)
 	srv.AddTool(toolFindContact(), s.handleFindContact)
 	srv.AddTool(toolFindContactByUsername(), s.handleFindContactByUsername)
+	srv.AddTool(toolLookupUsername(), s.handleLookupUsername)
 	srv.AddTool(toolGetCapabilities(), s.handleGetCapabilities)
 	srv.AddTool(toolFindGroup(), s.handleFindGroup)
 	srv.AddTool(toolSearchMessages(), s.handleSearchMessages)
