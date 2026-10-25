@@ -42,6 +42,7 @@ func handleContact(c *Client, evt *events.Contact) {
 		JID:       jid,
 		Phone:     evt.JID.User,
 		Name:      name,
+		Username:  action.GetUsername(),
 		UpdatedAt: evt.Timestamp.Unix(),
 	})
 }

@@ -1,6 +1,8 @@
 package wa
 
 import (
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 
 	"whatsapp-bridge-v2/internal/db"
@@ -72,6 +74,10 @@ func handleHistorySync(c *Client, evt *events.HistorySync) {
 		syncType, data.GetProgress(), len(data.GetConversations()))
 	c.Sync.RecordHistory(syncType)
 
+	for _, ic := range data.GetInlineContacts() {
+		storeInlineContact(c, ic)
+	}
+
 	for _, conv := range data.GetConversations() {
 		chatJID := conv.GetID()
 		chatName := conv.GetDisplayName()
@@ -91,6 +97,18 @@ func handleHistorySync(c *Client, evt *events.HistorySync) {
 
 		if err := c.Store.StoreChatFromHistorySync(chat); err != nil {
 			c.Log.Warnf("Failed to store chat %s: %v", chatJID, err)
+		}
+
+		if un := conv.GetUsername(); un != "" {
+			if parsed, err := types.ParseJID(chatJID); err == nil &&
+				(parsed.Server == types.DefaultUserServer || parsed.Server == types.HiddenUserServer) {
+				c.Store.StoreContact(&db.Contact{
+					JID:      chatJID,
+					Phone:    parsed.User,
+					Name:     chatName,
+					Username: un,
+				})
+			}
 		}
 
 		for _, hm := range conv.GetMessages() {
@@ -114,4 +132,42 @@ func handleHistorySync(c *Client, evt *events.HistorySync) {
 	}
 
 	c.Log.Infof("History sync processing complete")
+}
+
+func storeInlineContact(c *Client, ic *waHistorySync.InlineContact) {
+	if ic == nil {
+		return
+	}
+	username := ic.GetUsername()
+	name := ic.GetFullName()
+	if name == "" {
+		name = ic.GetFirstName()
+	}
+	if username == "" && name == "" {
+		return
+	}
+	pn := ic.GetPnJID()
+	lid := ic.GetLidJID()
+	jid := pn
+	if jid == "" {
+		jid = lid
+	}
+	if jid == "" {
+		return
+	}
+	phone := ""
+	if parsed, err := types.ParseJID(pn); err == nil && !parsed.IsEmpty() {
+		phone = parsed.User
+	}
+	lidUser := ""
+	if parsed, err := types.ParseJID(lid); err == nil && !parsed.IsEmpty() {
+		lidUser = parsed.User
+	}
+	c.Store.StoreContact(&db.Contact{
+		JID:      jid,
+		LID:      lidUser,
+		Phone:    phone,
+		Name:     name,
+		Username: username,
+	})
 }
