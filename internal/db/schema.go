@@ -101,9 +101,9 @@ CREATE TABLE IF NOT EXISTS contacts (
     -- from WhatsApp cannot overwrite them.
     kunya          TEXT    NOT NULL DEFAULT '',
     how_we_met     TEXT    NOT NULL DEFAULT '',
-    -- WhatsApp username (@handle). Only present when WhatsApp has actually
-    -- sent it to us (contact app-state or history-sync inline contacts).
-    -- Never live-looked-up; empty means we do not know it, not that they
+    -- WhatsApp username (@handle). Written when WhatsApp has sent it
+    -- (contact app-state, history-sync inline contacts) or after a live
+    -- usync username lookup. Empty means we do not know it, not that they
     -- have none.
     username       TEXT    NOT NULL DEFAULT '',
     updated_at     INTEGER NOT NULL DEFAULT 0
