@@ -110,7 +110,6 @@ CREATE TABLE IF NOT EXISTS contacts (
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_lid ON contacts(lid);
 CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
-CREATE INDEX IF NOT EXISTS idx_contacts_username ON contacts(username) WHERE username != '';
 
 CREATE TABLE IF NOT EXISTS groups (
     jid                            TEXT    PRIMARY KEY,
