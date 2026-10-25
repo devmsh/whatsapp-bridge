@@ -23,9 +23,30 @@ type Contact struct {
 	FirstSeen    int64  `json:"first_seen,omitempty"`
 	LastSeen     int64  `json:"last_seen,omitempty"`
 	// Yours, not WhatsApp's. See schema.go for why sync cannot overwrite them.
-	Kunya     string `json:"kunya,omitempty"`
-	HowWeMet  string `json:"how_we_met,omitempty"`
+	Kunya    string `json:"kunya,omitempty"`
+	HowWeMet string `json:"how_we_met,omitempty"`
+	// WhatsApp @username. Empty means we have not been sent one; a later
+	// upsert never overwrites a stored username with empty.
+	Username  string `json:"username,omitempty"`
 	UpdatedAt int64  `json:"updated_at"`
+}
+
+const contactColumns = `jid, lid, phone, name, push_name, business_name, verified_name,
+		is_business, status_text, status_set_at, picture_id, picture_url,
+		first_seen, last_seen, kunya, how_we_met, username, updated_at`
+
+func scanContact(s scanner, c *Contact) error {
+	return s.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName, &c.VerifiedName,
+		&c.IsBusiness, &c.StatusText, &c.StatusSetAt, &c.PictureID, &c.PictureURL,
+		&c.FirstSeen, &c.LastSeen, &c.Kunya, &c.HowWeMet, &c.Username, &c.UpdatedAt)
+}
+
+// NormalizeUsername trims whitespace and a leading @. Lookup is case-insensitive
+// elsewhere; this does not change case so stored values stay as WhatsApp sent them.
+func NormalizeUsername(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "@")
+	return strings.TrimSpace(s)
 }
 
 // StoreContact upserts a contact record.
@@ -37,11 +58,12 @@ func (s *Store) StoreContact(c *Contact) error {
 	if c.FirstSeen == 0 {
 		c.FirstSeen = now
 	}
+	c.Username = NormalizeUsername(c.Username)
 	_, err := s.DB.Exec(`INSERT INTO contacts (
 		jid, lid, phone, name, push_name, business_name, verified_name,
 		is_business, status_text, status_set_at, picture_id, picture_url,
-		first_seen, last_seen, updated_at
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		first_seen, last_seen, username, updated_at
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 	ON CONFLICT(jid) DO UPDATE SET
 		lid = CASE WHEN excluded.lid != '' THEN excluded.lid ELSE contacts.lid END,
 		phone = CASE WHEN excluded.phone != '' THEN excluded.phone ELSE contacts.phone END,
@@ -55,47 +77,91 @@ func (s *Store) StoreContact(c *Contact) error {
 		picture_id = CASE WHEN excluded.picture_id != '' THEN excluded.picture_id ELSE contacts.picture_id END,
 		picture_url = CASE WHEN excluded.picture_url != '' THEN excluded.picture_url ELSE contacts.picture_url END,
 		last_seen = CASE WHEN excluded.last_seen > contacts.last_seen THEN excluded.last_seen ELSE contacts.last_seen END,
+		username = CASE WHEN excluded.username != '' THEN excluded.username ELSE contacts.username END,
 		updated_at = excluded.updated_at`,
 		c.JID, c.LID, c.Phone, c.Name, c.PushName, c.BusinessName, c.VerifiedName,
 		c.IsBusiness, c.StatusText, c.StatusSetAt, c.PictureID, c.PictureURL,
-		c.FirstSeen, c.LastSeen, c.UpdatedAt,
+		c.FirstSeen, c.LastSeen, c.Username, c.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	s.propagateUsername(c)
+	return nil
+}
+
+// propagateUsername copies a newly learned username onto matching group
+// participant rows that do not already have one.
+func (s *Store) propagateUsername(c *Contact) {
+	if c == nil || c.Username == "" {
+		return
+	}
+	_, _ = s.DB.Exec(`UPDATE group_participants SET username = ?
+		WHERE username = '' AND (
+			jid = ?
+			OR (? != '' AND lid = ?)
+			OR (? != '' AND phone = ?)
+		)`, c.Username, c.JID, c.LID, c.LID, c.Phone, c.Phone)
 }
 
 // GetContact returns a contact by JID.
 func (s *Store) GetContact(jid string) (*Contact, error) {
-	row := s.DB.QueryRow(`SELECT jid, lid, phone, name, push_name, business_name, verified_name,
-		is_business, status_text, status_set_at, picture_id, picture_url,
-		first_seen, last_seen, kunya, how_we_met, updated_at
-		FROM contacts WHERE jid = ?`, jid)
+	row := s.DB.QueryRow(`SELECT `+contactColumns+` FROM contacts WHERE jid = ?`, jid)
 	c := &Contact{}
-	err := row.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName, &c.VerifiedName,
-		&c.IsBusiness, &c.StatusText, &c.StatusSetAt, &c.PictureID, &c.PictureURL,
-		&c.FirstSeen, &c.LastSeen, &c.Kunya, &c.HowWeMet, &c.UpdatedAt)
+	err := scanContact(row, c)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return c, err
 }
 
-// GetContacts returns all contacts, optionally filtered by a search query.
-func (s *Store) GetContacts(query string) ([]Contact, error) {
-	var rows *sql.Rows
-	var err error
+// GetContactByUsername returns one stored contact whose username matches
+// (case-insensitive, leading @ stripped). Prefers a phone-form JID when
+// both a phone row and a LID row exist. Returns nil if none is stored —
+// this never talks to WhatsApp.
+func (s *Store) GetContactByUsername(username string) (*Contact, error) {
+	username = NormalizeUsername(username)
+	if username == "" {
+		return nil, nil
+	}
+	row := s.DB.QueryRow(`SELECT `+contactColumns+` FROM contacts
+		WHERE username != '' AND LOWER(username) = LOWER(?)
+		ORDER BY CASE
+			WHEN jid LIKE '%@s.whatsapp.net' THEN 0
+			WHEN jid LIKE '%@lid' THEN 1
+			ELSE 2
+		END
+		LIMIT 1`, username)
+	c := &Contact{}
+	err := scanContact(row, c)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return c, err
+}
+
+// GetContacts returns all contacts, optionally filtered by a search query
+// (name / push_name / phone / business_name / username LIKE) and/or an
+// exact case-insensitive username (leading @ stripped).
+func (s *Store) GetContacts(query, username string) ([]Contact, error) {
+	username = NormalizeUsername(username)
+	sqlStr := `SELECT ` + contactColumns + ` FROM contacts`
+	var where []string
+	var args []any
 	if query != "" {
 		q := "%" + query + "%"
-		rows, err = s.DB.Query(`SELECT jid, lid, phone, name, push_name, business_name, verified_name,
-			is_business, status_text, status_set_at, picture_id, picture_url,
-			first_seen, last_seen, kunya, how_we_met, updated_at
-			FROM contacts WHERE name LIKE ? OR push_name LIKE ? OR phone LIKE ? OR business_name LIKE ?
-			ORDER BY updated_at DESC`, q, q, q, q)
-	} else {
-		rows, err = s.DB.Query(`SELECT jid, lid, phone, name, push_name, business_name, verified_name,
-			is_business, status_text, status_set_at, picture_id, picture_url,
-			first_seen, last_seen, kunya, how_we_met, updated_at
-			FROM contacts ORDER BY updated_at DESC`)
+		where = append(where, `(name LIKE ? OR push_name LIKE ? OR phone LIKE ? OR business_name LIKE ? OR username LIKE ?)`)
+		args = append(args, q, q, q, q, q)
 	}
+	if username != "" {
+		where = append(where, `username != '' AND LOWER(username) = LOWER(?)`)
+		args = append(args, username)
+	}
+	if len(where) > 0 {
+		sqlStr += " WHERE " + strings.Join(where, " AND ")
+	}
+	sqlStr += " ORDER BY updated_at DESC"
+	rows, err := s.DB.Query(sqlStr, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,9 +169,7 @@ func (s *Store) GetContacts(query string) ([]Contact, error) {
 	var contacts []Contact
 	for rows.Next() {
 		var c Contact
-		if err := rows.Scan(&c.JID, &c.LID, &c.Phone, &c.Name, &c.PushName, &c.BusinessName, &c.VerifiedName,
-			&c.IsBusiness, &c.StatusText, &c.StatusSetAt, &c.PictureID, &c.PictureURL,
-			&c.FirstSeen, &c.LastSeen, &c.Kunya, &c.HowWeMet, &c.UpdatedAt); err != nil {
+		if err := scanContact(rows, &c); err != nil {
 			return contacts, err
 		}
 		contacts = append(contacts, c)

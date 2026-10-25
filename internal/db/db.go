@@ -89,6 +89,11 @@ func NewStore(path string) (*Store, error) {
 		sqlDB.Exec(stmt)
 	}
 
+	if err := MigrateUsernameColumns(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("migrate username columns: %w", err)
+	}
+
 	return &Store{DB: sqlDB}, nil
 }
 

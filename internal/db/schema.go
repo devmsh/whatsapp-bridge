@@ -1,5 +1,10 @@
 package db
 
+import (
+	"database/sql"
+	"fmt"
+)
+
 // Schema is the complete DDL for the bridge database.
 // Every table maps to a whatsmeow type. Column names are snake_case
 // versions of the Go struct field names.
@@ -96,10 +101,16 @@ CREATE TABLE IF NOT EXISTS contacts (
     -- from WhatsApp cannot overwrite them.
     kunya          TEXT    NOT NULL DEFAULT '',
     how_we_met     TEXT    NOT NULL DEFAULT '',
+    -- WhatsApp username (@handle). Only present when WhatsApp has actually
+    -- sent it to us (contact app-state or history-sync inline contacts).
+    -- Never live-looked-up; empty means we do not know it, not that they
+    -- have none.
+    username       TEXT    NOT NULL DEFAULT '',
     updated_at     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_contacts_lid ON contacts(lid);
 CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone);
+CREATE INDEX IF NOT EXISTS idx_contacts_username ON contacts(username) WHERE username != '';
 
 CREATE TABLE IF NOT EXISTS groups (
     jid                            TEXT    PRIMARY KEY,
@@ -140,6 +151,7 @@ CREATE TABLE IF NOT EXISTS group_participants (
     is_admin       INTEGER NOT NULL DEFAULT 0,
     is_super_admin INTEGER NOT NULL DEFAULT 0,
     display_name   TEXT    NOT NULL DEFAULT '',
+    username       TEXT    NOT NULL DEFAULT '',
     error_code     INTEGER NOT NULL DEFAULT 0,
     updated_at     INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (group_jid, jid)
@@ -683,3 +695,55 @@ CREATE TABLE IF NOT EXISTS meeting_scan_state (
 );
 CREATE INDEX IF NOT EXISTS idx_meeting_scan_hits ON meeting_scan_state(hits DESC, last_run_at);
 `
+
+// MigrateUsernameColumns adds username TEXT to contacts and group_participants
+// on databases created before those columns existed. It is idempotent: it
+// checks PRAGMA table_info and only ALTER TABLEs when the column is missing,
+// so running it twice (or after Schema already created the column) is a no-op.
+func MigrateUsernameColumns(sqlDB *sql.DB) error {
+	if err := addColumnIfMissing(sqlDB, "contacts", "username", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(sqlDB, "group_participants", "username", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := sqlDB.Exec(`CREATE INDEX IF NOT EXISTS idx_contacts_username ON contacts(username) WHERE username != ''`); err != nil {
+		return fmt.Errorf("index contacts.username: %w", err)
+	}
+	return nil
+}
+
+func addColumnIfMissing(sqlDB *sql.DB, table, column, decl string) error {
+	has, err := tableHasColumn(sqlDB, table, column)
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl)
+	if _, err := sqlDB.Exec(stmt); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
+	}
+	return nil
+}
+
+func tableHasColumn(sqlDB *sql.DB, table, column string) (bool, error) {
+	rows, err := sqlDB.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, fmt.Errorf("PRAGMA table_info(%s): %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
