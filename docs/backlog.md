@@ -217,7 +217,7 @@ Depends on: nothing
 
 Why: a 15 MB status video download blocks the event loop for up to 90 s
 (seen in the bridge log). The hotspot spec
-(`specs/2026-07-18-pause-media-download-on-hotspot-design.md`) covers the same
+(`docs/superpowers/specs/2026-07-18-pause-media-download-on-hotspot-design.md`) covers the same
 problem and was never built.
 Where: `internal/wa` media download path.
 Size: M
